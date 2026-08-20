@@ -160,3 +160,16 @@ lat = degrees(2*atan(exp(y / R)) - pi/2)
   python toolkit_coordedit.py set   <输入.nimbyrails5> <输出.nimbyrails5> "站名=lon,lat" [更多…]
   ```
 - 意义：**“复刻现实路网”从“清单对照”升级为“逐站坐标级对齐”**。
+
+### 8.4 Line 的 stops 语法完全反解（本轮攻克）
+- **关键结论**：线路的 name/code/color/**按序站点** 都存在**带名记录**上（该记录 id 末位为 `0x6`，即游戏内统一的 Line/Schedule 对象），`0x4` 记录不携带名字。
+- 记录语法：`[id][namelen name][codelen code][tagcount=00][color uvarint][flags…][stopCount][每站块…]`；
+  - `color` 为 uvarint，值即 `0xAABBGGRR`（ABGR）；例 `a9 81 80 f8 0f` → `0xFF0000A9`。
+  - 每站块 = `[站台轨道 id ×N(W/E)][Station id][from_t/to_t f32 等标量]`，**Station id 为块尾**；按序收集 `stopCount` 个 Station id 即为完整站序。
+- **校验（对拹导出 JSON）**：站序 **35/37 完全一致**、颜色 **33/37 一致**（其余差异来自该存档与导出为不同游戏状态，站点数 166≠411 已佐证）。
+- 落地：`toolkit_savereader.py` 一体化直读 **站/线(含站序)/信号**；`tests/test_toolkit_savereader.py` 3 项单测通过。
+
+### 8.5 完整 JSON-free 路网管线（本轮落地）
+- `toolkit_savereader.read_network(save)` → `{stations, lines(含 stops), signals, counts}`，真实存档实测 **166 站 / 37 线 / 2459 信号**。
+- 已接入后端命令 `network-read`、`align-coords` 与 Web UI（现实路网页“从存档直读路网（含信号）”“信号/道岔图层”“坐标对齐面板”），HTTP 端到端验证通过。
+- **是否还需要 JSON？** 线路图 / 路网对照 / 坐标对齐现已可**完全脱离导出 JSON**。仅“时刻表体检/迁移”仍以导出 JSON 作为**真值**做写前后逐班次校验（安全护栏，刻意保留）。

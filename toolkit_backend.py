@@ -1258,6 +1258,68 @@ def command_map_data(args: argparse.Namespace) -> dict:
     }
 
 
+def command_network_read(args: argparse.Namespace) -> dict:
+    """JSON-free: read the rail network (lines/stations/signals) from a save."""
+    import toolkit_savereader as savereader
+
+    include_signals = not getattr(args, "no_signals", False)
+    emit_progress("network", 1, 3, "正在解压并直读存档路网…")
+    net = savereader.read_network(args.save, include_signals=include_signals)
+    emit_progress("network", 2, 3, "正在整理线路与车站…")
+    stations = {
+        s["id"]: {"name": s["name"], "lon": s["lon"], "lat": s["lat"]}
+        for s in net["stations"]
+    }
+    lines = [
+        {
+            "id": ln["id"],
+            "name": ln["name"],
+            "code": ln["code"] or "",
+            "color": ln["color"] or "",
+            "stops": ln["stops"],
+            "stop_count": len(ln["stops"]),
+        }
+        for ln in net["lines"]
+    ]
+    lines.sort(key=lambda row: (-row["stop_count"], row["name"].casefold()))
+    referenced = {sid for line in lines for sid in line["stops"]}
+    map_stations = {sid: data for sid, data in stations.items() if sid in referenced}
+    emit_progress("network", 3, 3, "路网数据就绪")
+    return {
+        "action": "network-read",
+        "save": str(args.save),
+        "lines": lines,
+        "stations": map_stations,
+        "all_stations": stations,
+        "signals": net["signals"],
+        "line_count": len(lines),
+        "station_count": len(stations),
+        "signal_count": len(net["signals"]),
+    }
+
+
+def command_align_coords(args: argparse.Namespace) -> dict:
+    """Overwrite station coordinates in place, producing a new save."""
+    import toolkit_coordedit as coordedit
+
+    updates: dict[str, tuple[float, float]] = {}
+    for item in args.update or []:
+        if "=" not in item:
+            raise RuntimeError(f"坐标更新格式错误（缺少 =）：{item}")
+        key, coords = item.split("=", 1)
+        try:
+            lon_s, lat_s = coords.split(",")
+            updates[key.strip()] = (float(lon_s), float(lat_s))
+        except ValueError as exc:
+            raise RuntimeError(f"坐标格式错误（应为 lon,lat）：{item}") from exc
+    if not updates:
+        raise RuntimeError("没有要写入的坐标更新")
+    emit_progress("align", 10, 100, "正在写入车站坐标并校验…")
+    manifest = coordedit.set_station_coordinates(args.save, args.output, updates)
+    emit_progress("align", 100, 100, "坐标对齐完成")
+    return {"action": "align-coords", **manifest}
+
+
 def command_network_diff(args: argparse.Namespace) -> dict:
     emit_progress("netdiff", 1, 3, "正在读取较早的导出…")
     before_lines, before_stations = extract_network(load_objects(args.before))
@@ -2685,6 +2747,13 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--after", type=Path, required=True)
     map_data = sub.add_parser("map-data")
     map_data.add_argument("--export", type=Path, required=True)
+    network_read = sub.add_parser("network-read")
+    network_read.add_argument("--save", type=Path, required=True)
+    network_read.add_argument("--no-signals", action="store_true")
+    align_coords = sub.add_parser("align-coords")
+    align_coords.add_argument("--save", type=Path, required=True)
+    align_coords.add_argument("--output", type=Path, required=True)
+    align_coords.add_argument("--update", action="append", default=[])
     network_diff = sub.add_parser("network-diff")
     network_diff.add_argument("--before", type=Path, required=True)
     network_diff.add_argument("--after", type=Path, required=True)
@@ -2726,6 +2795,10 @@ def main() -> None:
             result = command_compare(args)
         elif args.command == "map-data":
             result = command_map_data(args)
+        elif args.command == "network-read":
+            result = command_network_read(args)
+        elif args.command == "align-coords":
+            result = command_align_coords(args)
         elif args.command == "network-diff":
             result = command_network_diff(args)
         else:

@@ -423,6 +423,26 @@ class TaskManager:
                 "--limit",
                 str(limit),
             ]
+        if action == "network-read":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            args = ["network-read", "--save", str(save)]
+            if payload.get("no_signals"):
+                args.append("--no-signals")
+            return args
+        if action == "align-coords":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            output = validate_output_path(payload.get("output", ""))
+            updates = payload.get("updates") or []
+            if not isinstance(updates, list) or not updates:
+                raise RuntimeError("请至少提供一个车站坐标更新")
+            if len(updates) > 2000:
+                raise RuntimeError("坐标更新数量过多")
+            args = ["align-coords", "--save", str(save), "--output", str(output)]
+            for item in updates:
+                if not isinstance(item, str) or "=" not in item or len(item) > 200:
+                    raise RuntimeError(f"坐标更新项无效：{item!r}")
+                args += ["--update", item]
+            return args
         save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
         export = validate_input_path(payload.get("export", ""), ".json")
         if action == "analyze":

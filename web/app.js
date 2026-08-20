@@ -770,6 +770,79 @@ function realnetDrawGame() {
       .bindTooltip(st[id].name).addTo(REALNET.gameLayer);
   }));
 }
+function realnetDrawSignals() {
+  if (!REALNET.ready || !REALNET.map) return;
+  if (!REALNET.signalLayer) REALNET.signalLayer = L.layerGroup().addTo(REALNET.map);
+  REALNET.signalLayer.clearLayers();
+  const show = $('#realnet-show-signals')?.checked;
+  if (!show || !state.signals || !state.signals.length) return;
+  state.signals.forEach(s => {
+    L.circleMarker([s.lat, s.lon], { radius: 2, color: '#c0392b', weight: 1, fillColor: '#e74c3c', fillOpacity: 0.8 })
+      .addTo(REALNET.signalLayer);
+  });
+}
+function onNetworkRead(result) {
+  state.network = { lines: result.lines || [], stations: result.stations || {} };
+  state.allStations = result.all_stations || result.stations || {};
+  state.signals = result.signals || [];
+  const c = result;
+  const el = $('#realnet-read-count');
+  if (el) el.textContent = `直读：${c.line_count} 线 · ${c.station_count} 站 · ${c.signal_count} 信号`;
+  renderBinderLines();
+  populateAlignStations();
+  if (REALNET.ready) { realnetDrawGame(); realnetDrawSignals(); }
+  toast(`已从存档直读：${c.line_count} 线 / ${c.station_count} 站 / ${c.signal_count} 信号`);
+}
+function populateAlignStations() {
+  const sel = $('#align-station'); if (!sel) return;
+  const st = state.allStations || {};
+  const ids = Object.keys(st).sort((a, b) => (st[a].name || '').localeCompare(st[b].name || ''));
+  if (!ids.length) { sel.innerHTML = '<option value="">先直读路网…</option>'; return; }
+  sel.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(st[id].name)} (${st[id].lon.toFixed(4)}, ${st[id].lat.toFixed(4)})</option>`).join('');
+}
+function renderAlignList() {
+  const box = $('#align-list'); if (!box) return;
+  const list = state.alignList || [];
+  box.innerHTML = list.length
+    ? list.map((a, i) => `<div class="realnet-pin-row"><div><strong>${escapeHtml(a.name)}</strong><small>→ ${a.lon}, ${a.lat}</small></div><div class="realnet-pin-acts"><button class="text-button danger-text" data-align-del="${i}">删除</button></div></div>`).join('')
+    : '<div class="placeholder">还没有待对齐的车站。</div>';
+  const has = list.length > 0;
+  $('#align-generate').disabled = !has;
+  $('#align-clear').disabled = !has;
+}
+function alignAdd() {
+  const sel = $('#align-station'); const id = sel?.value;
+  if (!id) { toast('请先直读路网并选择车站', true); return; }
+  const m = ($('#align-lonlat').value || '').match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) { toast('请输入 lon,lat（如 -79.38,43.64）', true); return; }
+  const lon = +m[1], lat = +m[2];
+  if (lon < -180 || lon > 180 || lat < -85 || lat > 85) { toast('经纬度超出范围', true); return; }
+  const name = (state.allStations?.[id]?.name) || id;
+  state.alignList = (state.alignList || []).filter(a => a.id !== id);
+  state.alignList.push({ id, name, lon, lat });
+  renderAlignList();
+  toast(`已加入：${name} → ${lon}, ${lat}`);
+}
+function alignGenerate() {
+  const list = state.alignList || [];
+  if (!list.length) { toast('对齐列表为空', true); return; }
+  const save = $('#save-select')?.value;
+  if (!save) { toast('请先在“总览与体检”选择存档', true); return; }
+  let base = ($('#align-output').value || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\.nimbyrails5$/i, '');
+  if (!base) base = `坐标对齐_${timestamp()}`;
+  const saveName = save.split(/[\\/]/).pop().replace(/\.nimbyrails5$/i, '');
+  const output = save.replace(/[^\\/]+$/, '') + base + '.nimbyrails5';
+  const updates = list.map(a => `${a.id}=${a.lon},${a.lat}`);
+  startTask('align-coords', { save, output, updates });
+}
+async function onAlignDone(result) {
+  state.alignList = [];
+  renderAlignList();
+  const name = result.output_save?.split(/[\\/]/).pop() || '新存档';
+  toast(`已生成对齐后的新存档：${name}（改写 ${result.changed_count} 站）`);
+  await refreshFileLists();
+  if (typeof refreshOutputNames === 'function') refreshOutputNames();
+}
 function realnetEnsureData() {
   if (state.network) { realnetDrawGame(); return; }
   const exp = $('#export-select')?.value;
@@ -1000,9 +1073,19 @@ async function initRealnet() {
   REALNET.pins = loadJson('nimby_realnet_pins', []);
   renderRealnetPins();
   map.on('moveend zoomend', () => saveJson('nimby_realnet_view', { lat: map.getCenter().lat, lng: map.getCenter().lng, zoom: map.getZoom() }));
-  map.on('click', e => { if ($('#realnet-pin-mode').checked) addRealnetPin(e.latlng.lat, e.latlng.lng); });
+  map.on('click', e => {
+    if ($('#align-pick')?.checked) {
+      $('#align-lonlat').value = `${e.latlng.lng.toFixed(6)},${e.latlng.lat.toFixed(6)}`;
+      toast('已取坐标，点“加入对齐列表”');
+      return;
+    }
+    if ($('#realnet-pin-mode').checked) addRealnetPin(e.latlng.lat, e.latlng.lng);
+  });
   REALNET.ready = true;
-  if (state.network) realnetDrawGame(); else realnetEnsureData();
+  if (!state.alignList) state.alignList = [];
+  renderAlignList();
+  populateAlignStations();
+  if (state.network) { realnetDrawGame(); realnetDrawSignals(); } else realnetEnsureData();
   setTimeout(() => map.invalidateSize(), 80);
 }
 
@@ -1063,6 +1146,8 @@ async function pollOnce() {
       else if (s.action === 'compare') renderCompare(s.result);
       else if (s.action === 'find-reference') renderReference(s.result);
       else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
+      else if (s.action === 'network-read') { onNetworkRead(s.result); }
+      else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
@@ -1206,6 +1291,12 @@ $('#map-line-list').addEventListener('change',e=>{ if(e.target.classList.contain
 $('#realnet-base').addEventListener('change',()=>realnetSetBase($('#realnet-base').value));
 $('#realnet-overlay').addEventListener('change',()=>realnetSetOverlay($('#realnet-overlay').value));
 $('#realnet-show-game').addEventListener('change',realnetDrawGame);
+$('#realnet-show-signals')?.addEventListener('change',realnetDrawSignals);
+$('#realnet-read-save')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先在“总览与体检”选择存档',true); startTask('network-read',{save}); });
+$('#align-add')?.addEventListener('click',alignAdd);
+$('#align-generate')?.addEventListener('click',alignGenerate);
+$('#align-clear')?.addEventListener('click',()=>{ state.alignList=[]; renderAlignList(); });
+$('#align-list')?.addEventListener('click',e=>{ const del=e.target.closest('[data-align-del]'); if(del){ state.alignList.splice(+del.dataset.alignDel,1); renderAlignList(); } });
 $('#realnet-go').addEventListener('click',realnetSearch);
 $('#realnet-search').addEventListener('keydown',e=>{ if(e.key==='Enter') realnetSearch(); });
 $('#realnet-fit-game').addEventListener('click',realnetFitGame);

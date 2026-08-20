@@ -215,7 +215,14 @@
                 </select>
               </label>
               <label class="map-toggle"><input type="checkbox" id="realnet-show-game" checked> 叠加游戏路网</label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-signals"> 显示信号/道岔</label>
             </div>
+          </div>
+          <div class="realnet-importbar">
+            <strong>从存档直读（无需 JSON）</strong>
+            <button class="text-button" id="realnet-read-save">从当前存档直读路网（含信号）</button>
+            <span id="realnet-read-count" class="realnet-import-count"></span>
+            <small>直接解析所选存档的二进制，得到线路/站序/信号，连导出 JSON 都不需要。信号扫描较慢，请稍候。</small>
           </div>
           <div class="realnet-searchbar">
             <input id="realnet-search" type="search" placeholder="跳转到地点（如 Tokyo Station、上海、45.5,-73.6）" spellcheck="false">
@@ -256,6 +263,25 @@
         <article class="panel" id="realnet-pin-panel" hidden>
           <div class="panel-heading"><div><p class="step">规划清单</p><h3>规划针（复刻检查表）</h3></div><span class="phase-badge safe">本地存储</span></div>
           <div id="realnet-pin-list" class="realnet-pin-list"></div>
+        </article>
+        <article class="panel" id="realnet-align-panel">
+          <div class="panel-heading">
+            <div><p class="step">坐标级对齐</p><h3>把车站对齐到真实经纬度</h3></div>
+            <span class="phase-badge safe">只建新存档</span>
+          </div>
+          <p class="repair-note">先“从当前存档直读路网”。选一个游戏车站，填目标经纬度（或勾选“点图取坐标”后在地图上点一下），加入对齐列表；生成时只覆盖每个车站坐标的 16 字节、绝不改动其它数据，并写入一个新存档。</p>
+          <div class="realnet-searchbar">
+            <select id="align-station" aria-label="选择车站"><option value="">先直读路网…</option></select>
+            <input id="align-lonlat" type="text" placeholder="目标经纬度 lon,lat（如 -79.38,43.64）" spellcheck="false">
+            <label class="map-toggle"><input type="checkbox" id="align-pick"> 点图取坐标</label>
+            <button class="text-button" id="align-add">加入对齐列表</button>
+          </div>
+          <div id="align-list" class="realnet-pin-list"></div>
+          <div class="realnet-searchbar">
+            <input id="align-output" type="text" placeholder="新存档文件名（不含扩展名）" spellcheck="false">
+            <button class="text-button" id="align-generate" disabled>生成对齐后的新存档</button>
+            <button class="text-button danger-text" id="align-clear" disabled>清空对齐列表</button>
+          </div>
         </article>
       </section>
 
