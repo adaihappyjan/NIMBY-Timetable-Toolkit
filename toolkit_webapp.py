@@ -23,8 +23,31 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 BACKEND = ROOT / "toolkit_backend.py"
 ASSET_VERSION = uuid.uuid4().hex[:8]
-SAVE_DIR = Path.home() / "Saved Games" / "Weird and Wry" / "NIMBY Rails"
-SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "NIMBY_Timetable_Toolkit"
+# NIMBY Rails stores saves under a "Saved Games/Weird and Wry/NIMBY Rails"
+# folder, but the exact location differs per machine (OneDrive redirect, custom
+# Steam library, Linux/Proton, macOS). SAVE_DIR is resolved at startup by
+# resolve_save_dir(); this is only the last-resort default.
+NIMBY_VENDOR = "Weird and Wry"
+NIMBY_GAME = "NIMBY Rails"
+NIMBY_STEAM_APPID = "1134710"
+SAVE_DIR = Path.home() / "Saved Games" / NIMBY_VENDOR / NIMBY_GAME
+def _default_config_root() -> Path:
+    """A persistent, per-user config location for each OS (settings survive reboots)."""
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base)
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME")
+        if base:
+            return Path(base)
+        return Path.home() / ".config"
+    return Path.home()
+
+
+SETTINGS_DIR = _default_config_root() / "NIMBY_Timetable_Toolkit"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 TASK_DIR = Path(tempfile.gettempdir()) / "NIMBY_Timetable_Toolkit_Web"
 _DOWNLOADS = Path.home() / "Downloads"
@@ -42,6 +65,7 @@ def read_settings() -> dict:
         "days": 14,
         "keep": 5,
         "workers": max(1, min(4, (os.cpu_count() or 2) - 1)),
+        "save_dir": "",
     }
     try:
         stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
@@ -52,6 +76,7 @@ def read_settings() -> dict:
         "days": stored.get("days", stored.get("Days")),
         "keep": stored.get("keep", stored.get("Keep")),
         "workers": stored.get("workers", stored.get("Workers")),
+        "save_dir": stored.get("save_dir", stored.get("SaveDir")),
     }
     for key, value in aliases.items():
         if value is not None:
@@ -60,23 +85,185 @@ def read_settings() -> dict:
     defaults["days"] = max(1, min(365, int(defaults["days"])))
     defaults["keep"] = max(1, min(50, int(defaults["keep"])))
     defaults["workers"] = max(1, min(32, int(defaults["workers"])))
+    defaults["save_dir"] = str(defaults.get("save_dir") or "")
     return defaults
 
 
 def write_settings(settings: dict) -> dict:
     current = read_settings()
-    for key in ("enabled", "days", "keep", "workers"):
+    for key in ("enabled", "days", "keep", "workers", "save_dir"):
         if key in settings:
             current[key] = settings[key]
     current["enabled"] = bool(current["enabled"])
     current["days"] = max(1, min(365, int(current["days"])))
     current["keep"] = max(1, min(50, int(current["keep"])))
     current["workers"] = max(1, min(32, int(current["workers"])))
+    current["save_dir"] = str(current.get("save_dir") or "")
     SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
     partial = SETTINGS_FILE.with_suffix(".json.partial")
     partial.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
     partial.replace(SETTINGS_FILE)
     return current
+
+
+def _win_saved_games_dir() -> Path | None:
+    """Resolve the real Windows 'Saved Games' known folder (honours OneDrive)."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        # FOLDERID_SavedGames {4C5C32FF-BB9D-43b0-B5B4-2D72E54EAAA4}
+        folderid = GUID(
+            0x4C5C32FF, 0xBB9D, 0x43B0,
+            (ctypes.c_ubyte * 8)(0xB5, 0xB4, 0x2D, 0x72, 0xE5, 0x4E, 0xAA, 0xA4),
+        )
+        ptr = ctypes.c_wchar_p()
+        res = ctypes.windll.shell32.SHGetKnownFolderPath(
+            ctypes.byref(folderid), 0, None, ctypes.byref(ptr)
+        )
+        if res == 0 and ptr.value:
+            path = Path(ptr.value)
+            ctypes.windll.ole32.CoTaskMemFree(ptr)
+            return path
+    except Exception:
+        return None
+    return None
+
+
+def candidate_save_dirs() -> list[Path]:
+    """Likely NIMBY Rails save locations across OSes and install styles."""
+    home = Path.home()
+    tail = (NIMBY_VENDOR, NIMBY_GAME)
+    cands: list[Path] = []
+    known = _win_saved_games_dir()
+    if known:
+        cands.append(known.joinpath(*tail))
+    # Windows default + common redirects.
+    cands.append(home.joinpath("Saved Games", *tail))
+    cands.append(home.joinpath("OneDrive", "Saved Games", *tail))
+    cands.append(home.joinpath("Documents", "Saved Games", *tail))
+    # macOS.
+    cands.append(home.joinpath("Library", "Application Support", *tail))
+    # Native Linux.
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        cands.append(Path(xdg).joinpath(*tail))
+    cands.append(home.joinpath(".local", "share", *tail))
+    # Linux/Steam Proton prefixes.
+    steam_roots = [
+        home / ".steam" / "steam",
+        home / ".local" / "share" / "Steam",
+        home / ".var" / "app" / "com.valvesoftware.Steam" / "data" / "Steam",
+    ]
+    for root in steam_roots:
+        cands.append(
+            root.joinpath(
+                "steamapps", "compatdata", NIMBY_STEAM_APPID, "pfx",
+                "drive_c", "users", "steamuser", "Saved Games", *tail,
+            )
+        )
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for cand in cands:
+        key = str(cand)
+        if key not in seen:
+            seen.add(key)
+            unique.append(cand)
+    return unique
+
+
+def _dir_has_saves(path: Path) -> bool:
+    try:
+        if not path.is_dir():
+            return False
+        return any(path.glob("*.nimbyrails5")) or any(path.glob("*Timetable Export*.json"))
+    except Exception:
+        return False
+
+
+def detect_save_dir() -> Path:
+    """Best-effort auto-detection: a folder that actually holds saves wins."""
+    cands = candidate_save_dirs()
+    for cand in cands:
+        if _dir_has_saves(cand):
+            return cand
+    for cand in cands:
+        if cand.is_dir():
+            return cand
+    return cands[0] if cands else Path.home().joinpath("Saved Games", NIMBY_VENDOR, NIMBY_GAME)
+
+
+def resolve_save_dir() -> Path:
+    """Precedence: NIMBY_SAVE_DIR env → saved setting → auto-detection."""
+    env = os.environ.get("NIMBY_SAVE_DIR")
+    if env and env.strip():
+        return Path(env).expanduser()
+    stored = read_settings().get("save_dir")
+    if stored and str(stored).strip():
+        return Path(str(stored)).expanduser()
+    return detect_save_dir()
+
+
+def save_dir_info() -> dict:
+    """Snapshot of the active save directory plus alternatives for the UI."""
+    active = SAVE_DIR
+    try:
+        save_count = len(list(active.glob("*.nimbyrails5"))) if active.is_dir() else 0
+        export_count = len(list(active.glob("*Timetable Export*.json"))) if active.is_dir() else 0
+    except Exception:
+        save_count = export_count = 0
+    candidates = [
+        {"path": str(cand), "exists": cand.is_dir(), "has_saves": _dir_has_saves(cand)}
+        for cand in candidate_save_dirs()
+    ]
+    return {
+        "save_dir": str(active),
+        "exists": active.is_dir(),
+        "has_saves": _dir_has_saves(active),
+        "save_count": save_count,
+        "export_count": export_count,
+        "source": "env" if os.environ.get("NIMBY_SAVE_DIR") else (
+            "custom" if (read_settings().get("save_dir") or "").strip() else "auto"
+        ),
+        "env_locked": bool(os.environ.get("NIMBY_SAVE_DIR")),
+        "candidates": candidates,
+    }
+
+
+def set_save_dir(path_str: str) -> dict:
+    """Persist a user-chosen save directory and switch to it immediately."""
+    global SAVE_DIR
+    if os.environ.get("NIMBY_SAVE_DIR"):
+        raise RuntimeError("存档目录已由环境变量 NIMBY_SAVE_DIR 指定，请先清除该变量再修改。")
+    raw = str(path_str or "").strip().strip('"')
+    if not raw:
+        raise RuntimeError("请填写存档目录路径。")
+    path = Path(raw).expanduser()
+    if not path.is_dir():
+        raise RuntimeError(f"目录不存在：{path}")
+    SAVE_DIR = path.resolve()
+    write_settings({"save_dir": str(SAVE_DIR)})
+    return save_dir_info()
+
+
+def redetect_save_dir() -> dict:
+    """Forget any saved override and re-run auto-detection."""
+    global SAVE_DIR
+    if os.environ.get("NIMBY_SAVE_DIR"):
+        raise RuntimeError("存档目录已由环境变量 NIMBY_SAVE_DIR 指定，请先清除该变量再修改。")
+    write_settings({"save_dir": ""})
+    SAVE_DIR = detect_save_dir()
+    return save_dir_info()
 
 
 def file_info(path: Path) -> dict:
@@ -93,7 +280,10 @@ def file_info(path: Path) -> dict:
 
 
 def recent_files() -> dict:
-    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    if not SAVE_DIR.is_dir():
+        # Don't create an empty folder in the wrong place on other machines;
+        # the UI will prompt the user to pick the real save directory.
+        return {"saves": [], "exports": []}
     saves = sorted(SAVE_DIR.glob("*.nimbyrails5"), key=lambda path: path.stat().st_mtime, reverse=True)
     exports = sorted(
         SAVE_DIR.glob("*Timetable Export*.json"),
@@ -474,11 +664,16 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/bootstrap":
                 files = recent_files()
                 settings = read_settings()
-                preview = cleanup_preview(SAVE_DIR, days=settings["days"], keep=settings["keep"])
+                preview = (
+                    cleanup_preview(SAVE_DIR, days=settings["days"], keep=settings["keep"])
+                    if SAVE_DIR.is_dir()
+                    else {"groups": [], "total_files": 0}
+                )
                 self.send_json(
                     {
                         "ok": True,
                         "save_dir": str(SAVE_DIR),
+                        "save_status": save_dir_info(),
                         "files": files,
                         "settings": settings,
                         "cleanup": preview,
@@ -529,6 +724,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route == "/api/settings":
                 self.send_json({"ok": True, "settings": write_settings(payload)})
+                return
+            if route == "/api/config/save-dir":
+                if payload.get("detect"):
+                    status = redetect_save_dir()
+                else:
+                    status = set_save_dir(str(payload.get("path", "")))
+                self.send_json({"ok": True, "save_status": status, "files": recent_files()})
                 return
             if route == "/api/cleanup/preview":
                 result = cleanup_preview(
@@ -663,6 +865,8 @@ def run_startup_cleanup() -> dict | None:
     settings = read_settings()
     if not settings["enabled"]:
         return None
+    if not SAVE_DIR.is_dir():
+        return None
     preview = cleanup_preview(SAVE_DIR, days=settings["days"], keep=settings["keep"])
     if not preview["candidate_count"]:
         return {"preview": preview, "result": None}
@@ -738,7 +942,8 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--headless", action="store_true", help="仅运行本地服务，不打开任何窗口")
     args = parser.parse_args()
-    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    global SAVE_DIR
+    SAVE_DIR = resolve_save_dir()
     purge_stale_task_files()
     STARTUP_CLEANUP = safe_startup_cleanup()
 

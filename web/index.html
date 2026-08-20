@@ -76,6 +76,18 @@
             <button class="primary-button scan-button" id="scan-button"><span>开始全面体检</span><small>通常需要 5–15 秒</small></button>
           </div>
           <div class="safety-strip"><span>✓</span>游戏应回到主菜单或关闭；所有写入只创建新文件。</div>
+          <details class="save-dir" id="save-dir-box">
+            <summary><span class="sd-label">存档目录</span><span class="sd-path" id="save-dir-current">检测中…</span></summary>
+            <div class="save-dir-body">
+              <p class="save-dir-hint" id="save-dir-hint"></p>
+              <div class="save-dir-row">
+                <input type="text" id="save-dir-input" placeholder="粘贴 NIMBY Rails 存档文件夹路径…" aria-label="存档目录路径">
+                <button class="secondary-button" id="save-dir-apply">应用此目录</button>
+                <button class="text-button" id="save-dir-detect">重新自动检测</button>
+              </div>
+              <div class="save-dir-cands" id="save-dir-cands"></div>
+            </div>
+          </details>
         </article>
 
         <div class="metric-grid" id="metric-grid" hidden></div>

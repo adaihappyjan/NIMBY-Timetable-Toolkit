@@ -186,7 +186,7 @@ python -m unittest discover -s tests -v
 
 ## 依赖与环境
 
-- Windows 10/11 + Python 3.10 及以上。
+- Windows 10/11 + Python 3.10 及以上（macOS / Linux 亦可运行，见下方“存档目录”说明）。
 - 桌面单窗口依赖 `pywebview`（见 `requirements.txt`）；缺少时自动退回“本地服务 + 默认浏览器”模式。
 - 二进制存档解压需要 64 位 `libzstd.dll`（放到工具箱目录、设 `NIMBY_LIBZSTD` 环境变量，或安装 64 位 Git for Windows 均可）。
 - **现实路网**页需要联网（加载地图组件、瓦片与 Overpass 数据）；其余功能全部本地运行。
@@ -195,6 +195,21 @@ python -m unittest discover -s tests -v
 python -m pip install -r requirements.txt
 python toolkit_webapp.py
 ```
+
+## 存档目录（换电脑 / 不同系统）
+
+工具箱**不写死路径**，启动时会自动探测 NIMBY Rails 的存档目录，并支持随时手动切换：
+
+1. **自动探测**：按优先级依次检查各系统的常见位置——
+   - Windows：真实“Saved Games”已知文件夹（自动兼容 OneDrive 重定向）、`%USERPROFILE%\Saved Games\Weird and Wry\NIMBY Rails`、以及 `Documents\Saved Games\…` 等；
+   - macOS：`~/Library/Application Support/Weird and Wry/NIMBY Rails`；
+   - Linux 原生：`$XDG_DATA_HOME/…` 或 `~/.local/share/Weird and Wry/NIMBY Rails`；
+   - Linux/Steam Proton：`…/steamapps/compatdata/1134710/pfx/drive_c/users/steamuser/Saved Games/…`。
+   优先选中**真正含有存档**的目录。
+2. **界面内切换**：首页“步骤 01 · 选择文件”下方有 **存档目录** 折叠面板，显示当前目录，可从探测到的候选一键切换，或直接粘贴自定义路径后点“应用此目录”。找不到时会自动展开提醒。选择会持久保存到本机配置（Windows: `%LOCALAPPDATA%`；macOS: `Application Support`；Linux: `~/.config`）。
+3. **环境变量覆盖**：设置 `NIMBY_SAVE_DIR` 可强制指定目录（优先级最高，适合脚本/多人共用机，此时界面内不可改）。
+
+> 所有写入始终只在**存档目录内新建文件**，绝不覆盖原存档。若该目录暂不存在，工具不会擅自创建空文件夹，只会提示你先选对目录。
 
 ## 第三方数据与组件
 

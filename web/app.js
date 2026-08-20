@@ -74,8 +74,50 @@ async function loadBootstrap() {
   setOptions($('#save-select'), data.files.saves); setOptions($('#export-select'), data.files.exports); setCompareOptions(data.files.exports); refreshOutputNames();
   $('#cleanup-enabled').checked = data.settings.enabled; $('#cleanup-days').value = data.settings.days; $('#cleanup-keep').value = data.settings.keep;
   state.cleanup = data.cleanup; renderCleanup(); renderRoadmap(data.capabilities);
+  renderSaveDir(data.save_status);
   if (data.startup_cleanup?.error) toast(`启动清理未完成：${data.startup_cleanup.error}`, true);
   else if (data.startup_cleanup?.result?.moved_file_count) toast(`启动清理已将 ${data.startup_cleanup.result.moved_group_count} 组过期副本移入回收站`);
+}
+function renderSaveDir(info) {
+  if (!info) return;
+  state.saveStatus = info;
+  const box = $('#save-dir-box'); const current = $('#save-dir-current'); const hint = $('#save-dir-hint');
+  current.textContent = info.save_dir || '(未设置)';
+  const found = info.exists && info.has_saves;
+  current.className = 'sd-path ' + (found ? 'ok' : (info.exists ? 'warn' : 'bad'));
+  const input = $('#save-dir-input'); if (input) input.value = info.save_dir || '';
+  const applyBtn = $('#save-dir-apply'); const detectBtn = $('#save-dir-detect');
+  if (info.env_locked) {
+    hint.innerHTML = '当前存档目录由环境变量 <code>NIMBY_SAVE_DIR</code> 指定，界面内不可修改。';
+    if (applyBtn) applyBtn.disabled = true; if (input) input.disabled = true;
+  } else {
+    if (applyBtn) applyBtn.disabled = false; if (input) input.disabled = false;
+    if (found) hint.innerHTML = `已找到 <b>${info.save_count}</b> 份存档、<b>${info.export_count}</b> 份时刻表导出。若你在别的位置存档，可在下方切换目录。`;
+    else if (info.exists) hint.innerHTML = '该目录存在，但没有发现 <code>.nimbyrails5</code> 存档或时刻表导出。请确认这是 NIMBY Rails 的存档文件夹，或从下方候选中选择。';
+    else hint.innerHTML = '没有自动找到 NIMBY Rails 存档目录。请从下方候选中选择，或手动粘贴路径。<br>提示：游戏内“导出时刻表”后，存档通常在 <code>Saved Games/Weird and Wry/NIMBY Rails</code>。';
+  }
+  const cands = (info.candidates || []).filter(c => c.exists || c.has_saves);
+  const wrap = $('#save-dir-cands');
+  if (!cands.length) { wrap.innerHTML = ''; }
+  else {
+    wrap.innerHTML = '<p class="cands-title">检测到的候选目录：</p>' + cands.map(c =>
+      `<button class="cand-row${c.has_saves ? ' has' : ''}" data-path="${escapeHtml(c.path)}" ${info.env_locked ? 'disabled' : ''}>
+        <span class="cand-dot"></span><span class="cand-path">${escapeHtml(c.path)}</span>
+        <span class="cand-tag">${c.has_saves ? '有存档' : '空目录'}</span></button>`).join('');
+    wrap.querySelectorAll('.cand-row').forEach(btn => btn.addEventListener('click', () => applySaveDir(btn.dataset.path)));
+  }
+  // Auto-open the config when nothing usable was found so new users notice it.
+  if (!found && !box.dataset.userToggled) box.open = true;
+  if (!found) { const sel = $('#save-select'); if (sel && !sel.options.length) sel.innerHTML = '<option value="">未找到存档，请先设置存档目录</option>'; }
+}
+async function applySaveDir(path) {
+  if (!path || !path.trim()) { toast('请填写存档目录路径', true); return; }
+  try {
+    const res = await api('/api/config/save-dir', { method: 'POST', body: JSON.stringify({ path: path.trim() }) });
+    setOptions($('#save-select'), res.files.saves); setOptions($('#export-select'), res.files.exports); setCompareOptions(res.files.exports); refreshOutputNames();
+    renderSaveDir(res.save_status);
+    toast(res.save_status.has_saves ? `已切换存档目录，找到 ${res.save_status.save_count} 份存档` : '已切换目录，但该目录暂无存档', !res.save_status.has_saves);
+  } catch (e) { toast(e.message, true); }
 }
 function renderAnalysis(a) {
   state.analysis = a;
@@ -880,6 +922,17 @@ $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
 $('#save-select').addEventListener('change', refreshOutputNames);
+$('#save-dir-box')?.addEventListener('toggle', e => { e.target.dataset.userToggled = '1'; });
+$('#save-dir-apply')?.addEventListener('click', () => applySaveDir($('#save-dir-input').value));
+$('#save-dir-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applySaveDir($('#save-dir-input').value); } });
+$('#save-dir-detect')?.addEventListener('click', async () => {
+  try {
+    const res = await api('/api/config/save-dir', { method: 'POST', body: JSON.stringify({ detect: true }) });
+    setOptions($('#save-select'), res.files.saves); setOptions($('#export-select'), res.files.exports); setCompareOptions(res.files.exports); refreshOutputNames();
+    renderSaveDir(res.save_status);
+    toast(res.save_status.has_saves ? `已重新检测，找到 ${res.save_status.save_count} 份存档` : '已重新检测，但未找到存档目录', !res.save_status.has_saves);
+  } catch (e) { toast(e.message, true); }
+});
 $('#scan-button').addEventListener('click',()=>startTask('analyze',{save:$('#save-select').value,export:$('#export-select').value}));
 $('#migrate-button').addEventListener('click',()=>{ const pairs=$$('.pair-check:checked').map(x=>x.dataset.pair); if(!pairs.length)return toast('请至少勾选一组迁移方案',true); startTask('batch-migrate',{save:$('#save-select').value,export:$('#export-select').value,output:$('#migration-output').value,pairs,garage_join:$('#garage-join').checked}); });
 $('#toggle-schedules').addEventListener('click',()=>{const boxes=$$('.schedule-check'); const all=boxes.length&&boxes.every(x=>x.checked); boxes.forEach(x=>x.checked=!all); $('#toggle-schedules').textContent=all?'全选':'清空';});
