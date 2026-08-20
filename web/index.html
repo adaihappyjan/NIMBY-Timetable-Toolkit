@@ -91,6 +91,26 @@
           </details>
         </article>
 
+        <article class="panel" id="overview-panel">
+          <div class="panel-heading">
+            <div><p class="step">免 JSON</p><h3>从存档直读结构总览</h3></div>
+            <button class="secondary-button" id="overview-read">直读当前存档结构</button>
+          </div>
+          <div class="repair-note">无需导出 JSON：直接解压存档并从二进制枚举站点、线路、信号、列车与时刻表。全部只读，正式存档不受影响。首次读取较慢（深度扫描），请稍候。</div>
+          <div class="metric-grid" id="overview-metrics" hidden></div>
+          <div class="overview-meta" id="overview-meta"></div>
+          <div class="overview-lists" id="overview-lists" hidden>
+            <div class="overview-col">
+              <div class="panel-heading small"><h4>带几何的线路</h4><span class="count-badge" id="overview-route-count">0</span></div>
+              <div class="overview-scroll" id="overview-routes"></div>
+            </div>
+            <div class="overview-col">
+              <div class="panel-heading small"><h4>时刻表容器（引用线路）</h4><span class="count-badge" id="overview-container-count">0</span></div>
+              <div class="overview-scroll" id="overview-containers"></div>
+            </div>
+          </div>
+        </article>
+
         <div class="metric-grid" id="metric-grid" hidden></div>
         <article class="panel" id="findings-panel" hidden>
           <div class="panel-heading"><div><p class="step">诊断结果</p><h3>需要处理的项目</h3></div><span class="count-badge" id="finding-count">0</span></div>

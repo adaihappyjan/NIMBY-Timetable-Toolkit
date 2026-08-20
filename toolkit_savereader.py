@@ -145,6 +145,12 @@ def _find_name_records(raw: bytes, type_nibble: int):
     n = len(raw)
     i = 0
     while i < n - 12:
+        # Fast pre-filter: every object id is an 8-byte varint whose 8th byte
+        # equals the type nibble (idx<2**48 never reaches that byte). This skips
+        # the full uvarint decode on ~255/256 positions.
+        if raw[i + 7] != type_nibble:
+            i += 1
+            continue
         r = _is_id(raw, i, {type_nibble})
         if r:
             ident, end = r
@@ -219,6 +225,9 @@ def read_signals_from_raw(raw: bytes) -> list[SignalRecord]:
     n = len(raw)
     i = 0
     while i < n - 24:
+        if raw[i + 7] != TYPE_SIGNAL:
+            i += 1
+            continue
         r = _is_id(raw, i, {TYPE_SIGNAL})
         if r:
             ident, end = r
@@ -247,6 +256,9 @@ def read_trains_from_raw(raw: bytes) -> list[TrainRecord]:
     n = len(raw)
     i = 0
     while i < n - 12:
+        if raw[i + 7] != TYPE_TRAIN:
+            i += 1
+            continue
         r = _is_id(raw, i, {TYPE_TRAIN})
         if r:
             ident, end = r

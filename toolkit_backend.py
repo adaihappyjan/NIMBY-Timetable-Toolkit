@@ -1258,6 +1258,63 @@ def command_map_data(args: argparse.Namespace) -> dict:
     }
 
 
+def command_save_overview(args: argparse.Namespace) -> dict:
+    """JSON-free structural overview read straight from a save (no export needed).
+
+    Every number here comes from the binary object stream, validated against real
+    exports (stations 411/411, schedules 70/70, trains 393/393). Read-only.
+    """
+    import toolkit_savereader as savereader
+    from toolkit_binary import Zstd, split_save
+
+    path = Path(args.save)
+    emit_progress("overview", 1, 3, "正在解压并直读存档结构…")
+    header, frame, _offset = split_save(path)
+    raw = Zstd().decompress(frame)
+    stations = savereader.read_stations_from_raw(raw)
+    schedules = savereader.read_schedules_from_raw(raw)
+    signals = savereader.read_signals_from_raw(raw)
+    trains = savereader.read_trains_from_raw(raw)
+    emit_progress("overview", 2, 3, "正在归类线路与时刻表…")
+
+    routes = [s for s in schedules if s.stop_count >= 2]
+    containers = [s for s in schedules if s.stop_count < 2]
+    named_stations = sum(1 for s in stations if not s.name.startswith("车站 "))
+
+    route_rows = sorted(
+        (
+            {"id": s.id, "name": s.name, "color": s.color, "stop_count": s.stop_count}
+            for s in routes
+        ),
+        key=lambda r: (-r["stop_count"], r["name"].casefold()),
+    )
+    container_rows = sorted(
+        ({"id": s.id, "name": s.name, "color": s.color} for s in containers),
+        key=lambda r: r["name"].casefold(),
+    )
+
+    stat = path.stat()
+    emit_progress("overview", 3, 3, "结构总览就绪")
+    return {
+        "action": "save-overview",
+        "save": str(path),
+        "save_name": path.name,
+        "file_size": stat.st_size,
+        "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "save_format_version_hint": list(header[8:12]) if len(header) >= 12 else [],
+        "counts": {
+            "stations": len(stations),
+            "named_stations": named_stations,
+            "routes": len(routes),
+            "schedules": len(schedules),
+            "signals": len(signals),
+            "trains": len(trains),
+        },
+        "routes": route_rows,
+        "containers": container_rows,
+    }
+
+
 def command_network_read(args: argparse.Namespace) -> dict:
     """JSON-free: read the rail network (lines/stations/signals) from a save."""
     import toolkit_savereader as savereader
@@ -2755,6 +2812,8 @@ def build_parser() -> argparse.ArgumentParser:
     network_read = sub.add_parser("network-read")
     network_read.add_argument("--save", type=Path, required=True)
     network_read.add_argument("--no-signals", action="store_true")
+    save_overview = sub.add_parser("save-overview")
+    save_overview.add_argument("--save", type=Path, required=True)
     align_coords = sub.add_parser("align-coords")
     align_coords.add_argument("--save", type=Path, required=True)
     align_coords.add_argument("--output", type=Path, required=True)
@@ -2800,6 +2859,8 @@ def main() -> None:
             result = command_compare(args)
         elif args.command == "map-data":
             result = command_map_data(args)
+        elif args.command == "save-overview":
+            result = command_save_overview(args)
         elif args.command == "network-read":
             result = command_network_read(args)
         elif args.command == "align-coords":

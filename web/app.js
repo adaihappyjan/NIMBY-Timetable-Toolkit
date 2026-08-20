@@ -781,6 +781,31 @@ function realnetDrawSignals() {
       .addTo(REALNET.signalLayer);
   });
 }
+function renderSaveOverview(r) {
+  state.saveOverview = r;
+  const c = r.counts || {};
+  const metrics = [
+    ['车站', c.stations, `其中 ${c.named_stations} 有名`],
+    ['线路', c.routes, '带几何'],
+    ['时刻表', c.schedules, '张'],
+    ['列车', c.trains, '列'],
+    ['信号/道岔', c.signals, '个'],
+  ];
+  const mg = $('#overview-metrics');
+  mg.innerHTML = metrics.map(x => `<div class="metric-card"><small>${x[0]}</small><b>${(x[1] ?? 0).toLocaleString()}</b><em>${x[2]}</em></div>`).join('');
+  mg.hidden = false;
+  const ver = (r.save_format_version_hint || []).join('.');
+  const when = r.modified_utc ? new Date(r.modified_utc).toLocaleString() : '';
+  $('#overview-meta').innerHTML = `<span>存档：<strong>${escapeHtml(r.save_name || '')}</strong></span> · <span>${formatBytes(r.file_size || 0)}</span>${ver ? ` · <span>格式标记 ${escapeHtml(ver)}</span>` : ''}${when ? ` · <span>修改于 ${escapeHtml(when)}</span>` : ''}`;
+  const routes = r.routes || [], containers = r.containers || [];
+  const swatch = col => `<i class="ov-swatch" style="background:${lineColor(col)}"></i>`;
+  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong><span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
+  $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong></div>`).join('') : '<div class="placeholder">无</div>';
+  $('#overview-route-count').textContent = routes.length;
+  $('#overview-container-count').textContent = containers.length;
+  $('#overview-lists').hidden = false;
+  toast(`结构直读完成：${c.stations} 站 / ${c.routes} 线 / ${c.schedules} 时刻表 / ${c.trains} 车 / ${c.signals} 信号`);
+}
 function onNetworkRead(result) {
   state.network = { lines: result.lines || [], stations: result.stations || {} };
   state.allStations = result.all_stations || result.stations || {};
@@ -1149,6 +1174,7 @@ async function pollOnce() {
       else if (s.action === 'compare') renderCompare(s.result);
       else if (s.action === 'find-reference') renderReference(s.result);
       else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
+      else if (s.action === 'save-overview') { renderSaveOverview(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
@@ -1256,6 +1282,7 @@ function binderWriteGarage() {
 $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(b) switchView(b.dataset.view); });
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
+$('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
 $('#save-select').addEventListener('change', refreshOutputNames);
 $('#save-dir-box')?.addEventListener('toggle', e => { e.target.dataset.userToggled = '1'; });
 $('#save-dir-apply')?.addEventListener('click', () => applySaveDir($('#save-dir-input').value));
