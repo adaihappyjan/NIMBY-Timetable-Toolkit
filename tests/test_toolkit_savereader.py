@@ -37,6 +37,14 @@ def _line_bytes(seq: int, name: str, code: str, color: int, station_seqs: list[i
     return body
 
 
+def _assignment_tail(shift_ids: list[int], train_seqs: list[int]) -> bytes:
+    """Config tail: [N][N shift ids*2 uvarints][N][N train 0x5 ids]."""
+    n = len(shift_ids)
+    body = bytes([n]) + b"".join(uvarint(s * 2) for s in shift_ids)
+    body += bytes([n]) + b"".join(_id_varint(sr.TYPE_TRAIN, s) for s in train_seqs)
+    return body
+
+
 def _schedule_container_bytes(seq: int, name: str, color: int) -> bytes:
     """Variant-B schedule: [id][extra uvarint field][namelen][name]…, no stops."""
     body = _id_varint(sr.TYPE_SCHEDULE, seq)
@@ -77,6 +85,8 @@ def _make_raw() -> bytes:
     raw += _line_bytes(0x1, "Lakeshore West", "GO LW", 0xFF0000A9, [0x1, 0x20002, 0x30001])
     raw += b"\x66" * 5
     raw += _schedule_container_bytes(0x20001, "Lakeshore West Daily", 0xFF0000A9)
+    raw += b"\x11\x22"
+    raw += _assignment_tail([0x55, 0x7b], [0x2, 0x10002])
     raw += b"\x77" * 5
     raw += _signal_bytes(0x1, -79.3801, 43.6446)
     raw += b"\x88" * 4
@@ -128,6 +138,20 @@ def test_read_schedules_both_variants(tmp_path):
     assert daily.stop_count == 0
     route = next(s for s in scheds if s.name == "Lakeshore West")
     assert route.stop_count == 3
+
+
+def test_read_schedule_assignments(tmp_path):
+    save = _make_save(tmp_path, _make_raw())
+    raw = Zstd().decompress(__import__("toolkit_binary").split_save(save)[1])
+    asg = sr.read_schedule_assignments(raw)
+    by_id = {a.schedule_id: a for a in asg}
+    daily = by_id.get(hex((sr.TYPE_SCHEDULE << 48) | 0x20001))
+    assert daily is not None, "assignment tail must attach to its schedule head"
+    assert daily.count == 2
+    assert set(daily.train_ids) == {
+        hex((sr.TYPE_TRAIN << 48) | 0x2), hex((sr.TYPE_TRAIN << 48) | 0x10002)
+    }
+    assert set(daily.shift_ids) == {"0x55", "0x7b"}
 
 
 def test_read_network(tmp_path):

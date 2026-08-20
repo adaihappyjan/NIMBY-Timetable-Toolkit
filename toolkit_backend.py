@@ -1275,22 +1275,34 @@ def command_save_overview(args: argparse.Namespace) -> dict:
     schedules = savereader.read_schedules_from_raw(raw)
     signals = savereader.read_signals_from_raw(raw)
     trains = savereader.read_trains_from_raw(raw)
+    assignments = savereader.read_schedule_assignments(raw)
     emit_progress("overview", 2, 3, "正在归类线路与时刻表…")
 
+    assign_by_id = {a.schedule_id: a for a in assignments}
     routes = [s for s in schedules if s.stop_count >= 2]
     containers = [s for s in schedules if s.stop_count < 2]
     named_stations = sum(1 for s in stations if not s.name.startswith("车站 "))
+    total_shifts = sum(a.count for a in assignments)
+    assigned_train_ids = {t for a in assignments for t in a.train_ids}
+
+    def _row(s, with_stops):
+        a = assign_by_id.get(s.id)
+        row = {
+            "id": s.id, "name": s.name, "color": s.color,
+            "train_count": a.count if a else 0,
+            "shift_count": a.count if a else 0,
+        }
+        if with_stops:
+            row["stop_count"] = s.stop_count
+        return row
 
     route_rows = sorted(
-        (
-            {"id": s.id, "name": s.name, "color": s.color, "stop_count": s.stop_count}
-            for s in routes
-        ),
+        (_row(s, True) for s in routes),
         key=lambda r: (-r["stop_count"], r["name"].casefold()),
     )
     container_rows = sorted(
-        ({"id": s.id, "name": s.name, "color": s.color} for s in containers),
-        key=lambda r: r["name"].casefold(),
+        (_row(s, False) for s in containers),
+        key=lambda r: (-r["train_count"], r["name"].casefold()),
     )
 
     stat = path.stat()
@@ -1307,8 +1319,11 @@ def command_save_overview(args: argparse.Namespace) -> dict:
             "named_stations": named_stations,
             "routes": len(routes),
             "schedules": len(schedules),
+            "active_schedules": len(assignments),
             "signals": len(signals),
             "trains": len(trains),
+            "assigned_trains": len(assigned_train_ids),
+            "total_shifts": total_shifts,
         },
         "routes": route_rows,
         "containers": container_rows,

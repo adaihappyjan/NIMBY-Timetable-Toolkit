@@ -273,6 +273,114 @@ def read_trains_from_raw(raw: bytes) -> list[TrainRecord]:
     return list(out.values())
 
 
+@dataclass
+class AssignmentRecord:
+    schedule_id: str
+    train_ids: list[str]
+    shift_ids: list[str]
+    count: int
+
+
+def _train_id_runs(raw: bytes):
+    """Yield (run_start, length, [ids]) for maximal runs of adjacent 0x5 train ids."""
+    n = len(raw)
+    i = 0
+    positions = []  # (start, ident, end)
+    while i < n - 8:
+        if raw[i + 7] == TYPE_TRAIN:
+            r = _is_id(raw, i, {TYPE_TRAIN})
+            if r:
+                positions.append((i, r[0], r[1]))
+                i = r[1]
+                continue
+        i += 1
+    k = 0
+    m = len(positions)
+    while k < m:
+        run = [positions[k]]
+        j = k + 1
+        while j < m and positions[j][0] == run[-1][2]:
+            run.append(positions[j])
+            j += 1
+        yield run[0][0], len(run), [p[1] for p in run]
+        k = j
+
+
+def _shift_list_before(raw: bytes, count_pos: int, n: int):
+    """Match [n][n uvarints] whose bytes end exactly at count_pos (train count byte)."""
+    lo = max(0, count_pos - 2 - n * 5)
+    for q in range(lo, count_pos):
+        if raw[q] != n:
+            continue
+        j = q + 1
+        vals = []
+        ok = True
+        for _ in range(n):
+            r = _try_uv(raw, j)
+            if not r or r[1] > count_pos:
+                ok = False
+                break
+            vals.append(r[0])
+            j = r[1]
+        if ok and j == count_pos and len(vals) == n:
+            return [v >> 1 for v in vals]
+    return None
+
+
+def read_schedule_assignments(raw: bytes) -> list[AssignmentRecord]:
+    """Reconstruct schedule -> (assigned trains, shifts) from the config region.
+
+    Each schedule config block ends with a self-validating pair
+    ``[N][N shift ids][N][N train ids]``. Train ids and shift ids are recovered as
+    sets/counts (validated 35/35 vs export); the 1:1 train<->shift pairing is stored
+    by creation order elsewhere and is not reconstructed here.
+    """
+    # All 0x6 id+name positions WITHOUT dedup: a schedule is defined twice (route
+    # region and config region), and each train run must attach to the config-region
+    # head that immediately precedes it.
+    heads = []
+    n = len(raw)
+    i = 0
+    while i < n - 12:
+        if raw[i + 7] == TYPE_SCHEDULE:
+            r = _is_id(raw, i, {TYPE_SCHEDULE})
+            if r:
+                ident, end = r
+                if _name_after_id(raw, end):
+                    heads.append((i, ident))
+                    i = end
+                    continue
+        i += 1
+    if not heads:
+        return []
+    head_pos = [h[0] for h in heads]
+    import bisect
+
+    best: dict[int, AssignmentRecord] = {}
+    for run_start, length, train_ids in _train_id_runs(raw):
+        if length < 1 or length > 127:
+            continue
+        count_pos = run_start - 1
+        if count_pos < 0 or raw[count_pos] != length:
+            continue
+        shifts = _shift_list_before(raw, count_pos, length)
+        if shifts is None:
+            continue
+        idx = bisect.bisect_right(head_pos, run_start) - 1
+        if idx < 0:
+            continue
+        sched_id = heads[idx][1]
+        prev = best.get(sched_id)
+        if prev is None or length > prev.count:
+            best[sched_id] = AssignmentRecord(
+                schedule_id=hex(sched_id),
+                train_ids=[hex(t) for t in train_ids],
+                shift_ids=[hex(s) for s in shifts],
+                count=length,
+            )
+    return list(best.values())
+
+
 def read_schedules_from_raw(raw: bytes) -> list[ScheduleRecord]:
     """Every Schedule (0x6) = timetable container: id + name + color.
 

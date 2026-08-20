@@ -787,8 +787,9 @@ function renderSaveOverview(r) {
   const metrics = [
     ['车站', c.stations, `其中 ${c.named_stations} 有名`],
     ['线路', c.routes, '带几何'],
-    ['时刻表', c.schedules, '张'],
-    ['列车', c.trains, '列'],
+    ['时刻表', c.schedules, `${c.active_schedules ?? 0} 有班次`],
+    ['列车', c.trains, `${c.assigned_trains ?? 0} 已分配`],
+    ['班次', c.total_shifts ?? 0, '个'],
     ['信号/道岔', c.signals, '个'],
   ];
   const mg = $('#overview-metrics');
@@ -799,8 +800,9 @@ function renderSaveOverview(r) {
   $('#overview-meta').innerHTML = `<span>存档：<strong>${escapeHtml(r.save_name || '')}</strong></span> · <span>${formatBytes(r.file_size || 0)}</span>${ver ? ` · <span>格式标记 ${escapeHtml(ver)}</span>` : ''}${when ? ` · <span>修改于 ${escapeHtml(when)}</span>` : ''}`;
   const routes = r.routes || [], containers = r.containers || [];
   const swatch = col => `<i class="ov-swatch" style="background:${lineColor(col)}"></i>`;
-  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong><span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
-  $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong></div>`).join('') : '<div class="placeholder">无</div>';
+  const tbadge = x => x.train_count ? `<span>${x.train_count} 车</span>` : '';
+  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}<span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
+  $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}</div>`).join('') : '<div class="placeholder">无</div>';
   $('#overview-route-count').textContent = routes.length;
   $('#overview-container-count').textContent = containers.length;
   $('#overview-lists').hidden = false;
