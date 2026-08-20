@@ -429,12 +429,26 @@ class TaskManager:
             if payload.get("no_signals"):
                 args.append("--no-signals")
             return args
-            if action == "save-overview":
-                save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
-                return ["save-overview", "--save", str(save)]
-            if action == "line-timetable":
-                save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
-                return ["line-timetable", "--save", str(save)]
+        if action == "save-overview":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            return ["save-overview", "--save", str(save)]
+        if action == "line-timetable":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            return ["line-timetable", "--save", str(save)]
+        if action == "ops-analyze":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            args = ["ops-analyze", "--save", str(save)]
+            export_value = str(payload.get("export", "")).strip()
+            if export_value:
+                export = validate_input_path(export_value, ".json")
+                args += ["--export", str(export)]
+            target = payload.get("target_headway")
+            if target not in (None, "", 0):
+                target_int = int(target)
+                if not (10 <= target_int <= 86400):
+                    raise RuntimeError("目标班距需在 10–86400 秒之间")
+                args += ["--target-headway", str(target_int)]
+            return args
         if action == "align-coords":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             output = validate_output_path(payload.get("output", ""))

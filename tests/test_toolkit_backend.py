@@ -326,5 +326,43 @@ class GameVersionDetectionTests(unittest.TestCase):
         self.assertEqual(info["status"], "outdated")
 
 
+class OpsEstimateTests(unittest.TestCase):
+    def test_estimate_headway_is_cycle_over_trains(self) -> None:
+        # GO Kitchener: cycle 10477 s over 12 trains -> ~873 s (real 900, ~3% low).
+        self.assertEqual(backend.estimate_headway(10477, 12), 873)
+
+    def test_estimate_headway_guards_zero(self) -> None:
+        self.assertIsNone(backend.estimate_headway(0, 12))
+        self.assertIsNone(backend.estimate_headway(10477, 0))
+
+    def test_plan_train_count_is_inverse(self) -> None:
+        # Target 600 s headway on a 10477 s cycle -> 17 trains (round(17.46)).
+        self.assertEqual(backend.plan_train_count(10477, 600), 17)
+        # Round-trip: planning to the current headway returns the current fleet.
+        self.assertEqual(backend.plan_train_count(10477, backend.estimate_headway(10477, 12)), 12)
+
+    def test_plan_train_count_never_below_one(self) -> None:
+        self.assertEqual(backend.plan_train_count(500, 100000), 1)
+        self.assertIsNone(backend.plan_train_count(10477, 0))
+
+    def test_export_service_kpis_from_expanded_runs(self) -> None:
+        # Two trains, uniform 900 s headway, staggered start -> merged gaps ~450 s.
+        shifts = []
+        for offset in (0, 450):
+            runs = [
+                {"arrival_departure": [7000 + offset + k * 900, 7000 + offset + k * 900 + 300]}
+                for k in range(20)
+            ]
+            shifts.append({"id": f"0x{offset:x}", "name": str(offset), "runs": runs})
+        kpi = backend.export_service_kpis({"class": "Schedule", "shifts": shifts})
+        self.assertEqual(kpi["headway_median_seconds"], 450)
+        self.assertEqual(kpi["run_total"], 40)
+        self.assertEqual(kpi["coverage_day_count"], 1)
+        self.assertEqual(kpi["service_start_seconds"], 7000)
+
+    def test_export_service_kpis_needs_enough_runs(self) -> None:
+        self.assertIsNone(backend.export_service_kpis({"shifts": []}))
+
+
 if __name__ == "__main__":
     unittest.main()

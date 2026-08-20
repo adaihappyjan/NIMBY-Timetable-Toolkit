@@ -186,6 +186,44 @@ function renderLineTimetable(r) {
   }).join('');
   toast(`逐站时刻直读完成：${routes.length} 条线路模板`);
 }
+function renderOpsAnalyze(r) {
+  state.opsAnalyze = r;
+  const sum = $('#ops-summary'), wrap = $('#ops-lines');
+  const routes = r.routes || [];
+  const s = r.summary || {};
+  const rec = r.reconciliation;
+  const hasPlan = routes.some(x => x.plan);
+  const recCard = rec
+    ? `<div class="metric-card"><small>对账中位误差</small><b>${rec.headway_error_median_pct ?? '—'}%</b><em>10%内 ${rec.within_10pct}/${rec.matched_routes}</em></div>`
+    : '';
+  sum.innerHTML = `<div class="metric-grid">`
+    + `<div class="metric-card"><small>可估算线路</small><b>${s.route_count || 0}</b><em>条</em></div>`
+    + `<div class="metric-card"><small>班距中位(估算)</small><b>${headwayText(s.headway_estimate_median_seconds || 0)}</b><em>h≈T/N</em></div>`
+    + `<div class="metric-card"><small>分配列车合计</small><b>${s.total_assigned_trains || 0}</b><em>列</em></div>`
+    + recCard + `</div>`;
+  if (!routes.length) { wrap.innerHTML = '<div class="placeholder">未从存档读到可估算的载客线路（需同时读到循环时长与分配车数）。</div>'; return; }
+  const head = `<tr><th>线路</th><th>车数N</th><th>循环T</th><th>班距(估算)</th>`
+    + (rec ? `<th>班距(真值)</th><th>误差</th>` : '')
+    + (hasPlan ? `<th>目标→所需车</th>` : '') + `</tr>`;
+  const body = routes.map(t => {
+    const errCls = t.headway_error_pct == null ? '' : (t.headway_error_pct <= 10 ? 'ok' : (t.headway_error_pct <= 20 ? 'warn' : 'bad'));
+    let row = `<tr><td><i class="ov-swatch" style="background:${lineColor(t.color)}"></i>${escapeHtml(t.name)}</td>`
+      + `<td>${t.train_count}</td><td>${headwayText(t.cycle_seconds)}</td>`
+      + `<td><strong>${headwayText(t.headway_estimate_seconds)}</strong></td>`;
+    if (rec) row += `<td>${t.headway_real_seconds != null ? headwayText(t.headway_real_seconds) : '—'}</td>`
+      + `<td>${t.headway_error_pct != null ? `<span class="hw-delta ${errCls}">${t.headway_error_pct}%</span>` : '—'}</td>`;
+    if (hasPlan) {
+      const p = t.plan;
+      const d = p && p.delta_trains;
+      const dTxt = d == null ? '—' : (d > 0 ? `加 ${d}` : (d < 0 ? `减 ${-d}` : '不变'));
+      const dCls = d > 0 ? 'bad' : (d < 0 ? 'warn' : 'ok');
+      row += `<td>${p ? `<strong>${p.required_train_count}</strong> <span class="hw-delta ${dCls}">${dTxt}</span>` : '—'}</td>`;
+    }
+    return row + '</tr>';
+  }).join('');
+  wrap.innerHTML = `<div class="tt-scroll"><table class="tt-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+  toast(`存档直读运营估算完成：${routes.length} 条线路` + (rec ? `，中位误差 ${rec.headway_error_median_pct}%` : ''));
+}
 function renderHeadwayPlan() {
   const targetMin = +$('#headway-target').value;
   const onlyService = $('#headway-only-service').checked;
@@ -1287,6 +1325,7 @@ async function pollOnce() {
       else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
       else if (s.action === 'save-overview') { renderSaveOverview(s.result); }
       else if (s.action === 'line-timetable') { renderLineTimetable(s.result); }
+      else if (s.action === 'ops-analyze') { renderOpsAnalyze(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
@@ -1398,6 +1437,14 @@ $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')
 $('#headway-calc')?.addEventListener('click', renderHeadwayPlan);
 $('#headway-export')?.addEventListener('click', exportHeadwayCsv);
 $('#timetable-read')?.addEventListener('click', () => { const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true); startTask('line-timetable', { save }); });
+$('#ops-read')?.addEventListener('click', () => {
+  const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true);
+  const payload = { save };
+  if ($('#ops-use-export')?.checked && $('#export-select')?.value) payload.export = $('#export-select').value;
+  const t = parseInt($('#ops-target')?.value, 10);
+  if (t > 0) payload.target_headway = t;
+  startTask('ops-analyze', payload);
+});
 $('#headway-calc')?.addEventListener('click', calcHeadwayPlan);
 $('#headway-export')?.addEventListener('click', exportHeadwayPlan);
 $('#save-select').addEventListener('change', refreshOutputNames);

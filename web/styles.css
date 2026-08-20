@@ -291,3 +291,8 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .tt-table th, .tt-table td { text-align:left; padding:6px 14px; border-bottom:1px solid #eef2f2; white-space:nowrap; }
 .tt-table th { position:sticky; top:0; background:#fff; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
 .tt-table td:nth-child(2), .tt-table td:nth-child(3), .tt-table td:nth-child(4) { font-variant-numeric:tabular-nums; color:#41525b; }
+.ops-planner { display:flex; gap:20px; align-items:end; flex-wrap:wrap; margin:14px 0 4px; }
+.ops-planner .output-label { margin-top:0; min-width:180px; }
+.ops-guard { flex-direction:row; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+.ops-guard input { width:auto; }
+.tt-table .ov-swatch { display:inline-block; margin-right:7px; vertical-align:middle; }

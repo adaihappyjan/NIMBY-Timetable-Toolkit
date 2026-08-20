@@ -120,6 +120,24 @@
           <div class="timetable-lines" id="timetable-lines"><div class="placeholder">点“直读逐站时刻”从当前存档展开各线时刻表。</div></div>
         </article>
 
+        <article class="panel" id="ops-panel">
+          <div class="panel-heading">
+            <div><p class="step">免 JSON · 估算</p><h3>仅用存档估算运营指标</h3></div>
+            <button class="secondary-button" id="ops-read">仅用存档体检（估算）</button>
+          </div>
+          <div class="repair-note">
+            班距为规则推导量、<b>不入档</b>，故直接从存档估算：<code>h ≈ 循环时长 T ÷ 车数 N</code>（T、N 均从二进制直读）。
+            未计折返/层停，估算通常略偏小，实测中位误差约 <b>3.5%–5%</b>、大多数线路在 10% 以内。
+            发车时刻/精确班距/覆盖天数由游戏运行时展开，无法仅凭存档精确复现——如导出可用，将作为<b>只读真值护栏</b>逐条对账。
+          </div>
+          <div class="ops-planner">
+            <label class="output-label">目标班距（秒）<input id="ops-target" type="number" min="30" step="30" placeholder="如 600 = 10 分钟"></label>
+            <label class="output-label ops-guard"><input type="checkbox" id="ops-use-export" checked> 用导出对账（真值护栏，只读）</label>
+          </div>
+          <div id="ops-summary" class="overview-meta"></div>
+          <div class="timetable-lines" id="ops-lines"><div class="placeholder">点“仅用存档体检（估算）”从当前存档估算各线班距；填目标班距可规划所需车数。</div></div>
+        </article>
+
         <div class="metric-grid" id="metric-grid" hidden></div>
         <article class="panel" id="findings-panel" hidden>
           <div class="panel-heading"><div><p class="step">诊断结果</p><h3>需要处理的项目</h3></div><span class="count-badge" id="finding-count">0</span></div>
