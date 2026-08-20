@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-20b';
+const APP_BUILD = '2026-08-20c';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
 const $ = (selector) => document.querySelector(selector);
@@ -356,18 +356,20 @@ function octilinearize(raw, lines, usedIds) {
     });
   }
 }
+function mapStyle() { return $('#map-style')?.value || 'geo'; }
 function drawTransitMap() {
   if (!state.network) return;
   const stations = state.network.stations;
   const lines = selectedMapLines().filter(l => l.stops.length >= 2);
   const canvas = $('#map-canvas');
   if (!lines.length) { canvas.innerHTML = '<div class="placeholder">请至少选择一条有 2 站以上的线路。</div>'; return; }
+  if (mapStyle() === 'strip') { drawStripDiagram(lines, stations); return; }
   const usedIds = [...new Set(lines.flatMap(l => l.stops))].filter(id => stations[id]);
   if (!usedIds.length) { canvas.innerHTML = '<div class="placeholder">所选线路的车站缺少坐标。</div>'; return; }
   const lats = usedIds.map(id => stations[id].lat);
   const meanLat = lats.reduce((a, b) => a + b, 0) / lats.length;
   const k = Math.cos(meanLat * Math.PI / 180);
-  const schematic = $('#map-schematic')?.checked;
+  const schematic = mapStyle() === 'schematic';
   const raw = {};
   usedIds.forEach(id => { raw[id] = { x: stations[id].lon * k, y: -stations[id].lat }; });
   if (schematic) octilinearize(raw, lines, usedIds);
@@ -448,6 +450,90 @@ function drawTransitMap() {
     t.textContent = `${l.name}${l.code ? ' (' + l.code + ')' : ''}`;
     svg.appendChild(t);
   });
+  canvas.innerHTML = '';
+  canvas.appendChild(svg);
+  state.mapSvg = svg;
+}
+function svgEl(name, attrs) {
+  const e = document.createElementNS(SVG_NS, name);
+  for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  return e;
+}
+// Metro-sticker single-line strip diagram (like the printed line maps at stations).
+// One evenly-spaced strip per selected line, with terminus caps, interchange
+// rings and transfer badges pulled from the whole network. Text uses inline
+// attributes so the SVG export stays faithful without external CSS.
+function drawStripDiagram(lines, stations) {
+  const canvas = $('#map-canvas');
+  const vertical = ($('#map-orient')?.value || 'h') === 'v';
+  const allLines = state.network.lines || [];
+  const stationLines = {};
+  allLines.forEach(l => [...new Set(l.stops)].forEach(id => { (stationLines[id] || (stationLines[id] = [])).push(l); }));
+  const rows = lines.map(l => ({ line: l, stops: l.stops.filter(id => stations[id]) })).filter(r => r.stops.length >= 2);
+  if (!rows.length) { canvas.innerHTML = '<div class="placeholder">所选线路的车站缺少坐标。</div>'; return; }
+  const maxStops = Math.max(...rows.map(r => r.stops.length));
+  const FONT = '"Microsoft YaHei UI","Segoe UI",sans-serif';
+  const gap = 66, dotR = 8, txfR = 7;
+  const svg = svgEl('svg', { class: 'transit-svg', xmlns: SVG_NS });
+
+  const drawBadge = (parent, x, y, text, color, big) => {
+    const w = big ? 78 : 44, h = big ? 30 : 22, r = h / 2;
+    parent.appendChild(svgEl('rect', { x: x - w / 2, y: y - h / 2, width: w, height: h, rx: r, fill: color }));
+    const t = svgEl('text', { x, y: y + (big ? 5.5 : 4), 'text-anchor': 'middle', 'font-family': FONT, 'font-size': big ? 15 : 11.5, 'font-weight': 800, fill: '#ffffff' });
+    t.textContent = text; parent.appendChild(t);
+  };
+  const transfersOf = (id, selfId) => (stationLines[id] || []).filter(x => x.id !== selfId);
+
+  let W, H;
+  if (!vertical) {
+    const rowH = 168, leftPad = 130, rightPad = 260, topPad = 40;
+    W = leftPad + (maxStops - 1) * gap + rightPad;
+    H = topPad + rows.length * rowH + 30;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#ffffff' }));
+    rows.forEach((r, ri) => {
+      const color = lineColor(r.line.color);
+      const yMid = topPad + ri * rowH + rowH / 2 + 6;
+      const x0 = leftPad, x1 = leftPad + (r.stops.length - 1) * gap;
+      svg.appendChild(svgEl('line', { x1: x0, y1: yMid, x2: x1, y2: yMid, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
+      drawBadge(svg, 58, yMid, r.line.code || r.line.name.slice(0, 4), color, true);
+      r.stops.forEach((id, j) => {
+        const x = leftPad + j * gap;
+        const term = j === 0 || j === r.stops.length - 1;
+        const tx = transfersOf(id, r.line.id);
+        const inter = tx.length > 0;
+        svg.appendChild(svgEl('circle', { cx: x, cy: yMid, r: term ? dotR + 2 : (inter ? dotR : 5.5), fill: term ? color : '#ffffff', stroke: color, 'stroke-width': term ? 3 : 3 }));
+        if (inter) svg.appendChild(svgEl('circle', { cx: x, cy: yMid, r: 2.6, fill: color }));
+        const nm = svgEl('text', { x: x + 4, y: yMid - 20, 'text-anchor': 'start', transform: `rotate(-55 ${x + 4} ${yMid - 20})`, 'font-family': FONT, 'font-size': term || inter ? 15 : 13, 'font-weight': term || inter ? 800 : 500, fill: '#12202b' });
+        nm.textContent = stations[id].name; svg.appendChild(nm);
+        tx.slice(0, 4).forEach((tl, k) => drawBadge(svg, x, yMid + 26 + k * 24, tl.code || tl.name.slice(0, 3), lineColor(tl.color), false));
+      });
+    });
+  } else {
+    const colW = 240, topPad = 90, botPad = 40, leftPad = 60;
+    H = topPad + (maxStops - 1) * gap + botPad;
+    W = leftPad + rows.length * colW + 60;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#ffffff' }));
+    rows.forEach((r, ri) => {
+      const color = lineColor(r.line.color);
+      const xMid = leftPad + ri * colW + 70;
+      const y0 = topPad, y1 = topPad + (r.stops.length - 1) * gap;
+      svg.appendChild(svgEl('line', { x1: xMid, y1: y0, x2: xMid, y2: y1, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
+      drawBadge(svg, xMid, 44, r.line.code || r.line.name.slice(0, 4), color, true);
+      r.stops.forEach((id, j) => {
+        const y = topPad + j * gap;
+        const term = j === 0 || j === r.stops.length - 1;
+        const tx = transfersOf(id, r.line.id);
+        const inter = tx.length > 0;
+        svg.appendChild(svgEl('circle', { cx: xMid, cy: y, r: term ? dotR + 2 : (inter ? dotR : 5.5), fill: term ? color : '#ffffff', stroke: color, 'stroke-width': 3 }));
+        if (inter) svg.appendChild(svgEl('circle', { cx: xMid, cy: y, r: 2.6, fill: color }));
+        const nm = svgEl('text', { x: xMid + 20, y: y + 5, 'text-anchor': 'start', 'font-family': FONT, 'font-size': term || inter ? 15 : 13, 'font-weight': term || inter ? 800 : 500, fill: '#12202b' });
+        nm.textContent = stations[id].name; svg.appendChild(nm);
+        tx.slice(0, 3).forEach((tl, k) => drawBadge(svg, xMid - 24 - k * 30, y, tl.code || tl.name.slice(0, 3), lineColor(tl.color), false));
+      });
+    });
+  }
   canvas.innerHTML = '';
   canvas.appendChild(svg);
   state.mapSvg = svg;
@@ -752,7 +838,8 @@ $('#draw-map').addEventListener('click',drawTransitMap);
 $('#export-map-svg').addEventListener('click',exportMapSvg);
 $('#map-all-labels').addEventListener('change',drawTransitMap);
 $('#map-curved').addEventListener('change',drawTransitMap);
-$('#map-schematic').addEventListener('change',drawTransitMap);
+$('#map-style').addEventListener('change',()=>{ $('#map-orient-wrap').hidden = mapStyle()!=='strip'; drawTransitMap(); });
+$('#map-orient').addEventListener('change',drawTransitMap);
 $('#map-select-all').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=true); drawTransitMap(); });
 $('#map-clear').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=false); drawTransitMap(); });
 $('#map-select-service').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=x.dataset.service==='1'); drawTransitMap(); });

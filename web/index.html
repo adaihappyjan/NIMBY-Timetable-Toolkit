@@ -141,7 +141,19 @@
           <div class="panel-heading">
             <div><p class="step">线路图</p><h3>路网示意图</h3></div>
             <div class="analytics-tools">
-              <label class="map-toggle"><input type="checkbox" id="map-schematic"> 示意图（八向拉直）</label>
+              <label class="map-toggle">样式
+                <select id="map-style">
+                  <option value="geo">地理示意（多线）</option>
+                  <option value="schematic">八向示意图</option>
+                  <option value="strip">单线条形图（地铁贴纸）</option>
+                </select>
+              </label>
+              <label class="map-toggle" id="map-orient-wrap" hidden>方向
+                <select id="map-orient">
+                  <option value="h">横向</option>
+                  <option value="v">纵向</option>
+                </select>
+              </label>
               <label class="map-toggle"><input type="checkbox" id="map-all-labels"> 显示所有站名</label>
               <label class="map-toggle"><input type="checkbox" id="map-curved" checked> 平滑曲线</label>
               <button class="text-button" id="draw-map">绘制线路图</button>
