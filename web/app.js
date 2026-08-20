@@ -11,9 +11,12 @@ const viewMeta = {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 function lineColor(raw) {
   if (!raw) return '#8a9ba4';
-  let hex = String(raw).replace(/^0x/i, '').replace(/^#/, '');
-  if (hex.length === 8) hex = hex.slice(2);
-  return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : '#8a9ba4';
+  let hex = String(raw).trim().replace(/^0x/i, '').replace(/^#/, '');
+  if (hex.length === 8) hex = hex.slice(2); // drop alpha: AABBGGRR -> BBGGRR
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return '#8a9ba4';
+  // NIMBY Rails stores line colors as ABGR (0xAABBGGRR), so swap the red and
+  // blue bytes back to standard RGB (e.g. STM Yellow 0xff00cdff -> #ffcd00).
+  return `#${hex.slice(4, 6)}${hex.slice(2, 4)}${hex.slice(0, 2)}`.toLowerCase();
 }
 function secToClock(seconds) {
   if (seconds === null || seconds === undefined) return '—';
@@ -398,7 +401,21 @@ function octilinearize(raw, lines, usedIds) {
     });
   }
 }
+// Rough text width: CJK glyphs ~1em, ASCII ~0.56em. Good enough for layout.
+function estTextWidth(text, fs) { let u = 0; for (const ch of String(text)) u += (ch.charCodeAt(0) > 255 ? 1 : 0.56); return u * fs; }
+function rectsOverlap(a, b) { return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y); }
 function mapStyle() { return $('#map-style')?.value || 'geo'; }
+function mapNum(id, def) { const v = parseFloat($('#' + id)?.value); return Number.isFinite(v) ? v : def; }
+function mapOpts() {
+  return {
+    fontSize: Math.max(6, Math.min(40, mapNum('map-fontsize', 11))),
+    width: Math.max(600, Math.min(6000, mapNum('map-width', 1400))),
+    height: Math.max(400, Math.min(6000, mapNum('map-height', 940))),
+    lineWidth: Math.max(1, Math.min(30, mapNum('map-linewidth', 6))),
+    dotScale: Math.max(0.3, Math.min(4, mapNum('map-dotscale', 1))),
+    gap: Math.max(24, Math.min(200, mapNum('map-gap', 66))),
+  };
+}
 function drawTransitMap() {
   if (!state.network) return;
   const stations = state.network.stations;
@@ -415,9 +432,10 @@ function drawTransitMap() {
   const raw = {};
   usedIds.forEach(id => { raw[id] = { x: stations[id].lon * k, y: -stations[id].lat }; });
   if (schematic) octilinearize(raw, lines, usedIds);
+  const o = mapOpts();
   const xs = usedIds.map(id => raw[id].x), ys = usedIds.map(id => raw[id].y);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const W = 1200, H = 820, pad = 70;
+  const W = o.width, H = o.height, pad = Math.max(60, o.fontSize * 5);
   const spanX = (maxX - minX) || 1e-6, spanY = (maxY - minY) || 1e-6;
   const scale = Math.min((W - 2 * pad) / spanX, (H - 2 * pad) / spanY);
   const offX = (W - scale * spanX) / 2, offY = (H - scale * spanY) / 2;
@@ -453,35 +471,22 @@ function drawTransitMap() {
     path.setAttribute('d', pathFor(seq));
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', lineColor(l.color));
-    path.setAttribute('stroke-width', 6);
+    path.setAttribute('stroke-width', o.lineWidth);
     path.setAttribute('stroke-linejoin', 'round');
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('opacity', '0.92');
     svg.appendChild(path);
   });
-  // Station dots + labels.
+  // Which stations get labelled: termini + interchanges always; the rest only
+  // when "显示所有站名" is on.
   const labelIds = new Set();
   lines.forEach(l => { const s = l.stops.filter(id => stations[id]); if (s.length) { labelIds.add(s[0]); labelIds.add(s[s.length - 1]); } });
   Object.keys(usage).forEach(id => { if (usage[id] > 1) labelIds.add(id); });
-  usedIds.forEach(id => {
-    const p = project(id); const interchange = usage[id] > 1;
-    const dot = document.createElementNS(SVG_NS, 'circle');
-    dot.setAttribute('cx', p.x.toFixed(1)); dot.setAttribute('cy', p.y.toFixed(1));
-    dot.setAttribute('r', interchange ? 6 : 3.2);
-    dot.setAttribute('fill', interchange ? '#ffffff' : '#0b1d2a');
-    dot.setAttribute('stroke', interchange ? '#0b1d2a' : '#ffffff');
-    dot.setAttribute('stroke-width', interchange ? 2.4 : 1.2);
-    svg.appendChild(dot);
-    if (allLabels || labelIds.has(id)) {
-      const t = document.createElementNS(SVG_NS, 'text');
-      t.setAttribute('x', (p.x + 8).toFixed(1)); t.setAttribute('y', (p.y - 6).toFixed(1));
-      t.setAttribute('class', interchange ? 'st-label major' : 'st-label');
-      t.textContent = stations[id].name;
-      svg.appendChild(t);
-    }
-  });
-  // Legend.
+  // Reserved boxes act as obstacles for label placement (dots + legend).
+  const obstacles = [];
+  // Legend, drawn first so labels can route around it.
   const legendX = 24, legendY = 30;
+  let legendMaxW = 0;
   lines.forEach((l, i) => {
     const y = legendY + i * 24;
     const sw = document.createElementNS(SVG_NS, 'rect');
@@ -489,7 +494,67 @@ function drawTransitMap() {
     sw.setAttribute('fill', lineColor(l.color)); svg.appendChild(sw);
     const t = document.createElementNS(SVG_NS, 'text');
     t.setAttribute('x', legendX + 34); t.setAttribute('y', y); t.setAttribute('class', 'legend-label');
-    t.textContent = `${l.name}${l.code ? ' (' + l.code + ')' : ''}`;
+    const label = `${l.name}${l.code ? ' (' + l.code + ')' : ''}`;
+    t.textContent = label; svg.appendChild(t);
+    legendMaxW = Math.max(legendMaxW, 34 + estTextWidth(label, 13));
+  });
+  if (lines.length) obstacles.push({ x: legendX - 8, y: legendY - 20, w: legendMaxW + 16, h: lines.length * 24 + 8 });
+  // Station dots (drawn under the labels), each reserved as an obstacle.
+  usedIds.forEach(id => {
+    const p = project(id); const interchange = usage[id] > 1;
+    const rr = (interchange ? 6 : 3.2) * o.dotScale;
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('cx', p.x.toFixed(1)); dot.setAttribute('cy', p.y.toFixed(1));
+    dot.setAttribute('r', rr.toFixed(1));
+    dot.setAttribute('fill', interchange ? '#ffffff' : '#0b1d2a');
+    dot.setAttribute('stroke', interchange ? '#0b1d2a' : '#ffffff');
+    dot.setAttribute('stroke-width', (interchange ? 2.4 : 1.2) * o.dotScale);
+    svg.appendChild(dot);
+    obstacles.push({ x: p.x - rr, y: p.y - rr, w: rr * 2, h: rr * 2 });
+  });
+  // Greedy label placement: important labels first, each tries several anchors
+  // and takes the first that clears every other label + obstacle. Minor labels
+  // that can't fit are dropped so the map stays readable instead of overlapping.
+  const wantIds = usedIds.filter(id => allLabels || labelIds.has(id));
+  const priority = id => (usage[id] > 1 ? 2 : (labelIds.has(id) ? 1 : 0));
+  wantIds.sort((a, b) => priority(b) - priority(a));
+  const placed = [];
+  wantIds.forEach(id => {
+    const p = project(id); const interchange = usage[id] > 1;
+    const fs = interchange ? o.fontSize + 1 : o.fontSize;
+    const name = stations[id].name;
+    const w = estTextWidth(name, fs), h = fs * 1.2;
+    const off = (interchange ? 9 : 6) * o.dotScale;
+    // [dx, dy(baseline), anchor]; ordered by visual preference.
+    const cands = [
+      [off, -off, 'start'], [-off, -off, 'end'],
+      [off, off + h * 0.5, 'start'], [-off, off + h * 0.5, 'end'],
+      [0, -off - 2, 'middle'], [0, off + h * 0.7, 'middle'],
+      [off + 3, fs * 0.35, 'start'], [-off - 3, fs * 0.35, 'end'],
+    ];
+    const boxFor = (dx, dy, anchor) => {
+      const left = anchor === 'start' ? p.x + dx : anchor === 'end' ? p.x + dx - w : p.x + dx - w / 2;
+      return { x: left, y: p.y + dy - fs * 0.8, w, h };
+    };
+    let chosen = null;
+    for (const [dx, dy, anchor] of cands) {
+      const box = boxFor(dx, dy, anchor);
+      if (!placed.some(q => rectsOverlap(box, q)) && !obstacles.some(q => rectsOverlap(box, q))) {
+        chosen = { dx, dy, anchor, box }; break;
+      }
+    }
+    if (!chosen) {
+      if (priority(id) === 0) return; // drop only unimportant labels
+      const dx = off, dy = -off, anchor = 'start';
+      chosen = { dx, dy, anchor, box: boxFor(dx, dy, anchor) };
+    }
+    placed.push(chosen.box);
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', (p.x + chosen.dx).toFixed(1)); t.setAttribute('y', (p.y + chosen.dy).toFixed(1));
+    t.setAttribute('text-anchor', chosen.anchor);
+    t.setAttribute('class', interchange ? 'st-label major' : 'st-label');
+    t.setAttribute('style', `font-size:${fs.toFixed(1)}px`); // inline wins over CSS class
+    t.textContent = name;
     svg.appendChild(t);
   });
   canvas.innerHTML = '';
@@ -514,8 +579,9 @@ function drawStripDiagram(lines, stations) {
   const rows = lines.map(l => ({ line: l, stops: l.stops.filter(id => stations[id]) })).filter(r => r.stops.length >= 2);
   if (!rows.length) { canvas.innerHTML = '<div class="placeholder">所选线路的车站缺少坐标。</div>'; return; }
   const maxStops = Math.max(...rows.map(r => r.stops.length));
+  const o = mapOpts();
   const FONT = '"Microsoft YaHei UI","Segoe UI",sans-serif';
-  const gap = 66, dotR = 8;
+  const gap = o.gap, dotR = 8 * o.dotScale, stripLW = o.lineWidth * 2, dotSW = 3 * o.dotScale;
   const svg = svgEl('svg', { class: 'transit-svg', xmlns: SVG_NS });
 
   // Pills size themselves to their text (CJK ~1em, ASCII ~0.58em) so full line
@@ -541,10 +607,10 @@ function drawStripDiagram(lines, stations) {
     });
     return out;
   };
-  const lineFS = 14, badgeFS = 11, nameFS = 14;
+  const lineFS = o.fontSize, badgeFS = Math.max(9, o.fontSize - 3), nameFS = o.fontSize;
   const dot = (cx, cy, term, inter, color) => {
-    svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: term ? dotR + 2 : (inter ? dotR : 5.5), fill: term ? color : '#ffffff', stroke: color, 'stroke-width': 3 }));
-    if (inter) svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: 2.6, fill: color }));
+    svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: (term ? dotR + 2 : (inter ? dotR : 5.5 * o.dotScale)).toFixed(1), fill: term ? color : '#ffffff', stroke: color, 'stroke-width': dotSW.toFixed(1) }));
+    if (inter) svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: (2.6 * o.dotScale).toFixed(1), fill: color }));
   };
   const badgesFor = {};
   rows.forEach(r => r.stops.forEach(id => { badgesFor[r.line.id + '|' + id] = transferBadges(id, r.line.id); }));
@@ -576,7 +642,7 @@ function drawStripDiagram(lines, stations) {
       const color = lineColor(r.line.color);
       const yMid = topPad + ri * rowH + aboveSpace;
       const x1 = leftPad + (r.stops.length - 1) * localGap;
-      svg.appendChild(svgEl('line', { x1: leftPad, y1: yMid, x2: x1, y2: yMid, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
+      svg.appendChild(svgEl('line', { x1: leftPad, y1: yMid, x2: x1, y2: yMid, stroke: color, 'stroke-width': stripLW, 'stroke-linecap': 'round' }));
       pill(badgeCx, yMid, lineLabels[ri], color, lineFS, maxLinePillW);
       r.stops.forEach((id, j) => {
         const x = leftPad + j * localGap;
@@ -606,7 +672,7 @@ function drawStripDiagram(lines, stations) {
       const color = lineColor(r.line.color);
       const xMid = leftPad + ri * colW + leftArea;
       const y1 = topPad + (r.stops.length - 1) * gap;
-      svg.appendChild(svgEl('line', { x1: xMid, y1: topPad, x2: xMid, y2: y1, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
+      svg.appendChild(svgEl('line', { x1: xMid, y1: topPad, x2: xMid, y2: y1, stroke: color, 'stroke-width': stripLW, 'stroke-linecap': 'round' }));
       pill(xMid, 46, lineLabels[ri], color, lineFS);
       r.stops.forEach((id, j) => {
         const y = topPad + j * gap;
@@ -950,6 +1016,8 @@ $('#map-all-labels').addEventListener('change',drawTransitMap);
 $('#map-curved').addEventListener('change',drawTransitMap);
 $('#map-style').addEventListener('change',()=>{ $('#map-orient-wrap').hidden = mapStyle()!=='strip'; drawTransitMap(); });
 $('#map-orient').addEventListener('change',drawTransitMap);
+['#map-fontsize','#map-width','#map-height','#map-linewidth','#map-dotscale','#map-gap'].forEach(sel=>{ const el=$(sel); if(el) el.addEventListener('input',()=>{ if(state.network) drawTransitMap(); }); });
+$('#map-reset-adv')?.addEventListener('click',()=>{ const d={'map-fontsize':11,'map-width':1400,'map-height':940,'map-linewidth':6,'map-dotscale':1,'map-gap':66}; Object.entries(d).forEach(([k,v])=>{ const el=$('#'+k); if(el) el.value=v; }); if(state.network) drawTransitMap(); toast('已重置为默认排版'); });
 $('#map-select-all').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=true); drawTransitMap(); });
 $('#map-clear').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=false); drawTransitMap(); });
 $('#map-select-service').addEventListener('click',()=>{ $$('.map-line-check').forEach(x=>x.checked=x.dataset.service==='1'); drawTransitMap(); });
