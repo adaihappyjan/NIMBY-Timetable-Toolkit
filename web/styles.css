@@ -279,3 +279,15 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .hw-delta.ok { background:var(--aqua-soft); color:#137a72; }
 .hw-delta.warn { background:#fff3d6; color:#9a6a00; }
 .hw-delta.bad { background:#ffe1e1; color:#b3261e; }
+.timetable-lines { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+.tt-line { border:1px solid var(--line); border-radius:10px; background:#fbfdfd; overflow:hidden; }
+.tt-line > summary { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; font-size:13px; list-style:none; }
+.tt-line > summary::-webkit-details-marker { display:none; }
+.tt-line > summary strong { flex:1; font-weight:600; }
+.tt-line > summary span { font-size:11px; color:var(--muted); background:#eef4f4; padding:2px 8px; border-radius:999px; }
+.tt-line[open] > summary { border-bottom:1px solid var(--line); background:#f3f8f8; }
+.tt-scroll { max-height:360px; overflow:auto; }
+.tt-table { width:100%; border-collapse:collapse; font-size:12px; }
+.tt-table th, .tt-table td { text-align:left; padding:6px 14px; border-bottom:1px solid #eef2f2; white-space:nowrap; }
+.tt-table th { position:sticky; top:0; background:#fff; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+.tt-table td:nth-child(2), .tt-table td:nth-child(3), .tt-table td:nth-child(4) { font-variant-numeric:tabular-nums; color:#41525b; }

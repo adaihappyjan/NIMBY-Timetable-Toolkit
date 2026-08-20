@@ -218,17 +218,17 @@ lat = degrees(2*atan(exp(y / R)) - pi/2)
 - **编码**：在 ~3.54M 的**线路路径模板区**，每个停靠点记录为
   `… <停靠序号=2k> 01 <进站行驶时间×2> <累计到达时刻×2> <累计离站时刻×2> …`，
   所有时间以 **0.5 秒为单位**（即数值 = 秒×2）。停站时长 = 离-到（实测常见 40s→存 80）。
-- **验证**：`模板值 ÷ 2` 与导出 run 的**逐站相对到/离时刻逐一相等**。真实存档抽样 **58/58 停靠点逐站精确**，多条线**单车循环时间 T 精确到秒吻合**：
-  - 全 8 条 **VIA** 线（多渥/渥蒙魁/多蒙/多温/多萨/海洋/Maple Leaf…）：`exact 逐站全中`，T 完全一致（如 20975/24099/28093/28485s）。
-  - **GO Kitchener 24/24（T=10477）、Lakeshore East 18/18（5343）、Stouffville 18/18（4847）、Lakeshore West-Niagara 30/30（14221）**。
-  - 全量：**11/35 线路“整条模板逐站精确 + T 精确到 2s 内”**（见脚本输出）。
-- **两种线路存储范式**（决定可直读性）：
-  - **区域/城际线（GO/VIA）**：在 ~3.54M 存**整合式计时模板**（一条记录含全线停靠 + 逐站时刻）→ **可直接读出 T**。
-  - **地铁/通勤线（TTC/STM/OT/EXO/REM）**：路径按 **track 分段**散布于 ~4.2M 区（每段 = 时刻表id + 2 站 + 上百条 track id），无单一整合模板 → T 需由分段重建，**暂不可直读**。
-- **越界注记**：GO Barrie/Richmond Hill/Milton/UPX/Hamilton 的**真实停靠全部逐站精确**（18/18、16/16、12/12…），仅因“同 id 多处出现 + 取最长走查”误穿入相邻 VIA 模板（都误得 20975）；属**定位/边界工程问题**，数据本身无误。稳健化需用 `read_lines` 的该线站集做候选校验。
-- **意义与取舍**：
-  - “循环时间 T 去 JSON”对**区域/城际线已可行且精确**；对地铁线待补（分段重建）。
-  - 出于安全，**暂不把该提取器接入生产**（越界会喂错 T）；**班距规划器**继续以导出 JSON 的实测 T 为**真值**（用户体检本就会导出），此发现作为“未来全 JSON-free T”的已验证路径记录在案。
+- **计时挂在“路线对象”，不在“服务对象”**（关键澄清）：0x6 有两类——
+  - **路线对象**（`TTC Yonge–University`、`STM Orange Line`、`GO Kitchener Line`…）：带**站序 + 逐站计时模板**。
+  - **服务对象**（`TTC Line 1 Daily`、`STM Line 2 Daily`…，`stop_count=0`）：引用路线，承载班次/车队/时段（见 8.9）。
+  - 因此**地铁线的逐站时刻同样入档**——只是挂在其路线对象上（起初误在服务对象上找，才误判“地铁无模板”）。
+- **验证**：`模板值 ÷ 2` 与导出 run 的**逐站相对到/离时刻逐一相等**。真实存档 **32/37 条路线“整条模板逐站精确 + 循环时间 T 精确到秒”**（含大部分地铁线）：
+  - **地铁/通勤**：TTC Bloor–Danforth 60/60、STM Orange 60/60、STM Green 52/52、TTC Eglinton 46/46、REM A1/A4 36/36、OT Confederation 34/34、TTC Finch West 34/34、EXO Vaudreuil 34/34、STM Blue 22/22、TTC Sheppard 8/8、STM Yellow 4/4…
+  - **区域/城际**：全 8 条 VIA（20975/24099/28093/28485…）、GO Kitchener 24/24(10477)、Barrie 18/18(10033)、Milton 16/16(4849)、Richmond Hill 12/12(4089)、Lakeshore East 18/18(5343)、UPX 8/8(2477)…
+  - 其余 5 条 `??` 为**导出侧命名/变体对不上**（如 Lakeshore West 主线喂两个服务、EXO Weekday 导出仅 1 站），**非提取失败**。
+- **稳健化要点**（已修）：用**该路线自身第一处出现**（`read_lines` 取站序的同一区）+ **按已知站数限定走查步数**，杜绝“取最长走查”误穿入相邻线模板（此前 GO Barrie/Milton 等都误得 VIA 的 20975）。
+- **循环时间语义**：模板 T = **单程一趟运行时长**（行驶 + 停站）；而“每车发车间隔”还要**加折返/停留**（如 Kitchener 模板 T=10477 vs 按 8.10 的 h×N≈10800，差 ~323s 折返）。故 T 可直读，但与“班距用的循环时间”差一个折返量。
+- **已产品化**（本轮）：`toolkit_savereader.read_line_timetables(raw)` → 每条路线 `{id,name,color,cycle_seconds,stops:[{station_id,arrival,departure}]}`；后端命令 `line-timetable`；总览路线行显示**循环时间**；新增 Web 面板“**逐站时刻表直读**”。单测 `test_read_line_timetables_relative_times`。**只读**，不写存档。
 
 ### 8.5 完整 JSON-free 路网管线（本轮落地）
 - `toolkit_savereader.read_network(save)` → `{stations, lines(含 stops), signals, counts}`，真实存档实测 **166 站 / 37 线 / 2459 信号**。

@@ -154,6 +154,48 @@ def test_read_schedule_assignments(tmp_path):
     assert set(daily.shift_ids) == {"0x55", "0x7b"}
 
 
+def _timed_route_bytes(seq, name, color, stations_and_triples):
+    """Route with per-stop timing: after each station id, a
+    ``<idx=2k> 01 <leg*2> <arr*2> <dep*2>`` triple (times in half-seconds)."""
+    body = _id_varint(sr.TYPE_SCHEDULE, seq)
+    body += uvarint(len(name.encode())) + name.encode()
+    body += b"\x00"                       # empty code
+    body += b"\x00"                       # tag count 0
+    body += uvarint(color)
+    body += uvarint(len(stations_and_triples))
+    for k, (sseq, triple) in enumerate(stations_and_triples):
+        body += _id_varint(sr.TYPE_STATION, sseq)
+        if triple is not None:
+            idx, leg, arr, dep = triple
+            body += bytes([idx]) + b"\x01" + uvarint(leg) + uvarint(arr) + uvarint(dep)
+    body += b"\x00" * 4
+    return body
+
+
+def test_read_line_timetables_relative_times(tmp_path):
+    # 3 stops, dwell 20s: origin (0,20); stop2 leg100 -> (120,140); stop3 leg80 -> (220,240).
+    raw = b"\x11\x22\x33\x44" * 4
+    raw += _station_bytes(0x1, -79.380311, 43.644512, "Union")
+    raw += b"\x55" * 3
+    raw += _station_bytes(0x20002, -79.418689, 43.636070, "Exhibition")
+    raw += b"\x55" * 3
+    raw += _station_bytes(0x30001, -79.496128, 43.617216, "Mimico")
+    raw += b"\x66" * 5
+    raw += _timed_route_bytes(
+        0x5, "Timed Line", 0xFF0000A9,
+        [(0x1, None), (0x20002, (2, 200, 240, 280)), (0x30001, (4, 160, 440, 480))],
+    )
+    raw += b"\x00" * 16
+    save = _make_save(tmp_path, raw)
+    tts = sr.read_line_timetables(Zstd().decompress(
+        __import__("toolkit_binary").split_save(save)[1]))
+    t = next(x for x in tts if x.name == "Timed Line")
+    assert t.cycle_seconds == 240
+    assert [(s.arrival, s.departure) for s in t.stops] == [(0, 20), (120, 140), (220, 240)]
+    assert t.stops[0].station_id == hex((sr.TYPE_STATION << 48) | 0x1)
+    assert t.stops[1].departure - t.stops[1].arrival == 20  # dwell recovered
+
+
 def test_read_network(tmp_path):
     save = _make_save(tmp_path, _make_raw())
     net = sr.read_network(save, include_trains=True)

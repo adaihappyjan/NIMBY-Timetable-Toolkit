@@ -168,6 +168,24 @@ function headwayText(sec) {
   const m = sec / 60;
   return m >= 1 ? `${(Math.round(m * 10) / 10)} 分` : `${Math.round(sec)} 秒`;
 }
+function durText(sec) {
+  sec = Math.round(sec || 0);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+function renderLineTimetable(r) {
+  state.lineTimetable = r;
+  const wrap = $('#timetable-lines');
+  const routes = r.routes || [];
+  if (!routes.length) { wrap.innerHTML = '<div class="placeholder">未从存档读到任何带计时的线路模板。</div>'; return; }
+  wrap.innerHTML = routes.map((t, i) => {
+    const rows = t.stops.map(s => `<tr><td>${escapeHtml(s.station)}</td><td>${durText(s.arrival)}</td><td>${durText(s.departure)}</td><td>${s.dwell}s</td></tr>`).join('');
+    return `<details class="tt-line"${i === 0 ? ' open' : ''}><summary><i class="ov-swatch" style="background:${lineColor(t.color)}"></i><strong>${escapeHtml(t.name)}</strong><span>${t.stop_count} 站</span><span>运行 ${durText(t.cycle_seconds)}</span></summary>`
+      + `<div class="tt-scroll"><table class="tt-table"><thead><tr><th>车站</th><th>到达</th><th>发车</th><th>停站</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  }).join('');
+  toast(`逐站时刻直读完成：${routes.length} 条线路模板`);
+}
 function renderHeadwayPlan() {
   const targetMin = +$('#headway-target').value;
   const onlyService = $('#headway-only-service').checked;
@@ -890,7 +908,8 @@ function renderSaveOverview(r) {
   const routes = r.routes || [], containers = r.containers || [];
   const swatch = col => `<i class="ov-swatch" style="background:${lineColor(col)}"></i>`;
   const tbadge = x => x.train_count ? `<span>${x.train_count} 车</span>` : '';
-  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}<span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
+  const cbadge = x => x.cycle_seconds ? `<span title="单程运行时间（不含折返停留）">${durText(x.cycle_seconds)}</span>` : '';
+  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}${cbadge(x)}<span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
   $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}</div>`).join('') : '<div class="placeholder">无</div>';
   $('#overview-route-count').textContent = routes.length;
   $('#overview-container-count').textContent = containers.length;
@@ -1266,6 +1285,7 @@ async function pollOnce() {
       else if (s.action === 'find-reference') renderReference(s.result);
       else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
       else if (s.action === 'save-overview') { renderSaveOverview(s.result); }
+      else if (s.action === 'line-timetable') { renderLineTimetable(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
@@ -1376,6 +1396,7 @@ $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedInd
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
 $('#headway-calc')?.addEventListener('click', renderHeadwayPlan);
 $('#headway-export')?.addEventListener('click', exportHeadwayCsv);
+$('#timetable-read')?.addEventListener('click', () => { const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true); startTask('line-timetable', { save }); });
 $('#headway-calc')?.addEventListener('click', calcHeadwayPlan);
 $('#headway-export')?.addEventListener('click', exportHeadwayPlan);
 $('#save-select').addEventListener('change', refreshOutputNames);

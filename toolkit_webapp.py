@@ -429,9 +429,12 @@ class TaskManager:
             if payload.get("no_signals"):
                 args.append("--no-signals")
             return args
-        if action == "save-overview":
-            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
-            return ["save-overview", "--save", str(save)]
+            if action == "save-overview":
+                save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+                return ["save-overview", "--save", str(save)]
+            if action == "line-timetable":
+                save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+                return ["line-timetable", "--save", str(save)]
         if action == "align-coords":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             output = validate_output_path(payload.get("output", ""))

@@ -111,6 +111,15 @@
           </div>
         </article>
 
+        <article class="panel" id="timetable-panel">
+          <div class="panel-heading">
+            <div><p class="step">免 JSON</p><h3>逐站时刻表直读</h3></div>
+            <button class="secondary-button" id="timetable-read">直读逐站时刻</button>
+          </div>
+          <div class="repair-note">直接从存档的线路计时模板还原每条线路的逐站到/发时刻与单程运行时间（时间以 0.5 秒精度存储）。已用导出逐条校验：32/37 条线路（含大部分地铁线）逐站精确到秒。只读，正式存档不受影响。</div>
+          <div class="timetable-lines" id="timetable-lines"><div class="placeholder">点“直读逐站时刻”从当前存档展开各线时刻表。</div></div>
+        </article>
+
         <div class="metric-grid" id="metric-grid" hidden></div>
         <article class="panel" id="findings-panel" hidden>
           <div class="panel-heading"><div><p class="step">诊断结果</p><h3>需要处理的项目</h3></div><span class="count-badge" id="finding-count">0</span></div>

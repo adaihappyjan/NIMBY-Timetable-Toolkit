@@ -1276,9 +1276,11 @@ def command_save_overview(args: argparse.Namespace) -> dict:
     signals = savereader.read_signals_from_raw(raw)
     trains = savereader.read_trains_from_raw(raw)
     assignments = savereader.read_schedule_assignments(raw)
+    timetables = savereader.read_line_timetables(raw)
     emit_progress("overview", 2, 3, "正在归类线路与时刻表…")
 
     assign_by_id = {a.schedule_id: a for a in assignments}
+    cycle_by_id = {t.id: t.cycle_seconds for t in timetables if t.cycle_seconds}
     routes = [s for s in schedules if s.stop_count >= 2]
     containers = [s for s in schedules if s.stop_count < 2]
     named_stations = sum(1 for s in stations if not s.name.startswith("车站 "))
@@ -1294,6 +1296,7 @@ def command_save_overview(args: argparse.Namespace) -> dict:
         }
         if with_stops:
             row["stop_count"] = s.stop_count
+            row["cycle_seconds"] = cycle_by_id.get(s.id, 0)
         return row
 
     route_rows = sorted(
@@ -1327,6 +1330,50 @@ def command_save_overview(args: argparse.Namespace) -> dict:
         },
         "routes": route_rows,
         "containers": container_rows,
+    }
+
+
+def command_line_timetable(args: argparse.Namespace) -> dict:
+    """JSON-free per-line timetable: ordered stops + relative arr/dep + cycle time.
+
+    Read straight from each route's binary timing template (times stored in
+    half-second units). Validated exact-to-the-second on 32/37 routes (regional
+    + metro) against real exports. Read-only.
+    """
+    import toolkit_savereader as savereader
+    from toolkit_binary import Zstd, split_save
+
+    path = Path(args.save)
+    emit_progress("timetable", 1, 3, "正在解压并直读时刻模板…")
+    _header, frame, _offset = split_save(path)
+    raw = Zstd().decompress(frame)
+    stations = {s.id: s.name for s in savereader.read_stations_from_raw(raw)}
+    emit_progress("timetable", 2, 3, "正在展开逐站时刻…")
+    timetables = savereader.read_line_timetables(raw)
+    rows = []
+    for t in timetables:
+        stops = [
+            {
+                "station_id": s.station_id,
+                "station": stations.get(s.station_id, s.station_id),
+                "arrival": s.arrival,
+                "departure": s.departure,
+                "dwell": s.departure - s.arrival,
+            }
+            for s in t.stops
+        ]
+        rows.append({
+            "id": t.id, "name": t.name, "color": t.color,
+            "cycle_seconds": t.cycle_seconds, "stop_count": len(t.stops),
+            "stops": stops,
+        })
+    rows.sort(key=lambda r: (-r["stop_count"], r["name"].casefold()))
+    emit_progress("timetable", 3, 3, "逐站时刻就绪")
+    return {
+        "action": "line-timetable",
+        "save": str(path),
+        "route_count": len(rows),
+        "routes": rows,
     }
 
 
@@ -2829,6 +2876,8 @@ def build_parser() -> argparse.ArgumentParser:
     network_read.add_argument("--no-signals", action="store_true")
     save_overview = sub.add_parser("save-overview")
     save_overview.add_argument("--save", type=Path, required=True)
+    line_timetable = sub.add_parser("line-timetable")
+    line_timetable.add_argument("--save", type=Path, required=True)
     align_coords = sub.add_parser("align-coords")
     align_coords.add_argument("--save", type=Path, required=True)
     align_coords.add_argument("--output", type=Path, required=True)
@@ -2876,6 +2925,8 @@ def main() -> None:
             result = command_map_data(args)
         elif args.command == "save-overview":
             result = command_save_overview(args)
+        elif args.command == "line-timetable":
+            result = command_line_timetable(args)
         elif args.command == "network-read":
             result = command_network_read(args)
         elif args.command == "align-coords":
