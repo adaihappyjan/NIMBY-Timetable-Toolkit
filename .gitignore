@@ -23,6 +23,10 @@ downloads/
 *.manifest.json
 Das Rails*.json
 
+# Local save backups and binary-format research artifacts (never commit)
+_backups/
+_research/
+
 # OS / editor
 Thumbs.db
 .DS_Store
