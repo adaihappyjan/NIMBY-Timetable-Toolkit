@@ -643,6 +643,14 @@
     <button id="cancel-task">取消</button>
   </div>
   <div class="toast" id="toast" hidden></div>
+
+  <div class="cmdk" id="cmdk" hidden>
+    <div class="cmdk-panel" role="dialog" aria-label="命令面板">
+      <div class="cmdk-search"><span>⌕</span><input type="text" id="cmdk-input" placeholder="跳转到功能… (↑↓ 选择 · Enter 打开 · Esc 关闭)" aria-label="命令搜索"></div>
+      <div class="cmdk-list" id="cmdk-list"></div>
+      <div class="cmdk-foot"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> 呼出 · <kbd>Alt</kbd>+<kbd>1…9</kbd> 快速切换</div>
+    </div>
+  </div>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -441,3 +441,22 @@ body { background:
 .pair-route i { background:#3a4750; } .pair-route i:after { color:#6f818c; }
 /* dashed placeholders inside maps */
 .realnet-map { background: var(--surface-2); }
+
+/* ---- Command palette (Ctrl/Cmd+K) ---- */
+.cmdk[hidden] { display:none !important; }
+.cmdk { position:fixed; inset:0; z-index:60; background:rgba(3,8,13,.6); backdrop-filter:blur(3px); display:flex; align-items:flex-start; justify-content:center; padding-top:12vh; }
+.cmdk-panel { width:min(600px,92vw); background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:0 30px 80px rgba(0,0,0,.6); overflow:hidden; animation:viewIn .16s ease both; }
+.cmdk-search { display:flex; align-items:center; gap:10px; padding:15px 18px; border-bottom:1px solid var(--line); }
+.cmdk-search span { color:var(--aqua); font-size:18px; }
+.cmdk-search input { flex:1; border:0; background:transparent; color:var(--ink); font-size:15px; outline:none; }
+.cmdk-list { max-height:52vh; overflow:auto; padding:8px; display:flex; flex-direction:column; gap:3px; }
+.cmdk-item { display:flex; align-items:center; gap:12px; width:100%; text-align:left; border:0; background:transparent; color:var(--ink); padding:11px 13px; border-radius:10px; }
+.cmdk-item .cmdk-ic { width:24px; text-align:center; color:var(--muted); font-size:17px; }
+.cmdk-item .cmdk-tt { font-weight:600; }
+.cmdk-item small { color:var(--muted); font-size:11px; letter-spacing:.1em; }
+.cmdk-item kbd { margin-left:auto; }
+.cmdk-item.on, .cmdk-item:hover { background:var(--hover); }
+.cmdk-item.on .cmdk-ic { color:var(--aqua); }
+.cmdk-empty { color:var(--muted); text-align:center; padding:26px; }
+.cmdk-foot { border-top:1px solid var(--line); padding:9px 16px; font-size:11px; color:var(--muted); }
+kbd { background:var(--surface-2); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 6px; font:11px ui-monospace,Consolas,monospace; color:var(--ink); }

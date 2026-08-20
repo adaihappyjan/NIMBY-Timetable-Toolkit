@@ -1479,6 +1479,45 @@ function binderWriteGarage() {
 }
 
 $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(b) switchView(b.dataset.view); });
+
+/* ---- Command palette (Ctrl/Cmd+K) + keyboard view switching ---- */
+const CMDK = { open:false, items:[], filtered:[], cursor:0 };
+function cmdkBuild() {
+  const iconOf = {}; $$('.nav-item').forEach(b => { iconOf[b.dataset.view] = (b.querySelector('span')?.textContent || '›'); });
+  CMDK.items = Object.keys(viewMeta).map((k, i) => ({ view:k, icon:iconOf[k]||'›', title:viewMeta[k][1], sub:viewMeta[k][0], idx:i+1 }));
+}
+function cmdkRender() {
+  const list = $('#cmdk-list');
+  list.innerHTML = CMDK.filtered.length ? CMDK.filtered.map((it, i) =>
+    `<button class="cmdk-item${i===CMDK.cursor?' on':''}" data-view="${it.view}"><span class="cmdk-ic">${it.icon}</span><span class="cmdk-tt">${escapeHtml(it.title)}</span><small>${escapeHtml(it.sub)}</small>${it.idx<=9?`<kbd>Alt+${it.idx}</kbd>`:''}</button>`
+  ).join('') : '<div class="cmdk-empty">没有匹配的功能</div>';
+}
+function cmdkFilter(q) {
+  q = (q||'').trim().toLowerCase();
+  CMDK.filtered = !q ? CMDK.items.slice() : CMDK.items.filter(it => (it.title+it.sub+it.view).toLowerCase().includes(q));
+  CMDK.cursor = 0; cmdkRender();
+}
+function cmdkOpen() { if(!CMDK.items.length) cmdkBuild(); CMDK.open=true; $('#cmdk').hidden=false; const inp=$('#cmdk-input'); inp.value=''; cmdkFilter(''); setTimeout(()=>inp.focus(),0); }
+function cmdkClose() { CMDK.open=false; $('#cmdk').hidden=true; }
+function cmdkChoose(view) { if(view){ switchView(view); document.querySelector(`.nav-item[data-view="${view}"]`)?.scrollIntoView({block:'nearest'}); } cmdkClose(); }
+$('#cmdk-input')?.addEventListener('input', e => cmdkFilter(e.target.value));
+$('#cmdk-list')?.addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(b) cmdkChoose(b.dataset.view); });
+$('#cmdk')?.addEventListener('mousedown', e => { if(e.target.id==='cmdk') cmdkClose(); });
+document.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey||e.metaKey) && k==='k') { e.preventDefault(); CMDK.open?cmdkClose():cmdkOpen(); return; }
+  if (CMDK.open) {
+    if (k==='escape') { e.preventDefault(); cmdkClose(); }
+    else if (k==='arrowdown') { e.preventDefault(); CMDK.cursor=Math.min(CMDK.cursor+1,CMDK.filtered.length-1); cmdkRender(); }
+    else if (k==='arrowup') { e.preventDefault(); CMDK.cursor=Math.max(CMDK.cursor-1,0); cmdkRender(); }
+    else if (k==='enter') { e.preventDefault(); cmdkChoose(CMDK.filtered[CMDK.cursor]?.view); }
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
+    const keys = Object.keys(viewMeta); const target = keys[parseInt(e.key,10)-1];
+    if (target) { e.preventDefault(); switchView(target); }
+  }
+});
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
