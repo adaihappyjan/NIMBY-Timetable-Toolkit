@@ -24,6 +24,20 @@ def _station_bytes(station_id: int, lon: float, lat: float, name: str) -> bytes:
     return idv + fields + coords + uvarint(len(nb)) + nb + b"\x00\x00\x00"
 
 
+def _station_bytes_noname(station_id: int, lon: float, lat: float) -> bytes:
+    """A mod-imported station: [id][4B meta][f64 x][f64 y][platform block] — no name.
+
+    The id sits exactly 12 bytes before the coordinate pair, matching real saves.
+    """
+    x, y = ce.lonlat_to_mercator(lon, lat)
+    idv = uvarint(station_id * 2)
+    assert len(idv) == 8, "test station id must encode to 8 bytes"
+    fields = b"\xc0\xc3\x02\x01"
+    coords = struct.pack("<dd", x, y)
+    platform = b"\x00\x01\x00\x00\x04" + uvarint(0x1000000c00001 * 2) + b"\x00\x00\x00\x00"
+    return idv + fields + coords + platform
+
+
 def _make_raw() -> bytes:
     body = b"\x11\x22\x33\x44" * 8  # some leading noise
     body += _station_bytes(0x2000000000001, -79.380311, 43.644512, "Toronto Union Station")
@@ -92,6 +106,28 @@ def test_set_coordinates_only_touches_target(tmp_path):
     assert abs(edited["Bloor GO"].lat - new_lat) < 1e-6
     # other station intact
     assert abs(edited["Toronto Union Station"].lon - (-79.380311)) < 1e-5
+
+
+def test_reads_nameless_mod_station_by_id(tmp_path):
+    # Mod-imported stations store no inline name; they must still be enumerated
+    # (id + coords) and get a stable fallback label.
+    raw = b"\x11\x22\x33\x44" * 8
+    raw += _station_bytes(0x2000000000001, -79.380311, 43.644512, "Toronto Union Station")
+    raw += b"\x55\x66" * 4
+    raw += _station_bytes_noname(0x2000000540001, -75.6100, 45.4200)
+    raw += b"\x00" * 16
+    save = _make_save(tmp_path, raw)
+    stations = ce.read_stations(save)
+    by_id = {s.id: s for s in stations}
+    assert hex(0x2000000540001) in by_id, "nameless mod station must still be read"
+    modstn = by_id[hex(0x2000000540001)]
+    assert modstn.name.startswith("车站 "), "nameless station should get a fallback label"
+    assert abs(modstn.lon - (-75.6100)) < 1e-5
+    assert abs(modstn.lat - 45.4200) < 1e-5
+    # and it can be coordinate-aligned by id even without a name
+    out = tmp_path / "aligned.nimbyrails5"
+    manifest = ce.set_station_coordinates(save, out, {hex(0x2000000540001): (-73.5, 45.5)})
+    assert manifest["changed_count"] == 1
 
 
 def test_refuses_unknown_station(tmp_path):

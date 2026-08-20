@@ -97,7 +97,14 @@ class StationRecord:
 
 
 def read_stations_from_raw(raw: bytes) -> list[StationRecord]:
-    """Enumerate every station definition (id + name + coords) in the payload."""
+    """Enumerate every station (id + coords, plus name when stored) in the payload.
+
+    A station record is ``[id(0x2)][4B meta][f64 x][f64 y]…``; the id sits exactly
+    12 bytes before the coordinate pair. Stations the player named store the name
+    inline right after the coordinates; stations that come from a real-network mod
+    keep only id + coords + platform tracks (their display name lives in the mod, not
+    the save), so we fall back to a stable id-based label for those.
+    """
     out: dict[int, StationRecord] = {}
     n = len(raw)
     i = 0
@@ -106,17 +113,16 @@ def read_stations_from_raw(raw: bytes) -> list[StationRecord]:
             x = struct.unpack_from("<d", raw, i)[0]
             y = struct.unpack_from("<d", raw, i + 8)[0]
             if -2.1e7 < x < 2.1e7 and 1.0e5 < y < 2.0e7 and abs(x) > 1.0e4:
-                nm = _read_name(raw, i + 16)
-                if nm:
-                    name, _end = nm
+                ident = _station_id_before(raw, i)
+                if ident is not None and ident not in out:
                     lon, lat = mercator_to_lonlat(x, y)
                     if -180 <= lon <= 180 and -85 <= lat <= 85:
-                        ident = _station_id_before(raw, i)
-                        if ident is not None and ident not in out:
-                            out[ident] = StationRecord(
-                                id=hex(ident), name=name, lon=lon, lat=lat, coord_off=i
-                            )
-                            i += 24
+                        nm = _read_name(raw, i + 16)
+                        name = nm[0] if nm else f"车站 {hex(ident)}"
+                        out[ident] = StationRecord(
+                            id=hex(ident), name=name, lon=lon, lat=lat, coord_off=i
+                        )
+                        i += 24
         i += 1
     return sorted(out.values(), key=lambda s: s.coord_off)
 
