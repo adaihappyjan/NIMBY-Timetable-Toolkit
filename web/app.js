@@ -964,6 +964,7 @@ function renderSaveOverview(r) {
   const mg = $('#overview-metrics');
   mg.innerHTML = metrics.map(x => `<div class="metric-card"><small>${x[0]}</small><b>${(x[1] ?? 0).toLocaleString()}</b><em>${x[2]}</em></div>`).join('');
   mg.hidden = false;
+  renderOverviewHealth(r.health, c);
   const ver = (r.save_format_version_hint || []).join('.');
   const when = r.modified_utc ? new Date(r.modified_utc).toLocaleString() : '';
   $('#overview-meta').innerHTML = `<span>存档：<strong>${escapeHtml(r.save_name || '')}</strong></span> · <span>${formatBytes(r.file_size || 0)}</span>${ver ? ` · <span>格式标记 ${escapeHtml(ver)}</span>` : ''}${when ? ` · <span>修改于 ${escapeHtml(when)}</span>` : ''}`;
@@ -971,12 +972,34 @@ function renderSaveOverview(r) {
   const swatch = col => `<i class="ov-swatch" style="background:${lineColor(col)}"></i>`;
   const tbadge = x => x.train_count ? `<span>${x.train_count} 车</span>` : '';
   const cbadge = x => x.cycle_seconds ? `<span title="单程运行时间（不含折返停留）">${durText(x.cycle_seconds)}</span>` : '';
-  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}${cbadge(x)}<span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
-  $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${tbadge(x)}</div>`).join('') : '<div class="placeholder">无</div>';
+  const sbadge = x => x.is_service ? `<span class="ov-svc" title="经 route↔service 链接判定为运营时刻表，服务 ${x.served_lines} 条线路">运营·${x.served_lines}线</span>` : '';
+  $('#overview-routes').innerHTML = routes.length ? routes.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${sbadge(x)}${tbadge(x)}${cbadge(x)}<span>${x.stop_count} 站</span></div>`).join('') : '<div class="placeholder">无</div>';
+  $('#overview-containers').innerHTML = containers.length ? containers.map(x => `<div class="ov-row">${swatch(x.color)}<strong>${escapeHtml(x.name)}</strong>${sbadge(x)}${tbadge(x)}</div>`).join('') : '<div class="placeholder">无</div>';
   $('#overview-route-count').textContent = routes.length;
   $('#overview-container-count').textContent = containers.length;
   $('#overview-lists').hidden = false;
   toast(`结构直读完成：${c.stations} 站 / ${c.routes} 线 / ${c.schedules} 时刻表 / ${c.trains} 车 / ${c.signals} 信号`);
+}
+function renderOverviewHealth(h, c) {
+  const box = $('#overview-health'); if (!box) return;
+  if (!h) { box.hidden = true; return; }
+  const sc = h.health_score ?? 100;
+  const cls = sc >= 90 ? 'good' : sc >= 70 ? 'warn' : 'bad';
+  const sev = h.severity_counts || {};
+  const findings = h.findings || [];
+  const items = findings.length
+    ? findings.map(f => `<div class="ovh-item ovh-${f.severity}"><span class="ovh-dot"></span><div><strong>${escapeHtml(f.title)}</strong><small>${escapeHtml(f.detail || '')}</small></div></div>`).join('')
+    : '<div class="ovh-item ovh-ok"><span class="ovh-dot"></span><div><strong>结构无异常</strong><small>存档直读体检未发现可靠可判定的问题。</small></div></div>';
+  box.innerHTML = `<div class="ovh-head">
+      <div class="health-ring ovh-ring ${cls}" style="--score:${sc}"><div><b>${sc}</b><small>/ 100</small></div></div>
+      <div class="ovh-meta">
+        <strong>存档直读体检 · 免 JSON</strong>
+        <p>${c.active_schedules ?? 0} 张时刻表运营中（经 route↔service 链接解析），服务 ${h.schedules_with_trains ?? 0} 条 · 严重 ${sev.critical || 0} · 警告 ${sev.warning || 0} · 提示 ${sev.info || 0}</p>
+        <em>${escapeHtml(h.note || '')}</em>
+      </div>
+    </div>
+    <div class="ovh-list">${items}</div>`;
+  box.hidden = false;
 }
 function onNetworkRead(result) {
   state.network = { lines: result.lines || [], stations: result.stations || {} };

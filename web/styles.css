@@ -265,7 +265,25 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .ov-row strong { font-weight:600; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ov-row span { font-size:11px; color:var(--muted); flex-shrink:0; }
 .ov-swatch { width:12px; height:12px; border-radius:3px; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.08) inset; }
+.ov-svc { background:#e6f6ef; color:#0f7a4f; border:1px solid #bfe6d3; border-radius:6px; padding:1px 6px; font-size:10px !important; font-weight:600; }
 @media (max-width:860px){ .overview-lists { grid-template-columns:1fr; } }
+/* JSON-free 存档直读体检 */
+.overview-health { margin:14px 0 4px; border:1px solid var(--line); border-radius:14px; padding:14px 16px; background:linear-gradient(180deg,#fbfdfd,#f3f8f8); }
+.ovh-head { display:flex; align-items:center; gap:18px; }
+.health-ring.ovh-ring { width:84px; height:84px; }
+.health-ring.ovh-ring b { font-size:22px; }
+.health-ring.ovh-ring.good { background:conic-gradient(#1f9d63 calc(var(--score)*1%), #e7eeee 0); }
+.health-ring.ovh-ring.warn { background:conic-gradient(#d68a1e calc(var(--score)*1%), #e7eeee 0); }
+.health-ring.ovh-ring.bad { background:conic-gradient(#c0392b calc(var(--score)*1%), #e7eeee 0); }
+.ovh-meta strong { display:block; font-size:15px; color:#243138; }
+.ovh-meta p { margin:4px 0; font-size:12px; color:var(--muted); line-height:1.5; }
+.ovh-meta em { font-size:11px; color:#8a99a0; font-style:normal; }
+.ovh-list { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+.ovh-item { display:flex; gap:10px; align-items:flex-start; padding:7px 10px; border-radius:9px; background:#fff; border:1px solid var(--line); }
+.ovh-item small { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+.ovh-dot { width:9px; height:9px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+.ovh-critical .ovh-dot { background:#c0392b; } .ovh-warning .ovh-dot { background:#d68a1e; }
+.ovh-info .ovh-dot { background:#3b82c4; } .ovh-ok .ovh-dot { background:#1f9d63; }
 .headway-controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin:12px 0; }
 .headway-controls label { font-size:13px; color:#41525b; display:inline-flex; align-items:center; gap:6px; }
 .headway-controls input[type=number] { width:80px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; }

@@ -85,6 +85,7 @@ def _make_raw() -> bytes:
     raw += _line_bytes(0x1, "Lakeshore West", "GO LW", 0xFF0000A9, [0x1, 0x20002, 0x30001])
     raw += b"\x66" * 5
     raw += _schedule_container_bytes(0x20001, "Lakeshore West Daily", 0xFF0000A9)
+    raw += b"\x02" + _id_varint(sr.TYPE_LINE, 0x30001)  # served line marker + Line 0x4 id
     raw += b"\x11\x22"
     raw += _assignment_tail([0x55, 0x7b], [0x2, 0x10002])
     raw += b"\x77" * 5
@@ -152,6 +153,8 @@ def test_read_schedule_assignments(tmp_path):
         hex((sr.TYPE_TRAIN << 48) | 0x2), hex((sr.TYPE_TRAIN << 48) | 0x10002)
     }
     assert set(daily.shift_ids) == {"0x55", "0x7b"}
+    # route<->service linkage: the served Line(0x4) id is recovered from the block
+    assert daily.line_ids == [hex((sr.TYPE_LINE << 48) | 0x30001)]
 
 
 def _timed_route_bytes(seq, name, color, stations_and_triples):

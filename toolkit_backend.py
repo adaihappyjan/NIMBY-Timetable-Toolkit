@@ -1348,6 +1348,8 @@ def command_save_overview(args: argparse.Namespace) -> dict:
             "id": s.id, "name": s.name, "color": s.color,
             "train_count": a.count if a else 0,
             "shift_count": a.count if a else 0,
+            "served_lines": len(a.line_ids) if a else 0,
+            "is_service": bool(a and a.line_ids),
         }
         if with_stops:
             row["stop_count"] = s.stop_count
@@ -1363,8 +1365,16 @@ def command_save_overview(args: argparse.Namespace) -> dict:
         key=lambda r: (-r["train_count"], r["name"].casefold()),
     )
 
+    emit_progress("overview", 3, 3, "正在做存档直读体检…")
+    idle_trains = max(0, len(trains) - len(assigned_train_ids))
+    schedules_with_trains = sum(
+        1 for r in (route_rows + container_rows) if r["train_count"] > 0
+    )
+    health = _overview_health(
+        route_rows, container_rows, idle_trains, len(trains), schedules_with_trains
+    )
+
     stat = path.stat()
-    emit_progress("overview", 3, 3, "结构总览就绪")
     return {
         "action": "save-overview",
         "save": str(path),
@@ -1381,11 +1391,90 @@ def command_save_overview(args: argparse.Namespace) -> dict:
             "signals": len(signals),
             "trains": len(trains),
             "assigned_trains": len(assigned_train_ids),
+            "idle_trains": idle_trains,
             "total_shifts": total_shifts,
             "tags": len(tags),
         },
         "routes": route_rows,
         "containers": container_rows,
+        "health": health,
+    }
+
+
+_DEPOT_RE = re.compile(r"depot|yard|garage|车库|车厂|停车场", re.IGNORECASE)
+
+
+def _overview_health(
+    route_rows: list[dict],
+    container_rows: list[dict],
+    idle_trains: int,
+    train_total: int,
+    schedules_with_trains: int,
+) -> dict:
+    """JSON-free health check: score + advisories from the binary alone.
+
+    Deliberately conservative: it only flags conditions that are *unambiguous*
+    without an export. The route↔service↔depot semantics that the JSON-based deep
+    check relies on (e.g. "this line has no trains") cannot be reconstructed
+    reliably from the binary — GO regional lines carry trains on the route object
+    while metros split route/service — so those are NOT asserted here. What we can
+    trust: duplicate schedule names, idle rolling stock, routes whose timing
+    template failed to read, and genuinely empty (non-depot) schedules.
+    """
+    findings: list[dict] = []
+
+    names = [r["name"] for r in route_rows + container_rows]
+    seen: dict[str, int] = {}
+    for nm in names:
+        seen[nm] = seen.get(nm, 0) + 1
+    for nm, cnt in seen.items():
+        if cnt > 1 and nm.strip():
+            findings.append({
+                "code": "DUP_SCHEDULE_NAME", "severity": "warning", "schedule": nm,
+                "title": f"重名时刻表：{nm}（×{cnt}）",
+                "detail": "存在同名时刻表，可能是误复制；请确认是否有意为之。",
+            })
+
+    if idle_trains > 0:
+        sev = "warning" if train_total and idle_trains > train_total * 0.05 else "info"
+        findings.append({
+            "code": "IDLE_TRAINS", "severity": sev, "schedule": "",
+            "title": f"闲置列车 {idle_trains} 辆",
+            "detail": f"共 {train_total} 辆列车，其中 {idle_trains} 辆未被任何时刻表引用。",
+        })
+
+    for r in route_rows:
+        if not r.get("cycle_seconds"):
+            findings.append({
+                "code": "ROUTE_NO_CYCLE", "severity": "info", "schedule": r["name"],
+                "title": f"未读到循环时间：{r['name']}",
+                "detail": "该线路的逐站时刻模板未能直读（可能为退化/异常模板或非常规存储）。",
+            })
+
+    for r in container_rows:
+        if r["train_count"] == 0 and not _DEPOT_RE.search(r["name"] or ""):
+            findings.append({
+                "code": "EMPTY_SCHEDULE", "severity": "info", "schedule": r["name"],
+                "title": f"空时刻表：{r['name']}",
+                "detail": "该时刻表未分配列车，且看起来不是车库/车厂；可能是待填充的模板。",
+            })
+
+    severity_counts = {
+        sev: sum(f["severity"] == sev for f in findings)
+        for sev in ("critical", "warning", "info")
+    }
+    # JSON-free health can't assert critical faults; score reflects warnings only.
+    health_score = max(0, 100 - severity_counts["warning"] * 5)
+    findings.sort(key=lambda f: {"critical": 0, "warning": 1, "info": 2}[f["severity"]])
+    return {
+        "health_score": health_score,
+        "severity_counts": severity_counts,
+        "findings": findings,
+        "schedules_with_trains": schedules_with_trains,
+        "note": (
+            "存档直读体检：仅覆盖可从二进制可靠判定的结构/运营项；"
+            "线路“是否缺车/空跑”等需 route↔service 语义，仍需导出 JSON 做深度核对。"
+        ),
     }
 
 

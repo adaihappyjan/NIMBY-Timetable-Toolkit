@@ -462,6 +462,7 @@ class AssignmentRecord:
     train_ids: list[str]
     shift_ids: list[str]
     count: int
+    line_ids: list[str] = field(default_factory=list)  # Line(0x4) ids this schedule serves
 
 
 def _train_id_runs(raw: bytes):
@@ -510,13 +511,38 @@ def _shift_list_before(raw: bytes, count_pos: int, n: int):
     return None
 
 
+def _line_ids_in(raw: bytes, start: int, end: int) -> list[str]:
+    """Collect Line(0x4) ids appearing in ``[start, end)`` (a schedule config block).
+
+    A service schedule's config block references the physical Line(s) it operates
+    via ``02 <line_id 0x4>`` markers (right after name/color, before the shift/train
+    tail). Validated 34/35 exact + 1 superset vs export run.line_id sets.
+    """
+    out: list[str] = []
+    seen: set[int] = set()
+    j = start
+    while j < end - 8:
+        if raw[j + 7] == TYPE_LINE:
+            r = _is_id(raw, j, {TYPE_LINE})
+            if r:
+                if r[0] not in seen:
+                    seen.add(r[0])
+                    out.append(hex(r[0]))
+                j = r[1]
+                continue
+        j += 1
+    return out
+
+
 def read_schedule_assignments(raw: bytes) -> list[AssignmentRecord]:
-    """Reconstruct schedule -> (assigned trains, shifts) from the config region.
+    """Reconstruct schedule -> (assigned trains, shifts, served lines) from config.
 
     Each schedule config block ends with a self-validating pair
     ``[N][N shift ids][N][N train ids]``. Train ids and shift ids are recovered as
     sets/counts (validated 35/35 vs export); the 1:1 train<->shift pairing is stored
-    by creation order elsewhere and is not reconstructed here.
+    by creation order elsewhere and is not reconstructed here. The block also
+    references the physical Line(0x4) ids the schedule serves (``line_ids``),
+    validated 34/35 exact vs export run.line_id sets.
     """
     # All 0x6 id+name positions WITHOUT dedup: a schedule is defined twice (route
     # region and config region), and each train run must attach to the config-region
@@ -560,6 +586,7 @@ def read_schedule_assignments(raw: bytes) -> list[AssignmentRecord]:
                 train_ids=[hex(t) for t in train_ids],
                 shift_ids=[hex(s) for s in shifts],
                 count=length,
+                line_ids=_line_ids_in(raw, head_pos[idx], run_start),
             )
     return list(best.values())
 
