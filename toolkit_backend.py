@@ -1299,6 +1299,7 @@ def command_network_read(args: argparse.Namespace) -> dict:
         "station_count": len(stations),
         "signal_count": len(net["signals"]),
         "train_count": len(net.get("trains", [])),
+        "schedule_count": net["counts"].get("schedules", len(lines)),
     }
 
 

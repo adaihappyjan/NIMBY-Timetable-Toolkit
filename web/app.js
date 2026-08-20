@@ -789,11 +789,12 @@ function onNetworkRead(result) {
   state.savereaderTrains = result.trains || [];
   const el = $('#realnet-read-count');
   const trainTxt = c.train_count != null ? ` · ${c.train_count} 车` : '';
-  if (el) el.textContent = `直读：${c.line_count} 线 · ${c.station_count} 站 · ${c.signal_count} 信号${trainTxt}`;
+  const schedTxt = c.schedule_count != null ? ` · ${c.schedule_count} 时刻表` : '';
+  if (el) el.textContent = `直读：${c.line_count} 线 · ${c.station_count} 站 · ${c.signal_count} 信号${trainTxt}${schedTxt}`;
   renderBinderLines();
   populateAlignStations();
   if (REALNET.ready) { realnetDrawGame(); realnetDrawSignals(); }
-  toast(`已从存档直读：${c.line_count} 线 / ${c.station_count} 站 / ${c.signal_count} 信号${c.train_count != null ? ' / ' + c.train_count + ' 车' : ''}`);
+  toast(`已从存档直读：${c.line_count} 线 / ${c.station_count} 站 / ${c.signal_count} 信号${c.train_count != null ? ' / ' + c.train_count + ' 车' : ''}${c.schedule_count != null ? ' / ' + c.schedule_count + ' 时刻表' : ''}`);
 }
 function populateAlignStations() {
   const sel = $('#align-station'); if (!sel) return;

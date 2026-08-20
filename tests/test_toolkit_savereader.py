@@ -37,6 +37,17 @@ def _line_bytes(seq: int, name: str, code: str, color: int, station_seqs: list[i
     return body
 
 
+def _schedule_container_bytes(seq: int, name: str, color: int) -> bytes:
+    """Variant-B schedule: [id][extra uvarint field][namelen][name]…, no stops."""
+    body = _id_varint(sr.TYPE_SCHEDULE, seq)
+    body += uvarint(41890)                 # extra field between id and name
+    body += uvarint(len(name.encode())) + name.encode()
+    body += b"\x00"                        # empty second string
+    body += uvarint(color)
+    body += b"\x00" * 6
+    return body
+
+
 def _signal_bytes(seq: int, lon: float, lat: float) -> bytes:
     x, y = ce.lonlat_to_mercator(lon, lat)
     return _id_varint(sr.TYPE_SIGNAL, seq) + b"\x3a\x00\x00" + struct.pack("<dd", x, y)
@@ -64,6 +75,8 @@ def _make_raw() -> bytes:
     raw += _station_bytes(0x30001, -79.496128, 43.617216, "Mimico")
     raw += b"\x66" * 5
     raw += _line_bytes(0x1, "Lakeshore West", "GO LW", 0xFF0000A9, [0x1, 0x20002, 0x30001])
+    raw += b"\x66" * 5
+    raw += _schedule_container_bytes(0x20001, "Lakeshore West Daily", 0xFF0000A9)
     raw += b"\x77" * 5
     raw += _signal_bytes(0x1, -79.3801, 43.6446)
     raw += b"\x88" * 4
@@ -103,6 +116,20 @@ def test_read_trains(tmp_path):
     assert names == {"GO 188", "REM 0045"}
 
 
+def test_read_schedules_both_variants(tmp_path):
+    save = _make_save(tmp_path, _make_raw())
+    raw = Zstd().decompress(__import__("toolkit_binary").split_save(save)[1])
+    scheds = sr.read_schedules_from_raw(raw)
+    names = {s.name for s in scheds}
+    # a route-bearing schedule (variant A) AND a container schedule (variant B)
+    assert "Lakeshore West" in names
+    assert "Lakeshore West Daily" in names
+    daily = next(s for s in scheds if s.name == "Lakeshore West Daily")
+    assert daily.stop_count == 0
+    route = next(s for s in scheds if s.name == "Lakeshore West")
+    assert route.stop_count == 3
+
+
 def test_read_network(tmp_path):
     save = _make_save(tmp_path, _make_raw())
     net = sr.read_network(save, include_trains=True)
@@ -110,6 +137,7 @@ def test_read_network(tmp_path):
     assert net["counts"]["lines"] == 1
     assert net["counts"]["signals"] == 1
     assert net["counts"]["trains"] == 2
+    assert net["counts"]["schedules"] == 2  # route + container
     line = net["lines"][0]
     assert len(line["stops"]) == 3
     assert line["name"] == "Lakeshore West"

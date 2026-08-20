@@ -68,6 +68,11 @@ def _is_id(raw: bytes, i: int, nibbles: set[int]):
     if (val & 1) or (nxt - i < 7):
         return None
     ident = val >> 1
+    # Real object ids are laid out type<<48 | major_index<<16 | small_subindex.
+    # The sub-index (low 16 bits) is always tiny in practice (<=0x8 across every
+    # class in real saves); a large value means we matched noise, not a real id.
+    if (ident & 0xFFFF) > 0x100:
+        return None
     if (ident >> 48) in nibbles and (ident & ((1 << 48) - 1)) != 0:
         return ident, nxt
     return None
@@ -107,16 +112,45 @@ class TrainRecord:
     name: str
 
 
+@dataclass
+class ScheduleRecord:
+    id: str
+    name: str
+    color: str | None
+    stop_count: int  # >=2 means it also carries a drawable route template
+
+
+def _name_after_id(raw: bytes, end: int, skip: int = 2):
+    """Read the record name, tolerating a few optional uvarint fields after the id.
+
+    Two record variants exist: ``[id][namelen][name]`` (most objects) and
+    ``[id][extra uvarint field][namelen][name]`` (e.g. some schedules). Try the
+    name directly first, then skip up to ``skip`` leading uvarint fields.
+    """
+    p = end
+    for _ in range(skip + 1):
+        nm = _read_name(raw, p, mn=2, mx=80)
+        if nm:
+            return nm
+        r = _try_uv(raw, p)
+        if not r or r[1] == p:
+            break
+        p = r[1]
+    return None
+
+
 def _find_name_records(raw: bytes, type_nibble: int):
     recs = []
+    seen: set[int] = set()
     n = len(raw)
     i = 0
     while i < n - 12:
         r = _is_id(raw, i, {type_nibble})
         if r:
             ident, end = r
-            nm = _read_name(raw, end, mn=2, mx=80)
-            if nm:
+            nm = _name_after_id(raw, end)
+            if nm and ident not in seen:
+                seen.add(ident)
                 recs.append((i, ident, nm[0], nm[1]))
                 i = end
                 continue
@@ -227,6 +261,20 @@ def read_trains_from_raw(raw: bytes) -> list[TrainRecord]:
     return list(out.values())
 
 
+def read_schedules_from_raw(raw: bytes) -> list[ScheduleRecord]:
+    """Every Schedule (0x6) = timetable container: id + name + color.
+
+    Schedules share the 0x6 name-record layout with route templates; those that
+    also embed an ordered stop list (>=2 stops) are what gets drawn as a line on
+    the map, while the rest are pure timetable containers referencing a route.
+    """
+    lines = read_lines_from_raw(raw)
+    return [
+        ScheduleRecord(id=ln.id, name=ln.name, color=ln.color, stop_count=len(ln.stops))
+        for ln in lines
+    ]
+
+
 def read_network(
     save_path: Path,
     include_signals: bool = True,
@@ -252,6 +300,7 @@ def read_network(
             "stations": len(stations),
             "lines": len(drawable),
             "signals": len(signals),
+            "schedules": len(lines),
         },
     }
     if include_trains:
@@ -282,7 +331,10 @@ def _cli(argv: list[str]) -> int:
         print(json.dumps(net, ensure_ascii=False, indent=2))
     else:
         c = net["counts"]
-        print(f"车站 {c['stations']}  线路 {c['lines']}  信号/道岔 {c['signals']}")
+        print(
+            f"车站 {c['stations']}  线路 {c['lines']}  信号/道岔 {c['signals']}"
+            f"  时刻表 {c.get('schedules', 0)}"
+        )
         for ln in net["lines"][:15]:
             print(f"  {ln['name']:<32} {ln['code'] or '':<8} {ln['color'] or '':<12} {len(ln['stops'])} 站")
     return 0
