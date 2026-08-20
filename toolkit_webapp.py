@@ -136,19 +136,6 @@ def save_map_export(payload: dict) -> Path:
     return path
 
 
-def reveal_in_explorer(path: Path) -> None:
-    """Best-effort: open the containing folder with the file selected (Windows)."""
-    try:
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["explorer", f"/select,{path}"])
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path.parent)])
-    except Exception:
-        pass
-
-
 def validate_input_path(value: str, suffix: str) -> Path:
     path = Path(value).resolve()
     if path.parent != SAVE_DIR.resolve() or not path.is_file() or not path.name.lower().endswith(suffix):
@@ -592,7 +579,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route == "/api/map/export":
                 path = save_map_export(payload)
-                reveal_in_explorer(path)
                 self.send_json({"ok": True, "path": str(path), "dir": str(path.parent)})
                 return
             raise RuntimeError("未知操作")

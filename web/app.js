@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-20e';
+const APP_BUILD = '2026-08-20f';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
 const $ = (selector) => document.querySelector(selector);
@@ -476,11 +476,10 @@ function drawStripDiagram(lines, stations) {
   const gap = 66, dotR = 8;
   const svg = svgEl('svg', { class: 'transit-svg', xmlns: SVG_NS });
 
-  // Pills size themselves to their text (CJK ~1em, ASCII ~0.58em) so long line
-  // codes and station names never overflow their capsule.
+  // Pills size themselves to their text (CJK ~1em, ASCII ~0.58em) so full line
+  // codes and station names always fit — nothing is truncated.
   const estWidth = (text, fs) => { let u = 0; for (const ch of String(text)) u += (ch.charCodeAt(0) > 255 ? 1 : 0.58); return u * fs; };
   const pillW = (text, fs) => Math.max(fs * 2, estWidth(text, fs) + fs * 1.2);
-  const short = (s, n) => { s = String(s || '').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
   const pill = (cx, cy, text, color, fs, wOverride) => {
     const w = wOverride || pillW(text, fs), h = fs * 1.75, r = h / 2;
     svg.appendChild(svgEl('rect', { x: (cx - w / 2).toFixed(1), y: (cy - h / 2).toFixed(1), width: w.toFixed(1), height: h.toFixed(1), rx: r.toFixed(1), fill: color }));
@@ -488,57 +487,75 @@ function drawStripDiagram(lines, stations) {
     t.textContent = text; svg.appendChild(t);
     return w;
   };
-  // Interchange badges: dedupe by label, cap the count, collapse extras into "+n".
-  const transferBadges = (id, selfId, max) => {
+  // Interchange badges: every distinct connecting line at the station (deduped by
+  // label so identical codes aren't repeated). No cap — the canvas grows to fit.
+  const transferBadges = (id, selfId) => {
     const seen = new Set(); const out = [];
     (stationLines[id] || []).forEach(tl => {
       if (tl.id === selfId) return;
-      const lab = short(tl.code || tl.name, 6);
-      if (seen.has(lab)) return; seen.add(lab);
+      const lab = (tl.code || tl.name || '').trim();
+      if (!lab || seen.has(lab)) return; seen.add(lab);
       out.push({ label: lab, color: lineColor(tl.color) });
     });
-    if (out.length > max) { const extra = out.length - max; out.length = max; out.push({ label: '+' + extra, color: '#7c8a93' }); }
     return out;
   };
-  const lineFS = 14, badgeFS = 10.5, nameFS = 14;
+  const lineFS = 14, badgeFS = 11, nameFS = 14;
   const dot = (cx, cy, term, inter, color) => {
     svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: term ? dotR + 2 : (inter ? dotR : 5.5), fill: term ? color : '#ffffff', stroke: color, 'stroke-width': 3 }));
     if (inter) svg.appendChild(svgEl('circle', { cx: cx.toFixed(1), cy: cy.toFixed(1), r: 2.6, fill: color }));
   };
-  const lineLabels = rows.map(r => short(r.line.code || r.line.name, 12));
+  const badgesFor = {};
+  rows.forEach(r => r.stops.forEach(id => { badgesFor[r.line.id + '|' + id] = transferBadges(id, r.line.id); }));
+  const lineLabels = rows.map(r => (r.line.code || r.line.name || '').trim());
+  const badgeRowW = bs => bs.reduce((s, b) => s + pillW(b.label, badgeFS) + 7, 0);
 
   let W, H;
   if (!vertical) {
-    const maxBadgeW = Math.max(...rows.map((r, i) => pillW(lineLabels[i], lineFS)));
-    const badgeCx = 22 + maxBadgeW / 2;
-    const leftPad = 22 + maxBadgeW + 30;
-    const rowH = 216, topPad = 30, rightPad = 250;
-    W = leftPad + (maxStops - 1) * gap + rightPad;
+    // Space above each strip for the (angled) full station names, space below for
+    // the vertical stack of every transfer badge; horizontal gap widens so a
+    // station's badge column never touches its neighbour's.
+    const maxNameW = Math.max(...rows.flatMap(r => r.stops.map(id => estWidth(stations[id].name, nameFS))));
+    const maxBadgeW = Math.max(0, ...rows.flatMap(r => r.stops.flatMap(id => badgesFor[r.line.id + '|' + id].map(b => pillW(b.label, badgeFS)))));
+    const maxTransfers = Math.max(0, ...rows.flatMap(r => r.stops.map(id => badgesFor[r.line.id + '|' + id].length)));
+    const localGap = Math.max(gap, maxBadgeW + 12);
+    const aboveSpace = Math.ceil(Math.sin(0.96) * maxNameW) + 26;   // ~55° angled name height
+    const belowSpace = 26 + maxTransfers * (badgeFS * 1.75 + 6) + 12;
+    const rowH = aboveSpace + belowSpace + 24;
+    const maxLinePillW = Math.max(...lineLabels.map(t => pillW(t, lineFS)));
+    const badgeCx = 20 + maxLinePillW / 2;
+    const leftPad = 20 + maxLinePillW + 28;
+    const rightPad = Math.ceil(Math.cos(0.96) * maxNameW) + 60;
+    const topPad = 24;
+    W = leftPad + (maxStops - 1) * localGap + rightPad;
     H = topPad + rows.length * rowH + 20;
     svg.setAttribute('viewBox', `0 0 ${W.toFixed(0)} ${H.toFixed(0)}`);
     svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#ffffff' }));
     rows.forEach((r, ri) => {
       const color = lineColor(r.line.color);
-      const yMid = topPad + ri * rowH + rowH / 2;
-      const x1 = leftPad + (r.stops.length - 1) * gap;
+      const yMid = topPad + ri * rowH + aboveSpace;
+      const x1 = leftPad + (r.stops.length - 1) * localGap;
       svg.appendChild(svgEl('line', { x1: leftPad, y1: yMid, x2: x1, y2: yMid, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
-      pill(badgeCx, yMid, lineLabels[ri], color, lineFS, maxBadgeW);
+      pill(badgeCx, yMid, lineLabels[ri], color, lineFS, maxLinePillW);
       r.stops.forEach((id, j) => {
-        const x = leftPad + j * gap;
+        const x = leftPad + j * localGap;
         const term = j === 0 || j === r.stops.length - 1;
-        const badges = transferBadges(id, r.line.id, 3);
+        const badges = badgesFor[r.line.id + '|' + id];
         dot(x, yMid, term, badges.length > 0, color);
-        const ny = yMid - 22;
+        const ny = yMid - 20;
         const nm = svgEl('text', { x: (x + 4).toFixed(1), y: ny.toFixed(1), 'text-anchor': 'start', transform: `rotate(-55 ${(x + 4).toFixed(1)} ${ny.toFixed(1)})`, 'font-family': FONT, 'font-size': term || badges.length ? nameFS : 13, 'font-weight': term || badges.length ? 800 : 500, fill: '#12202b' });
         nm.textContent = stations[id].name; svg.appendChild(nm);
-        badges.forEach((b, k) => pill(x, yMid + 30 + k * 20, b.label, b.color, badgeFS));
+        badges.forEach((b, k) => pill(x, yMid + 28 + k * (badgeFS * 1.75 + 6), b.label, b.color, badgeFS));
       });
     });
   } else {
-    const nameMaxW = Math.max(...rows.flatMap(r => r.stops.map(id => estWidth(short(stations[id].name, 18), nameFS))));
-    const leftArea = 108;
-    const colW = leftArea + 24 + nameMaxW + 44;
-    const topPad = 88, botPad = 40, leftPad = 30;
+    // Each station on its own row: full name to the right, every transfer badge
+    // laid out to the left. Column width grows to fit the widest name and the
+    // busiest interchange so nothing overlaps.
+    const nameMaxW = Math.max(...rows.flatMap(r => r.stops.map(id => estWidth(stations[id].name, nameFS))));
+    const leftArea = Math.max(60, ...rows.flatMap(r => r.stops.map(id => badgeRowW(badgesFor[r.line.id + '|' + id])))) + 18;
+    const maxLinePillW = Math.max(...lineLabels.map(t => pillW(t, lineFS)));
+    const colW = Math.max(leftArea + 24 + nameMaxW + 44, maxLinePillW + 30);
+    const topPad = 92, botPad = 40, leftPad = 24;
     H = topPad + (maxStops - 1) * gap + botPad;
     W = leftPad + rows.length * colW + 20;
     svg.setAttribute('viewBox', `0 0 ${W.toFixed(0)} ${H.toFixed(0)}`);
@@ -548,16 +565,16 @@ function drawStripDiagram(lines, stations) {
       const xMid = leftPad + ri * colW + leftArea;
       const y1 = topPad + (r.stops.length - 1) * gap;
       svg.appendChild(svgEl('line', { x1: xMid, y1: topPad, x2: xMid, y2: y1, stroke: color, 'stroke-width': 12, 'stroke-linecap': 'round' }));
-      pill(xMid, 44, lineLabels[ri], color, lineFS);
+      pill(xMid, 46, lineLabels[ri], color, lineFS);
       r.stops.forEach((id, j) => {
         const y = topPad + j * gap;
         const term = j === 0 || j === r.stops.length - 1;
-        const badges = transferBadges(id, r.line.id, 2);
+        const badges = badgesFor[r.line.id + '|' + id];
         dot(xMid, y, term, badges.length > 0, color);
         const nm = svgEl('text', { x: (xMid + 20).toFixed(1), y: (y + 5).toFixed(1), 'text-anchor': 'start', 'font-family': FONT, 'font-size': term || badges.length ? nameFS : 13, 'font-weight': term || badges.length ? 800 : 500, fill: '#12202b' });
-        nm.textContent = short(stations[id].name, 18); svg.appendChild(nm);
+        nm.textContent = stations[id].name; svg.appendChild(nm);
         let bx = xMid - dotR - 12;
-        badges.forEach(b => { const w = pillW(b.label, badgeFS); pill(bx - w / 2, y, b.label, b.color, badgeFS, w); bx -= (w + 6); });
+        badges.forEach(b => { const w = pillW(b.label, badgeFS); pill(bx - w / 2, y, b.label, b.color, badgeFS, w); bx -= (w + 7); });
       });
     });
   }
@@ -579,7 +596,7 @@ async function exportMapSvg() {
   // window (WebView2 often ignores JS blob downloads); show the full path.
   try {
     const res = await api('/api/map/export', { method: 'POST', body: JSON.stringify({ svg: data, filename, format: 'svg' }) });
-    toast(`已保存到：${res.path}（已打开所在文件夹）`);
+    toast(`已保存到下载文件夹：${res.path}`);
     return;
   } catch (e) {
     // Fall back to a browser download if the service save is unavailable.
