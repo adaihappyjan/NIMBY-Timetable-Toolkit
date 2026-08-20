@@ -228,3 +228,28 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .map-adv-grid input { width:92px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; font-size:13px; font-weight:600; color:var(--ink); }
 .map-adv-grid input:focus { outline:none; border-color:var(--aqua); box-shadow:0 0 0 3px rgba(25,198,186,.15); }
 .map-adv-hint { margin:0 14px 12px; font-size:11px; color:var(--muted); line-height:1.6; }
+.realnet-lines-list { display:flex; flex-direction:column; gap:9px; }
+.realnet-line-row { border:1px solid var(--line); border-radius:11px; padding:10px 13px; background:var(--white); }
+.realnet-line-row:hover { border-color:#bfe6e1; background:#f6fcfb; }
+.rl-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.rl-swatch { width:16px; height:8px; border-radius:4px; flex:0 0 auto; }
+.rl-ref { font-size:11px; font-weight:800; color:#fff; background:#7c8a90; padding:1px 7px; border-radius:999px; }
+.rl-tag { font-size:11px; color:#137a72; background:var(--aqua-soft); padding:1px 8px; border-radius:999px; font-weight:700; }
+.rl-meta { font-size:11px; color:var(--muted); margin-left:auto; }
+.rl-stops { margin-top:7px; font-size:11px; color:#41525b; line-height:1.7; word-break:break-word; }
+.binder-rules { display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
+.binder-rules .map-toggle { font-size:13px; }
+.binder-rules input[type=number] { width:78px; padding:6px 9px; border:1px solid var(--line); border-radius:8px; font-size:13px; }
+.binder-meta { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
+.binder-meta label { display:flex; flex-direction:column; gap:5px; font-size:11px; color:var(--muted); font-weight:700; flex:1; min-width:180px; }
+.binder-meta input { padding:9px 11px; border:1px solid var(--line); border-radius:9px; font-size:13px; }
+.binder-result { margin-top:16px; border-top:1px solid #eef2f2; padding-top:14px; }
+.binder-dl { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.binder-dl a.primary-button { text-decoration:none; display:inline-block; }
+.bind-list { margin-top:12px; display:flex; flex-direction:column; gap:10px; }
+.bind-sec { border:1px solid var(--line); border-radius:11px; padding:11px 13px; background:#fbfdfd; }
+.bind-sec-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline; }
+.bind-sec-head span { font-size:11px; color:var(--muted); }
+.bind-sec p { margin:6px 0 0; font-size:12px; color:#41525b; line-height:1.6; }
+.bind-targets { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; }
+.bind-targets span { font-size:11px; background:var(--aqua-soft); color:#137a72; padding:2px 9px; border-radius:999px; font-weight:600; }

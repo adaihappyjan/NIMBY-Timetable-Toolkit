@@ -621,8 +621,8 @@ CAPABILITIES = [
     {"rank": 7, "name": "一键线路图", "status": "available", "detail": "按经纬度绘制单/多线路网图，支持八向示意图风格与 SVG 导出"},
     {"rank": 8, "name": "现实路网参考图", "status": "available", "detail": "叠加 OpenRailwayMap 与游戏路网，规划针本地存储、导出 GeoJSON/CSV"},
     {"rank": 9, "name": "存档差分实验室", "status": "available", "detail": "逐项对比两份导出的线路、车站、站序与坐标变化"},
-    {"rank": 10, "name": "批量扩展绑定器", "status": "next", "detail": "线路 / 信号 / 轨道的批量配置（需先完成安全的二进制字段验证）"},
-    {"rank": 11, "name": "现实路网导入向导", "status": "research", "detail": "从 OSM/OpenRailwayMap 拉取真实线站，生成对照清单辅助在游戏内复刻（评估中）"},
+    {"rank": 10, "name": "批量扩展绑定器", "status": "available", "detail": "批量为线路/信号/车队生成运营扩展 mod 与逐对象启用清单，并可把已校验的车库接班批量写入新存档"},
+    {"rank": 11, "name": "现实路网导入向导", "status": "available", "detail": "从 OSM 拉取真实线路与站序，生成复刻对照清单并导出 JSON/CSV，一键把站点加入规划针"},
 ]
 
 

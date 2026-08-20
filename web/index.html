@@ -21,6 +21,7 @@
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
         <button class="nav-item" data-view="timetable"><span>◫</span>时刻表配置</button>
         <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
+        <button class="nav-item" data-view="binder"><span>⧉</span>批量绑定</button>
         <button class="nav-item" data-view="vehicle"><span>▤</span>车辆工坊</button>
         <button class="nav-item" data-view="scripts"><span>{ }</span>脚本规则</button>
         <button class="nav-item" data-view="history"><span>◔</span>历史与性能</button>
@@ -228,7 +229,8 @@
           <div class="realnet-importbar">
             <strong>现实数据导入</strong>
             <button class="text-button" id="realnet-import-stations">拉取此范围真实车站</button>
-            <button class="text-button" id="realnet-import-to-pins" disabled>全部加入规划针</button>
+            <button class="text-button" id="realnet-import-lines">拉取此范围真实线路</button>
+            <button class="text-button" id="realnet-import-to-pins" disabled>车站加入规划针</button>
             <button class="text-button danger-text" id="realnet-import-clear" disabled>清除导入</button>
             <span id="realnet-import-count" class="realnet-import-count"></span>
             <small>数据来自 OpenStreetMap（Overpass），用于对照复刻，请先放大到城市级别。</small>
@@ -238,6 +240,18 @@
             <span id="realnet-pin-count">规划针 0 个</span>
             <small>底图 © OpenStreetMap / CARTO；铁路层 © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noopener">OpenRailwayMap</a>（CC-BY-SA 2.0）。仅供个人参考使用。</small>
           </div>
+        </article>
+        <article class="panel" id="realnet-lines-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">现实路网导入向导</p><h3>真实线路对照清单</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="realnet-lines-json" disabled>导出清单 JSON</button>
+              <button class="text-button" id="realnet-lines-csv" disabled>导出清单 CSV</button>
+              <button class="text-button danger-text" id="realnet-lines-clear" disabled>清除线路</button>
+            </div>
+          </div>
+          <p class="repair-note">从 OpenStreetMap 拉取的真实线路（含按序站点），用于在游戏里逐条复刻。点线路可高亮，点“站→针”把该线站点加入规划针。里程为按站点直线累加的近似值。</p>
+          <div id="realnet-lines-list" class="realnet-lines-list"><div class="placeholder">点“拉取此范围真实线路”，会读取当前地图范围内的地铁/轻轨/有轨/铁路线路关系。</div></div>
         </article>
         <article class="panel" id="realnet-pin-panel" hidden>
           <div class="panel-heading"><div><p class="step">规划清单</p><h3>规划针（复刻检查表）</h3></div><span class="phase-badge safe">本地存储</span></div>
@@ -307,6 +321,54 @@
         <article class="panel action-panel">
           <label class="output-label">新存档名称<input id="extension-output" type="text" spellcheck="false"></label>
           <div class="button-row"><button class="secondary-button" id="remove-extension">移除扩展</button><button class="primary-button" id="add-extension">加入扩展</button></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-binder">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">BATCH BINDER</p><h2>批量扩展绑定器</h2><p>一次为多条线路 / 多张车队批量配置运营扩展：生成可加载的 private mod 与“逐对象启用清单”，并可把已验证的车库接班批量写入新存档。绝不改写任意二进制字段。</p></div>
+          <span class="phase-badge safe">mod 安全 + 已校验写入</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">第一步</p><h3>选择要绑定的线路</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="binder-load-lines">从当前导出载入线路</button>
+              <button class="text-button" id="binder-lines-all">全选</button>
+              <button class="text-button" id="binder-lines-none">清空</button>
+            </div>
+          </div>
+          <div id="binder-line-list" class="map-line-grid"><div class="placeholder">点“从当前导出载入线路”，会读取上方所选的时刻表导出。</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">第二步</p><h3>运营规则模组（安全）</h3></div><span class="phase-badge safe">生成 mod，不碰存档</span></div>
+          <div class="binder-rules">
+            <label class="map-toggle"><input type="checkbox" id="binder-garage" checked> 车库接班（Timetable garage join）</label>
+            <label class="map-toggle"><input type="checkbox" id="binder-hold"> 到站附加等待 <input type="number" id="binder-hold-s" value="30" min="0" max="3600" step="5"> 秒</label>
+            <label class="map-toggle"><input type="checkbox" id="binder-speed"> 信号前限速 <input type="number" id="binder-speed-kmh" value="40" min="1" max="500" step="5"> km/h</label>
+          </div>
+          <div class="binder-meta">
+            <label>模组名称<input type="text" id="binder-name" value="批量运营扩展包" spellcheck="false"></label>
+            <label>模组 ID<input type="text" id="binder-id" placeholder="batch_ops_ext" spellcheck="false"></label>
+            <button class="primary-button" id="binder-generate">生成绑定模组 + 清单</button>
+          </div>
+          <div id="binder-result" class="binder-result" hidden></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">第三步（可选）</p><h3>批量车库接班 · 写入新存档</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="binder-load-fleets">从体检载入车队</button>
+              <button class="text-button" id="binder-fleets-all">全选</button>
+              <button class="text-button" id="binder-fleets-none">清空</button>
+            </div>
+          </div>
+          <p class="repair-note">沿用已通过前后校验的“列车尾部扩展向量”机制，把车库接班一次性写入所选车队；只创建新存档，绝不覆盖原档。请先在“总览与体检”完成体检。</p>
+          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">完成体检后点“从体检载入车队”。</div></div>
+          <div class="binder-meta">
+            <label class="output-label">新存档名称<input id="binder-output" type="text" spellcheck="false"></label>
+            <button class="primary-button" id="binder-write-garage">批量写入车库接班</button>
+          </div>
         </article>
       </section>
 

@@ -6,7 +6,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const viewMeta = {
   dashboard: ['CONTROL CENTER', '铁路运营总览'], analytics: ['OPERATIONS ANALYTICS', '运营分析'], map: ['TRANSIT MAP', '线路图'], realnet: ['REAL-WORLD REFERENCE', '现实路网参考图'], timetable: ['TIMETABLE STUDIO', '时刻表配置'],
-  extensions: ['DEPOT CONTROL', '车库接班管理'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线']
+  extensions: ['DEPOT CONTROL', '车库接班管理'], binder: ['BATCH BINDER', '批量扩展绑定器'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线']
 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 function lineColor(raw) {
@@ -62,7 +62,7 @@ function outputPath(kind) {
   const dir = save.slice(0, slash + 1); const base = save.slice(slash + 1).replace(/\.nimbyrails5$/i, '');
   return `${dir}${base}_${kind}_${timestamp()}.nimbyrails5`;
 }
-function refreshOutputNames() { $('#migration-output').value = outputPath('Toolkit'); $('#extension-output').value = outputPath('Extension'); $('#fix-output').value = outputPath('Repair'); const rec = $('#recover-output'); if (rec) rec.value = outputPath('Recovery'); }
+function refreshOutputNames() { $('#migration-output').value = outputPath('Toolkit'); $('#extension-output').value = outputPath('Extension'); $('#fix-output').value = outputPath('Repair'); const rec = $('#recover-output'); if (rec) rec.value = outputPath('Recovery'); const bnd = $('#binder-output'); if (bnd) bnd.value = outputPath('GarageJoin'); }
 
 function setCompareOptions(exports) {
   const options = exports.map(f => `<option value="${escapeHtml(f.path)}">${escapeHtml(f.name)}</option>`).join('');
@@ -875,6 +875,112 @@ function importedToPins() {
   saveJson('nimby_realnet_pins', REALNET.pins); renderRealnetPins();
   toast(`已把 ${items.length} 个真实车站加入规划针清单`);
 }
+function haversineKm(a, b) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+const OSM_ROUTE_LABELS = { subway: '地铁', light_rail: '轻轨', tram: '有轨电车', train: '铁路', monorail: '单轨' };
+const FALLBACK_PALETTE = ['#e6194B', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', '#9A6324', '#800000', '#808000', '#000075'];
+function osmColor(raw, idx) {
+  const v = String(raw || '').trim();
+  if (/^#?[0-9a-fA-F]{6}$/.test(v)) return v.startsWith('#') ? v : '#' + v;
+  return FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
+}
+async function importRealLines() {
+  if (!REALNET.map) { toast('地图未就绪', true); return; }
+  if (REALNET.map.getZoom() < 9) { toast('范围太大，请先放大到城市/线路级别再拉取', true); return; }
+  const b = REALNET.map.getBounds();
+  const bbox = `${b.getSouth().toFixed(5)},${b.getWest().toFixed(5)},${b.getNorth().toFixed(5)},${b.getEast().toFixed(5)}`;
+  const q = `[out:json][timeout:90];rel["route"~"^(subway|light_rail|tram|train|monorail)$"](${bbox});out body;node(r);out body;`;
+  const btn = $('#realnet-import-lines'); btn.disabled = true;
+  let lastErr = '';
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    toast(`正在从 OpenStreetMap 拉取真实线路…（源 ${i + 1}/${OVERPASS_ENDPOINTS.length}）`);
+    try {
+      const r = await fetch(OVERPASS_ENDPOINTS[i], { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: q });
+      if (!r.ok) { lastErr = 'HTTP ' + r.status; continue; }
+      const data = await r.json();
+      const nodes = {};
+      (data.elements || []).forEach(e => { if (e.type === 'node') nodes[e.id] = e; });
+      const rels = (data.elements || []).filter(e => e.type === 'relation' && e.tags && /^(subway|light_rail|tram|train|monorail)$/.test(e.tags.route));
+      const lines = [];
+      rels.forEach((rel, idx) => {
+        const t = rel.tags;
+        let stopMembers = (rel.members || []).filter(m => m.type === 'node' && /stop/.test(m.role || ''));
+        if (!stopMembers.length) stopMembers = (rel.members || []).filter(m => { const n = nodes[m.ref]; return n && n.tags && (/^(station|halt|stop)$/.test(n.tags.railway || '') || /(station|stop_position)/.test(n.tags.public_transport || '')); });
+        const stops = [];
+        stopMembers.forEach(m => {
+          const n = nodes[m.ref]; if (!n || n.lat == null) return;
+          const name = (n.tags && (n.tags.name || n.tags['name:en'])) || '未命名站';
+          if (stops.length && stops[stops.length - 1].name === name) return;
+          stops.push({ name, lat: n.lat, lon: n.lon });
+        });
+        if (stops.length < 2) return;
+        let km = 0; for (let j = 1; j < stops.length; j++) km += haversineKm(stops[j - 1], stops[j]);
+        lines.push({ name: (t.name || t.ref || '未命名线路').trim(), ref: (t.ref || '').trim(), route: t.route, color: osmColor(t.colour, idx), stops, lengthKm: km });
+      });
+      lines.sort((a, b2) => a.name.localeCompare(b2.name));
+      REALNET.importedLines = lines.slice(0, 80);
+      renderImportedLines();
+      toast(lines.length ? `已拉取 ${REALNET.importedLines.length} 条真实线路，生成复刻清单` : '该范围没有找到线路关系，换个区域或放大再试', !lines.length);
+      btn.disabled = false; return;
+    } catch (e) { lastErr = e.message; }
+  }
+  btn.disabled = false;
+  toast(`拉取失败：${lastErr}。Overpass 公共服务器可能繁忙，请缩小范围或稍后再试`, true);
+}
+function renderImportedLines() {
+  if (!REALNET.importLinesLayer) REALNET.importLinesLayer = L.layerGroup().addTo(REALNET.map);
+  REALNET.importLinesLayer.clearLayers();
+  const lines = REALNET.importedLines || [];
+  lines.forEach(l => {
+    const pts = l.stops.map(s => [s.lat, s.lon]);
+    L.polyline(pts, { color: l.color, weight: 4, opacity: 0.9 }).bindTooltip(`${l.name}（现实 · ${l.stops.length}站）`).addTo(REALNET.importLinesLayer);
+    l.stops.forEach(s => L.circleMarker([s.lat, s.lon], { radius: 3, color: '#fff', weight: 1, fillColor: l.color, fillOpacity: 1 }).bindTooltip(`${s.name}（${l.name}）`).addTo(REALNET.importLinesLayer));
+  });
+  const panel = $('#realnet-lines-panel'); if (panel) panel.hidden = false;
+  const list = $('#realnet-lines-list');
+  if (!lines.length) { list.innerHTML = '<div class="placeholder">该范围没有找到线路关系。</div>'; }
+  else {
+    list.innerHTML = lines.map((l, i) => `<div class="realnet-line-row"><div class="rl-head"><span class="rl-swatch" style="background:${l.color}"></span><strong>${escapeHtml(l.name)}</strong>${l.ref ? `<span class="rl-ref">${escapeHtml(l.ref)}</span>` : ''}<span class="rl-tag">${OSM_ROUTE_LABELS[l.route] || l.route}</span><span class="rl-meta">${l.stops.length} 站 · ≈${l.lengthKm.toFixed(1)} km</span><button class="text-button mini" data-line-focus="${i}">高亮</button><button class="text-button mini" data-line-pins="${i}">站→针</button></div><div class="rl-stops">${l.stops.map(s => escapeHtml(s.name)).join(' → ')}</div></div>`).join('');
+    list.querySelectorAll('[data-line-focus]').forEach(b => b.addEventListener('click', () => { const l = lines[+b.dataset.lineFocus]; REALNET.map.fitBounds(l.stops.map(s => [s.lat, s.lon]), { padding: [40, 40] }); }));
+    list.querySelectorAll('[data-line-pins]').forEach(b => b.addEventListener('click', () => lineStopsToPins(+b.dataset.linePins)));
+  }
+  const has = lines.length > 0;
+  ['#realnet-lines-json', '#realnet-lines-csv', '#realnet-lines-clear'].forEach(sel => { const el = $(sel); if (el) el.disabled = !has; });
+}
+function lineStopsToPins(idx) {
+  const l = (REALNET.importedLines || [])[idx]; if (!l) return;
+  l.stops.forEach(s => REALNET.pins.push({ lat: +(+s.lat).toFixed(6), lng: +(+s.lon).toFixed(6), name: s.name, note: `OSM 线路：${l.name}` }));
+  saveJson('nimby_realnet_pins', REALNET.pins); renderRealnetPins();
+  toast(`已把「${l.name}」的 ${l.stops.length} 个站点加入规划针`);
+}
+function clearRealLines() {
+  REALNET.importedLines = [];
+  if (REALNET.importLinesLayer) REALNET.importLinesLayer.clearLayers();
+  renderImportedLines();
+  toast('已清除导入的真实线路');
+}
+function exportRealLines(kind) {
+  const lines = REALNET.importedLines || [];
+  if (!lines.length) { toast('还没有导入线路', true); return; }
+  const stamp = timestamp(); let blob, filename;
+  if (kind === 'json') {
+    blob = new Blob([JSON.stringify({ generated: new Date().toISOString(), source: 'OpenStreetMap (Overpass)', line_count: lines.length, lines }, null, 2)], { type: 'application/json' });
+    filename = `现实线路对照清单_${stamp}.json`;
+  } else {
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [['line', 'ref', 'type', 'color', 'stop_count', 'length_km', 'stops_in_order']];
+    lines.forEach(l => rows.push([l.name, l.ref, l.route, l.color, l.stops.length, l.lengthKm.toFixed(2), l.stops.map(s => s.name).join(' > ')]));
+    blob = new Blob(['\ufeff' + rows.map(r => r.map(esc).join(',')).join('\r\n')], { type: 'text/csv' });
+    filename = `现实线路对照清单_${stamp}.csv`;
+  }
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 500);
+  toast(`已导出 ${filename}`);
+}
 async function initRealnet() {
   if (REALNET.ready) { setTimeout(() => REALNET.map.invalidateSize(), 60); if (state.network) realnetDrawGame(); return; }
   try { await loadLeaflet(); } catch (e) { $('#realnet-map').innerHTML = `<div class="placeholder">${escapeHtml(e.message)}</div>`; return; }
@@ -956,7 +1062,7 @@ async function pollOnce() {
       else if (s.action === 'inventory') renderInventory(s.result);
       else if (s.action === 'compare') renderCompare(s.result);
       else if (s.action === 'find-reference') renderReference(s.result);
-      else if (s.action === 'map-data') { renderMapData(s.result); if (REALNET.ready) realnetDrawGame(); }
+      else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
@@ -985,6 +1091,78 @@ async function updateCleanupPreview() {
   try {
     const data = await api('/api/cleanup/preview', { method:'POST', body:JSON.stringify({ days:+$('#cleanup-days').value, keep:+$('#cleanup-keep').value, compact:state.cleanMode==='compact' }) }); state.cleanup=data.cleanup; renderCleanup();
   } catch(e) { toast(e.message,true); }
+}
+// ---- #10 批量扩展绑定器 ----
+function renderBinderLines() {
+  const box = $('#binder-line-list'); if (!box) return;
+  const lines = state.network?.lines || [];
+  if (!lines.length) { box.innerHTML = '<div class="placeholder">点“从当前导出载入线路”，会读取上方所选的时刻表导出。</div>'; return; }
+  box.innerHTML = lines.map(l => {
+    const c = lineColor(l.color); const service = l.stop_count > 1;
+    return `<label class="map-line-option"><input class="binder-line-check" type="checkbox" value="${escapeHtml(l.id)}" data-name="${escapeHtml(l.name)}" data-code="${escapeHtml(l.code || '')}" ${service ? 'checked' : ''}><span class="line-swatch" style="background:${c}"></span><span><strong>${escapeHtml(l.name)}</strong><small>${escapeHtml(l.code || '')}${l.code ? ' · ' : ''}${l.stop_count} 站</small></span></label>`;
+  }).join('');
+}
+function binderLoadLines() {
+  if (state.network) { renderBinderLines(); toast('已载入线路'); return; }
+  if (!$('#export-select').value) { toast('请先在“总览与体检”选择时刻表导出', true); return; }
+  startTask('map-data', { export: $('#export-select').value });
+}
+function renderBinderFleets() {
+  const box = $('#binder-fleet-list'); if (!box) return;
+  const schedules = (state.analysis?.health_schedules || []).filter(s => s.train_count > 0);
+  box.innerHTML = schedules.length
+    ? schedules.map(s => `<label class="schedule-option"><input class="binder-fleet-check" type="checkbox" value="${escapeHtml(s.name)}"><span><strong>${escapeHtml(s.name)}</strong><small>${s.train_count} 列车 · 已启用 ${s.garage_enabled}</small></span></label>`).join('')
+    : '<div class="placeholder">请先在“总览与体检”完成体检。</div>';
+}
+function selectedBinderLines() { return $$('.binder-line-check:checked').map(x => ({ id: x.value, name: x.dataset.name, code: x.dataset.code })); }
+async function generateBinderMod() {
+  const rules = { garage_join: $('#binder-garage').checked, arrival_hold: $('#binder-hold').checked, hold_seconds: +$('#binder-hold-s').value || 0, signal_speed_limit: $('#binder-speed').checked, speed_kmh: +$('#binder-speed-kmh').value || 40 };
+  if (!rules.garage_join && !rules.arrival_hold && !rules.signal_speed_limit) { toast('请至少勾选一条规则', true); return; }
+  const lines = selectedBinderLines();
+  if ((rules.arrival_hold) && !lines.length) { toast('到站附加等待需要至少选择一条线路', true); return; }
+  const payload = { name: $('#binder-name').value || '批量运营扩展包', id: $('#binder-id').value || '', ...rules };
+  const btn = $('#binder-generate'); btn.disabled = true;
+  try {
+    const res = await api('/api/script/generate', { method: 'POST', body: JSON.stringify(payload) });
+    state.binderChecklist = buildBinderChecklist(rules, lines, res.meta);
+    renderBinderResult(res, rules, lines);
+    toast('已生成绑定模组与启用清单');
+  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+}
+function buildBinderChecklist(rules, lines, meta) {
+  const sections = [];
+  if (rules.garage_join) sections.push({ rule: 'Timetable garage join', apply_to: '列车', how: '在游戏中给相关列车启用；或用下方“批量车库接班·写入新存档”一次性绑定。', targets: [] });
+  if (rules.arrival_hold) sections.push({ rule: `Arrival hold (+${rules.hold_seconds}s)`, apply_to: '线路停站 (Line::Stop)', how: '在游戏中打开每条线路，给需要的停站启用 Arrival hold 扩展。', targets: lines.map(l => l.name + (l.code ? ` (${l.code})` : '')) });
+  if (rules.signal_speed_limit) sections.push({ rule: `Signal speed limit (${rules.speed_kmh} km/h)`, apply_to: '信号 (Signal)', how: '在游戏中框选目标信号并启用 Signal speed limit 扩展，按需调节限速。', targets: [] });
+  return { mod_id: meta?.script_id, mod_name: meta?.display_name, generated: new Date().toISOString(), sections };
+}
+function renderBinderResult(res, rules, lines) {
+  const el = $('#binder-result'); el.hidden = false;
+  const cl = state.binderChecklist;
+  const secHtml = cl.sections.map(s => `<div class="bind-sec"><div class="bind-sec-head"><strong>${escapeHtml(s.rule)}</strong><span>作用对象：${escapeHtml(s.apply_to)}</span></div><p>${escapeHtml(s.how)}</p>${s.targets.length ? `<div class="bind-targets">${s.targets.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}</div>`).join('');
+  el.innerHTML = `<div class="binder-dl"><a class="primary-button" href="${res.download_url}" download>下载模组 ZIP（${escapeHtml(res.meta.script_id)}）</a><button class="text-button" id="binder-export-json">导出清单 JSON</button><button class="text-button" id="binder-export-csv">导出清单 CSV</button></div><p class="plan-note">解压到 NIMBY Rails 的 private mods 目录并在游戏内启用模组，然后按下面的清单逐对象启用扩展。</p><div class="bind-list">${secHtml}</div>`;
+  $('#binder-export-json').addEventListener('click', () => exportBinderChecklist('json'));
+  $('#binder-export-csv').addEventListener('click', () => exportBinderChecklist('csv'));
+}
+function exportBinderChecklist(kind) {
+  const cl = state.binderChecklist; if (!cl) { toast('请先生成清单', true); return; }
+  const stamp = timestamp(); let blob, filename;
+  if (kind === 'json') { blob = new Blob([JSON.stringify(cl, null, 2)], { type: 'application/json' }); filename = `绑定清单_${stamp}.json`; }
+  else {
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [['rule', 'apply_to', 'how', 'targets']];
+    cl.sections.forEach(s => rows.push([s.rule, s.apply_to, s.how, s.targets.join(' | ')]));
+    blob = new Blob(['\ufeff' + rows.map(r => r.map(esc).join(',')).join('\r\n')], { type: 'text/csv' }); filename = `绑定清单_${stamp}.csv`;
+  }
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename;
+  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 500);
+  toast(`已导出 ${filename}`);
+}
+function binderWriteGarage() {
+  const schedules = $$('.binder-fleet-check:checked').map(x => x.value);
+  if (!schedules.length) { toast('请至少选择一张车队', true); return; }
+  if (!$('#save-select').value || !$('#export-select').value) { toast('请先在“总览与体检”选择存档与导出并完成体检', true); return; }
+  startTask('extension', { save: $('#save-select').value, export: $('#export-select').value, output: $('#binder-output').value, schedules, mode: 'add' });
 }
 
 $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(b) switchView(b.dataset.view); });
@@ -1035,8 +1213,12 @@ $('#realnet-export-geojson').addEventListener('click',()=>exportPins('geojson'))
 $('#realnet-export-csv').addEventListener('click',()=>exportPins('csv'));
 $('#realnet-clear-pins').addEventListener('click',()=>{ if(!REALNET.pins.length)return; if(!confirm('清空所有规划针？此操作不可撤销。'))return; REALNET.pins=[]; saveJson('nimby_realnet_pins',REALNET.pins); renderRealnetPins(); });
 $('#realnet-import-stations').addEventListener('click',importRealStations);
+$('#realnet-import-lines').addEventListener('click',importRealLines);
 $('#realnet-import-to-pins').addEventListener('click',importedToPins);
 $('#realnet-import-clear').addEventListener('click',()=>{ REALNET.imported=[]; renderImported(); });
+$('#realnet-lines-json')?.addEventListener('click',()=>exportRealLines('json'));
+$('#realnet-lines-csv')?.addEventListener('click',()=>exportRealLines('csv'));
+$('#realnet-lines-clear')?.addEventListener('click',clearRealLines);
 $('#realnet-pin-list').addEventListener('click',e=>{
   const go=e.target.closest('[data-pin-go]'), rn=e.target.closest('[data-pin-rename]'), del=e.target.closest('[data-pin-del]');
   if(go){ const p=REALNET.pins[+go.dataset.pinGo]; if(p) REALNET.map.setView([p.lat,p.lng],14); }
@@ -1057,6 +1239,14 @@ $('#run-compare').addEventListener('click',()=>{
 });
 function extensionTask(mode){const schedules=$$('.schedule-check:checked').map(x=>x.value); if(!schedules.length)return toast('请至少选择一张时刻表',true); startTask('extension',{save:$('#save-select').value,export:$('#export-select').value,output:$('#extension-output').value,schedules,mode});}
 $('#add-extension').addEventListener('click',()=>extensionTask('add')); $('#remove-extension').addEventListener('click',()=>extensionTask('remove'));
+$('#binder-load-lines')?.addEventListener('click',binderLoadLines);
+$('#binder-lines-all')?.addEventListener('click',()=>$$('.binder-line-check').forEach(x=>x.checked=true));
+$('#binder-lines-none')?.addEventListener('click',()=>$$('.binder-line-check').forEach(x=>x.checked=false));
+$('#binder-generate')?.addEventListener('click',generateBinderMod);
+$('#binder-load-fleets')?.addEventListener('click',()=>{ if(!state.analysis){toast('请先在“总览与体检”完成体检',true);return;} renderBinderFleets(); toast('已载入车队'); });
+$('#binder-fleets-all')?.addEventListener('click',()=>$$('.binder-fleet-check').forEach(x=>x.checked=true));
+$('#binder-fleets-none')?.addEventListener('click',()=>$$('.binder-fleet-check').forEach(x=>x.checked=false));
+$('#binder-write-garage')?.addEventListener('click',binderWriteGarage);
 $('#save-cleanup-settings').addEventListener('click',async()=>{try{await api('/api/settings',{method:'POST',body:JSON.stringify({enabled:$('#cleanup-enabled').checked,days:+$('#cleanup-days').value,keep:+$('#cleanup-keep').value})}); await updateCleanupPreview(); toast('自动清理规则已保存');}catch(e){toast(e.message,true);}});
 $$('[data-clean-mode]').forEach(b=>b.addEventListener('click',()=>{$$('[data-clean-mode]').forEach(x=>x.classList.toggle('active',x===b));state.cleanMode=b.dataset.cleanMode;updateCleanupPreview();}));
 $('#execute-cleanup').addEventListener('click',async()=>{const c=state.cleanup;if(!c?.candidate_count)return;if(!confirm(`将 ${c.candidate_count} 组文件移入 Windows 回收站，预计释放 ${formatBytes(c.candidate_bytes)}。继续吗？`))return;try{const d=await api('/api/cleanup/execute',{method:'POST',body:JSON.stringify({days:+$('#cleanup-days').value,keep:+$('#cleanup-keep').value,compact:state.cleanMode==='compact'})});toast(`已将 ${d.result.moved_group_count} 组文件移入回收站`);await updateCleanupPreview();await refreshFileLists();}catch(e){toast(e.message,true);}});
