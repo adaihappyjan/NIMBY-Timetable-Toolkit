@@ -42,6 +42,11 @@ def _signal_bytes(seq: int, lon: float, lat: float) -> bytes:
     return _id_varint(sr.TYPE_SIGNAL, seq) + b"\x3a\x00\x00" + struct.pack("<dd", x, y)
 
 
+def _train_bytes(seq: int, name: str) -> bytes:
+    return (_id_varint(sr.TYPE_TRAIN, seq) + b"\x01"
+            + uvarint(len(name.encode())) + name.encode())
+
+
 def _make_save(tmp_path: Path, raw: bytes) -> Path:
     header = b"NMBY\x02\x00\x01\x00" + b"\x00" * 24
     assert ZSTD_MAGIC not in header
@@ -61,6 +66,10 @@ def _make_raw() -> bytes:
     raw += _line_bytes(0x1, "Lakeshore West", "GO LW", 0xFF0000A9, [0x1, 0x20002, 0x30001])
     raw += b"\x77" * 5
     raw += _signal_bytes(0x1, -79.3801, 43.6446)
+    raw += b"\x88" * 4
+    raw += _train_bytes(0x2, "GO 188")
+    raw += b"\x99" * 3
+    raw += _train_bytes(0x10002, "REM 0045")
     raw += b"\x00" * 16
     return raw
 
@@ -86,12 +95,21 @@ def test_read_signals(tmp_path):
     assert abs(s.lat - 43.6446) < 1e-4
 
 
+def test_read_trains(tmp_path):
+    save = _make_save(tmp_path, _make_raw())
+    raw = Zstd().decompress(__import__("toolkit_binary").split_save(save)[1])
+    trains = sr.read_trains_from_raw(raw)
+    names = {t.name for t in trains}
+    assert names == {"GO 188", "REM 0045"}
+
+
 def test_read_network(tmp_path):
     save = _make_save(tmp_path, _make_raw())
-    net = sr.read_network(save)
+    net = sr.read_network(save, include_trains=True)
     assert net["counts"]["stations"] == 3
     assert net["counts"]["lines"] == 1
     assert net["counts"]["signals"] == 1
+    assert net["counts"]["trains"] == 2
     line = net["lines"][0]
     assert len(line["stops"]) == 3
     assert line["name"] == "Lakeshore West"

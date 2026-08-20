@@ -786,12 +786,14 @@ function onNetworkRead(result) {
   state.allStations = result.all_stations || result.stations || {};
   state.signals = result.signals || [];
   const c = result;
+  state.savereaderTrains = result.trains || [];
   const el = $('#realnet-read-count');
-  if (el) el.textContent = `直读：${c.line_count} 线 · ${c.station_count} 站 · ${c.signal_count} 信号`;
+  const trainTxt = c.train_count != null ? ` · ${c.train_count} 车` : '';
+  if (el) el.textContent = `直读：${c.line_count} 线 · ${c.station_count} 站 · ${c.signal_count} 信号${trainTxt}`;
   renderBinderLines();
   populateAlignStations();
   if (REALNET.ready) { realnetDrawGame(); realnetDrawSignals(); }
-  toast(`已从存档直读：${c.line_count} 线 / ${c.station_count} 站 / ${c.signal_count} 信号`);
+  toast(`已从存档直读：${c.line_count} 线 / ${c.station_count} 站 / ${c.signal_count} 信号${c.train_count != null ? ' / ' + c.train_count + ' 车' : ''}`);
 }
 function populateAlignStations() {
   const sel = $('#align-station'); if (!sel) return;

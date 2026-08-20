@@ -25,6 +25,7 @@ TYPE_TRACK = 0x1
 TYPE_STATION = 0x2
 TYPE_SIGNAL = 0x3
 TYPE_LINE = 0x4
+TYPE_TRAIN = 0x5
 TYPE_SCHEDULE = 0x6
 _HI = {0x40, 0x41, 0xC0, 0xC1}
 
@@ -98,6 +99,12 @@ class SignalRecord:
     id: str
     lon: float
     lat: float
+
+
+@dataclass
+class TrainRecord:
+    id: str
+    name: str
 
 
 def _find_name_records(raw: bytes, type_nibble: int):
@@ -200,13 +207,38 @@ def read_signals_from_raw(raw: bytes) -> list[SignalRecord]:
     return list(out.values())
 
 
-def read_network(save_path: Path, include_signals: bool = True) -> dict:
+def read_trains_from_raw(raw: bytes) -> list[TrainRecord]:
+    """Train records: [id(0x5)][meta uvarint][namelen][name utf8]. Self-describing."""
+    out: dict[int, TrainRecord] = {}
+    n = len(raw)
+    i = 0
+    while i < n - 12:
+        r = _is_id(raw, i, {TYPE_TRAIN})
+        if r:
+            ident, end = r
+            meta = _try_uv(raw, end)
+            if meta:
+                nm = _read_name(raw, meta[1], mn=1, mx=80)
+                if nm and ident not in out:
+                    out[ident] = TrainRecord(id=hex(ident), name=nm[0])
+                    i = meta[1]
+                    continue
+        i += 1
+    return list(out.values())
+
+
+def read_network(
+    save_path: Path,
+    include_signals: bool = True,
+    include_trains: bool = False,
+) -> dict:
     raw = Zstd().decompress(split_save(Path(save_path))[1])
     stations = read_stations_from_raw(raw)
     lines = read_lines_from_raw(raw)
     drawable = [ln for ln in lines if len(ln.stops) >= 2]
     signals = read_signals_from_raw(raw) if include_signals else []
-    return {
+    trains = read_trains_from_raw(raw) if include_trains else []
+    result = {
         "stations": [
             {"id": s.id, "name": s.name, "lon": s.lon, "lat": s.lat} for s in stations
         ],
@@ -222,6 +254,10 @@ def read_network(save_path: Path, include_signals: bool = True) -> dict:
             "signals": len(signals),
         },
     }
+    if include_trains:
+        result["trains"] = [{"id": t.id, "name": t.name} for t in trains]
+        result["counts"]["trains"] = len(trains)
+    return result
 
 
 def _cli(argv: list[str]) -> int:

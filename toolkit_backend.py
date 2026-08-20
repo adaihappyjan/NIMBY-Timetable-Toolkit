@@ -1264,8 +1264,10 @@ def command_network_read(args: argparse.Namespace) -> dict:
 
     include_signals = not getattr(args, "no_signals", False)
     emit_progress("network", 1, 3, "正在解压并直读存档路网…")
-    net = savereader.read_network(args.save, include_signals=include_signals)
-    emit_progress("network", 2, 3, "正在整理线路与车站…")
+    net = savereader.read_network(
+        args.save, include_signals=include_signals, include_trains=True
+    )
+    emit_progress("network", 2, 3, "正在整理线路、车站与车队…")
     stations = {
         s["id"]: {"name": s["name"], "lon": s["lon"], "lat": s["lat"]}
         for s in net["stations"]
@@ -1292,9 +1294,11 @@ def command_network_read(args: argparse.Namespace) -> dict:
         "stations": map_stations,
         "all_stations": stations,
         "signals": net["signals"],
+        "trains": net.get("trains", []),
         "line_count": len(lines),
         "station_count": len(stations),
         "signal_count": len(net["signals"]),
+        "train_count": len(net.get("trains", [])),
     }
 
 
