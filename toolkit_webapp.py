@@ -27,6 +27,8 @@ SAVE_DIR = Path.home() / "Saved Games" / "Weird and Wry" / "NIMBY Rails"
 SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "NIMBY_Timetable_Toolkit"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 TASK_DIR = Path(tempfile.gettempdir()) / "NIMBY_Timetable_Toolkit_Web"
+_DOWNLOADS = Path.home() / "Downloads"
+EXPORT_DIR = (_DOWNLOADS if _DOWNLOADS.is_dir() else Path.home()) / "NIMBY 线路图导出"
 
 sys.path.insert(0, str(ROOT))
 from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
@@ -102,6 +104,49 @@ def recent_files() -> dict:
         "saves": [file_info(path) for path in saves[:40]],
         "exports": [file_info(path) for path in exports[:40]],
     }
+
+
+def _safe_export_name(value: str, default: str, suffix: str) -> str:
+    stem = str(value or "").strip()
+    if stem.lower().endswith(suffix):
+        stem = stem[: -len(suffix)]
+    cleaned = "".join(
+        ch for ch in stem if ch not in '<>:"/\\|?*' and ord(ch) >= 32
+    ).strip().strip(".")
+    if not cleaned:
+        cleaned = default
+    return cleaned[:80] + suffix
+
+
+def save_map_export(payload: dict) -> Path:
+    """Write a client-generated map (SVG/text) into a discoverable folder."""
+    content = payload.get("svg")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("没有可导出的内容")
+    if len(content) > 20_000_000:
+        raise RuntimeError("导出内容过大")
+    suffix = ".svg" if str(payload.get("format", "svg")).lower() == "svg" else ".txt"
+    default = f"线路图_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    name = _safe_export_name(payload.get("filename", ""), default, suffix)
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    path = EXPORT_DIR / name
+    if path.exists():
+        path = EXPORT_DIR / f"{path.stem}_{uuid.uuid4().hex[:6]}{suffix}"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def reveal_in_explorer(path: Path) -> None:
+    """Best-effort: open the containing folder with the file selected (Windows)."""
+    try:
+        if sys.platform.startswith("win"):
+            subprocess.Popen(["explorer", f"/select,{path}"])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
+    except Exception:
+        pass
 
 
 def validate_input_path(value: str, suffix: str) -> Path:
@@ -544,6 +589,11 @@ class Handler(BaseHTTPRequestHandler):
                         "meta": meta,
                     }
                 )
+                return
+            if route == "/api/map/export":
+                path = save_map_export(payload)
+                reveal_in_explorer(path)
+                self.send_json({"ok": True, "path": str(path), "dir": str(path.parent)})
                 return
             raise RuntimeError("未知操作")
         except Exception as exc:

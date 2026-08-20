@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-20c';
+const APP_BUILD = '2026-08-20d';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
 const $ = (selector) => document.querySelector(selector);
@@ -538,16 +538,29 @@ function drawStripDiagram(lines, stations) {
   canvas.appendChild(svg);
   state.mapSvg = svg;
 }
-function exportMapSvg() {
-  if (!state.mapSvg) { toast('请先绘制线路图', true); return; }
+function buildMapSvgData() {
   const clone = state.mapSvg.cloneNode(true);
   const css = 'text.st-label{font:11px "Segoe UI",sans-serif;fill:#0b1d2a;paint-order:stroke;stroke:#fff;stroke-width:3px;}text.st-label.major{font-weight:700;font-size:12px;}text.legend-label{font:13px "Segoe UI",sans-serif;fill:#0b1d2a;}';
   const style = document.createElementNS(SVG_NS, 'style'); style.textContent = css; clone.insertBefore(style, clone.firstChild);
-  const data = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
-  const blob = new Blob([data], { type: 'image/svg+xml' });
-  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `线路图_${timestamp()}.svg`;
-  document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 500);
-  toast('已导出 SVG');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+}
+async function exportMapSvg() {
+  if (!state.mapSvg) { toast('请先绘制线路图', true); return; }
+  const data = buildMapSvgData();
+  const filename = `线路图_${timestamp()}.svg`;
+  // Save through the local service so it reliably lands on disk in the desktop
+  // window (WebView2 often ignores JS blob downloads); show the full path.
+  try {
+    const res = await api('/api/map/export', { method: 'POST', body: JSON.stringify({ svg: data, filename, format: 'svg' }) });
+    toast(`已保存到：${res.path}（已打开所在文件夹）`);
+    return;
+  } catch (e) {
+    // Fall back to a browser download if the service save is unavailable.
+    const blob = new Blob([data], { type: 'image/svg+xml' });
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 500);
+    toast('已触发下载（若窗口未弹出，请查看浏览器/下载文件夹）');
+  }
 }
 function renderNetworkDiff(r) {
   const grid = `<div class="metric-grid"><div class="metric-card"><small>线路变化</small><b>${r.line_change_count}</b><em>条</em></div><div class="metric-card"><small>车站变化</small><b>${r.station_change_count}</b><em>个</em></div><div class="metric-card"><small>较早路网</small><b>${r.before_summary.lines}/${r.before_summary.stations}</b><em>线/站</em></div><div class="metric-card"><small>较新路网</small><b>${r.after_summary.lines}/${r.after_summary.stations}</b><em>线/站</em></div></div>`;
