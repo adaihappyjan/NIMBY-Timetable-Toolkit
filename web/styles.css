@@ -266,3 +266,16 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .ov-row span { font-size:11px; color:var(--muted); flex-shrink:0; }
 .ov-swatch { width:12px; height:12px; border-radius:3px; flex-shrink:0; box-shadow:0 0 0 1px rgba(0,0,0,.08) inset; }
 @media (max-width:860px){ .overview-lists { grid-template-columns:1fr; } }
+.headway-controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin:12px 0; }
+.headway-controls label { font-size:13px; color:#41525b; display:inline-flex; align-items:center; gap:6px; }
+.headway-controls input[type=number] { width:80px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; }
+.headway-summary { margin:10px 0; }
+.headway-table-wrap { overflow:auto; }
+.headway-table { width:100%; border-collapse:collapse; font-size:13px; }
+.headway-table th, .headway-table td { text-align:left; padding:8px 10px; border-bottom:1px solid #eef2f2; white-space:nowrap; }
+.headway-table th { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.headway-table td small { display:block; color:var(--muted); font-size:11px; }
+.hw-delta { font-weight:700; padding:2px 9px; border-radius:999px; font-size:12px; }
+.hw-delta.ok { background:var(--aqua-soft); color:#137a72; }
+.hw-delta.warn { background:#fff3d6; color:#9a6a00; }
+.hw-delta.bad { background:#ffe1e1; color:#b3261e; }

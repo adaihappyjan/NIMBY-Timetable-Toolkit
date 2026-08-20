@@ -163,6 +163,48 @@ function analyticsRows() {
       depot_lines: o.depot_line_count || 0, findings: s.findings || [] };
   });
 }
+function headwayText(sec) {
+  if (sec == null) return '—';
+  const m = sec / 60;
+  return m >= 1 ? `${(Math.round(m * 10) / 10)} 分` : `${Math.round(sec)} 秒`;
+}
+function renderHeadwayPlan() {
+  const targetMin = +$('#headway-target').value;
+  const onlyService = $('#headway-only-service').checked;
+  const summary = $('#headway-summary');
+  if (!state.analysis) { summary.innerHTML = '<div class="placeholder">请先在“总览与体检”完成体检。</div>'; $('#headway-table').hidden = true; $('#headway-export').hidden = true; return; }
+  if (!(targetMin > 0)) { toast('请输入有效的目标班距（分钟）', true); return; }
+  const target = targetMin * 60;
+  let rows = analyticsRows().filter(r => r.trains > 0 && r.headway_median != null && r.headway_median > 0);
+  if (onlyService) rows = rows.filter(r => r.service_line);
+  if (!rows.length) { summary.innerHTML = '<div class="placeholder">没有可规划的载客时刻表（需要有班距数据）。</div>'; $('#headway-table').hidden = true; $('#headway-export').hidden = true; return; }
+  const plan = rows.map(r => {
+    const cycle = r.headway_median * r.trains;         // T = h × N, constant per line
+    const need = Math.max(1, Math.round(cycle / target));
+    return { name: r.name, trains: r.trains, headway: r.headway_median, cycle, need, delta: need - r.trains, line: r.service_line };
+  }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.name.localeCompare(b.name));
+  state.headwayPlan = { target, targetMin, plan };
+  const add = plan.filter(p => p.delta > 0).reduce((s, p) => s + p.delta, 0);
+  const rem = plan.filter(p => p.delta < 0).reduce((s, p) => s - p.delta, 0);
+  const same = plan.filter(p => p.delta === 0).length;
+  summary.innerHTML = `<div class="metric-grid"><div class="metric-card"><small>目标班距</small><b>${targetMin}</b><em>分钟</em></div><div class="metric-card"><small>需加车</small><b>+${add}</b><em>列</em></div><div class="metric-card"><small>可减车</small><b>-${rem}</b><em>列</em></div><div class="metric-card"><small>已达标</small><b>${same}</b><em>张表</em></div></div>`;
+  $('#headway-rows').innerHTML = plan.map(p => {
+    const cls = p.delta > 0 ? 'bad' : (p.delta < 0 ? 'warn' : 'ok');
+    const deltaTxt = p.delta > 0 ? `加 ${p.delta}` : (p.delta < 0 ? `减 ${-p.delta}` : '不变');
+    return `<tr><td><strong>${escapeHtml(p.name)}</strong>${p.line ? `<small>${escapeHtml(p.line)}</small>` : ''}</td><td>${p.trains}</td><td>${headwayText(p.headway)}</td><td>${headwayText(p.cycle)}</td><td>${headwayText(p.headway * p.trains / p.need)}</td><td><strong>${p.need}</strong></td><td><span class="hw-delta ${cls}">${deltaTxt}</span></td></tr>`;
+  }).join('');
+  $('#headway-table').hidden = false;
+  $('#headway-export').hidden = false;
+  toast(`已规划 ${plan.length} 张时刻表：目标班距 ${targetMin} 分钟`);
+}
+function exportHeadwayCsv() {
+  const p = state.headwayPlan; if (!p) return;
+  const lines = [['时刻表', '服务线路', '当前车数', '当前班距(秒)', '循环T(秒)', '目标班距(秒)', '所需车数', '增减'].join(',')];
+  p.plan.forEach(x => lines.push([`"${x.name.replace(/"/g, '""')}"`, `"${(x.line || '').replace(/"/g, '""')}"`, x.trains, Math.round(x.headway), Math.round(x.cycle), p.target, x.need, x.delta].join(',')));
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  a.href = url; a.download = `班距规划_${p.targetMin}分钟.csv`; a.click(); URL.revokeObjectURL(url);
+}
 function drawAnalyticsList() {
   const q = ($('#analytics-search').value || '').trim().toLowerCase();
   const filter = $('#analytics-filter').value;
@@ -781,6 +823,53 @@ function realnetDrawSignals() {
       .addTo(REALNET.signalLayer);
   });
 }
+function calcHeadwayPlan() {
+  const a = state.analysis;
+  if (!a || !(a.health_schedules || []).length) { toast('请先在“总览与体检”完成体检', true); return; }
+  const targetMin = +$('#headway-target').value;
+  if (!(targetMin > 0)) { toast('请输入有效的目标班距（分钟）', true); return; }
+  const targetSec = targetMin * 60;
+  const onlyService = $('#headway-only-service').checked;
+  const rows = [];
+  for (const s of a.health_schedules) {
+    const N = s.train_count || 0;
+    const h = (s.operations || {}).headway_median_seconds;
+    if (!N || !h) continue;                 // only schedules with a measured headway
+    if (onlyService && !(s.operations || {}).service_line) continue;
+    const T = h * N;                        // cycle time is invariant of N
+    const need = Math.max(1, Math.round(T / targetSec));
+    rows.push({ name: s.name, N, h, T, need, delta: need - N });
+  }
+  rows.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta) || y.N - x.N);
+  state.headwayPlan = { targetMin, rows };
+  const add = rows.filter(r => r.delta > 0).reduce((s, r) => s + r.delta, 0);
+  const rem = rows.filter(r => r.delta < 0).reduce((s, r) => s - r.delta, 0);
+  $('#headway-summary').innerHTML = rows.length
+    ? `<span>目标班距 <strong>${targetMin} 分</strong></span> · <span>${rows.length} 条线</span> · <span class="hw-add">需加 ${add} 车</span> · <span class="hw-rem">需减 ${rem} 车</span>`
+    : '<span class="placeholder">没有可规划的载客时刻表（需已分配车队且有可测班距）。</span>';
+  const fmt = sec => sec >= 3600 ? `${(sec / 3600).toFixed(1)}h` : `${Math.round(sec / 60)}分`;
+  $('#headway-rows').innerHTML = rows.map(r => {
+    const cls = r.delta > 0 ? 'hw-add' : (r.delta < 0 ? 'hw-rem' : 'hw-ok');
+    const txt = r.delta > 0 ? `+${r.delta}` : (r.delta < 0 ? `${r.delta}` : '±0');
+    return `<tr><td>${escapeHtml(r.name)}</td><td>${r.N}</td><td>${fmt(r.h)}</td><td>${fmt(r.T)}</td><td>${$('#headway-target').value}分</td><td>${r.need}</td><td class="${cls}">${txt}</td></tr>`;
+  }).join('');
+  $('#headway-table').hidden = rows.length === 0;
+  $('#headway-export').hidden = rows.length === 0;
+  if (rows.length) toast(`已按目标班距 ${targetMin} 分规划 ${rows.length} 条线`);
+}
+function exportHeadwayPlan() {
+  const p = state.headwayPlan; if (!p || !p.rows.length) return;
+  const head = ['schedule', 'current_trains', 'current_headway_s', 'cycle_time_s', 'target_headway_s', 'required_trains', 'delta'];
+  const lines = [head.join(',')].concat(p.rows.map(r =>
+    [`"${r.name.replace(/"/g, '""')}"`, r.N, r.h, r.T, p.targetMin * 60, r.need, r.delta].join(',')));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = `班距规划_${p.targetMin}分.csv`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('已导出班距规划 CSV');
+}
 function renderSaveOverview(r) {
   state.saveOverview = r;
   const c = r.counts || {};
@@ -1285,6 +1374,10 @@ $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
+$('#headway-calc')?.addEventListener('click', renderHeadwayPlan);
+$('#headway-export')?.addEventListener('click', exportHeadwayCsv);
+$('#headway-calc')?.addEventListener('click', calcHeadwayPlan);
+$('#headway-export')?.addEventListener('click', exportHeadwayPlan);
 $('#save-select').addEventListener('change', refreshOutputNames);
 $('#save-dir-box')?.addEventListener('toggle', e => { e.target.dataset.userToggled = '1'; });
 $('#save-dir-apply')?.addEventListener('click', () => applySaveDir($('#save-dir-input').value));

@@ -337,6 +337,18 @@
             </div>
           </div>
         </article>
+        <article class="panel" id="headway-panel">
+          <div class="panel-heading"><div><p class="step">能力 04 · 已可用</p><h3>班距规划器（目标班距 → 所需车数）</h3></div><span class="phase-badge safe">零风险 · 建议</span></div>
+          <p class="repair-note">基于体检实测：每条线的<strong>单车循环时间 T = 当前班距 × 当前车数</strong>是与车数无关的常量（实档 35/35 精确成立）。设定目标班距后，工具算出各时刻表所需车数与增减量，供你在游戏内加/减车——不写任何存档。请先在“总览与体检”完成体检。</p>
+          <div class="headway-controls">
+            <label>目标班距<input id="headway-target" type="number" min="0.5" max="240" step="0.5" value="5"><span>分钟</span></label>
+            <label class="map-toggle"><input type="checkbox" id="headway-only-service" checked> 只看载客线路</label>
+            <button class="secondary-button" id="headway-calc">计算所需车数</button>
+            <button class="text-button" id="headway-export" hidden>导出方案 CSV</button>
+          </div>
+          <div class="headway-summary" id="headway-summary"></div>
+          <div class="headway-table-wrap"><table class="headway-table" id="headway-table" hidden><thead><tr><th>时刻表</th><th>当前车数</th><th>当前班距</th><th>循环 T</th><th>目标班距</th><th>所需车数</th><th>增减</th></tr></thead><tbody id="headway-rows"></tbody></table></div>
+        </article>
         <article class="panel" id="recover-panel">
           <div class="panel-heading"><div><p class="step">模板恢复</p><h3>从历史导出恢复车队</h3></div><span class="phase-badge safe">安全重建</span></div>
           <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史导出里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。请先在“总览与体检”完成体检。</p>
