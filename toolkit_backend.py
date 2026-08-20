@@ -1277,6 +1277,7 @@ def command_save_overview(args: argparse.Namespace) -> dict:
     trains = savereader.read_trains_from_raw(raw)
     assignments = savereader.read_schedule_assignments(raw)
     timetables = savereader.read_line_timetables(raw)
+    tags = savereader.read_tags_from_raw(raw)
     emit_progress("overview", 2, 3, "正在归类线路与时刻表…")
 
     assign_by_id = {a.schedule_id: a for a in assignments}
@@ -1327,6 +1328,7 @@ def command_save_overview(args: argparse.Namespace) -> dict:
             "trains": len(trains),
             "assigned_trains": len(assigned_train_ids),
             "total_shifts": total_shifts,
+            "tags": len(tags),
         },
         "routes": route_rows,
         "containers": container_rows,

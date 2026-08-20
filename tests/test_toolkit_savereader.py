@@ -196,6 +196,30 @@ def test_read_line_timetables_relative_times(tmp_path):
     assert t.stops[1].departure - t.stops[1].arrival == 20  # dwell recovered
 
 
+def _tag_bytes(tag_id: int, parent_id: int, name: str, with_marker: bool = True) -> bytes:
+    """Tag record: [ff ff ff ff 0f][01][cat][00][id*2][id*2][parent*2][namelen][name]."""
+    body = b""
+    if with_marker:
+        body += b"\xff\xff\xff\xff\x0f\x01\x04\x00"
+    body += uvarint(tag_id * 2) + uvarint(tag_id * 2) + uvarint(parent_id * 2)
+    body += uvarint(len(name.encode())) + name.encode()
+    return body
+
+
+def test_read_tags(tmp_path):
+    # Two marker-prefixed tags + one straggler (first-in-subgroup, no marker).
+    raw = b"\x33" * 8
+    raw += _tag_bytes(0x65, 0x0, "purpose")
+    raw += _tag_bytes(0x66, 0x65, "metro")
+    raw += _tag_bytes(0x192, 0x191, "linear", with_marker=False)
+    raw += b"\x00" * 8
+    tags = {t.id: t for t in sr.read_tags_from_raw(raw)}
+    assert tags["0x65"].name == "purpose" and tags["0x65"].parent == "0x0"
+    assert tags["0x66"].name == "metro" and tags["0x66"].parent == "0x65"
+    # straggler without marker is still recovered by the bounded region sweep
+    assert tags["0x192"].name == "linear" and tags["0x192"].parent == "0x191"
+
+
 def test_read_network(tmp_path):
     save = _make_save(tmp_path, _make_raw())
     net = sr.read_network(save, include_trains=True)

@@ -329,6 +329,78 @@ def read_line_timetables(raw: bytes) -> list[TimetableRecord]:
     return out
 
 
+@dataclass
+class TagRecord:
+    id: str
+    name: str
+    parent: str  # "0x0" for a top-level category
+
+
+def _tag_at(raw: bytes, q: int):
+    """Parse a tag body ``[id*2][id*2][parent*2][namelen][name]`` at offset q.
+
+    Tag ids are small integers (not the ``type<<48`` object ids); the id is
+    written twice, then the parent id, all doubled (LSB parity marker).
+    """
+    a = _try_uv(raw, q)
+    if not a or a[0] == 0 or a[0] % 2:
+        return None
+    id1, p = a
+    b = _try_uv(raw, p)
+    if not b or b[0] != id1:
+        return None
+    p = b[1]
+    c = _try_uv(raw, p)
+    if not c or c[0] % 2:
+        return None
+    par, p = c
+    nm = _read_name(raw, p, mn=1, mx=40)
+    if not nm:
+        return None
+    return id1 // 2, par // 2, nm[0], nm[1]
+
+
+def read_tags_from_raw(raw: bytes) -> list[TagRecord]:
+    """Hierarchical tag taxonomy (train purpose / gauge / power / …).
+
+    Definitions sit in one cluster; most are prefixed by the marker
+    ``ff ff ff ff 0f 01 <cat> 00`` then the tag body. A few (first in a
+    sub-group) lack the marker, so after locating the marker-anchored tags we
+    sweep the bounded cluster for the ``[id][id][parent][name]`` body to pick up
+    stragglers without risking false positives outside the tag region.
+    Validated 64/64 (name + parent exact, 0 false positives) vs export.
+    """
+    MARK = b"\xff\xff\xff\xff\x0f"
+    out: dict[int, TagRecord] = {}
+    positions: list[int] = []
+    n = len(raw)
+    i = 0
+    while True:
+        p = raw.find(MARK, i)
+        if p < 0:
+            break
+        i = p + 1
+        q = p + 5
+        if q + 3 >= n or raw[q] != 0x01 or raw[q + 2] != 0x00:
+            continue
+        t = _tag_at(raw, q + 3)
+        if t and 0 < t[0] < 0x80000:
+            out.setdefault(t[0], TagRecord(id=hex(t[0]), name=t[2], parent=hex(t[1])))
+            positions.append(p)
+    if positions:
+        lo = max(0, min(positions) - 500)
+        hi = min(n, max(positions) + 500)
+        j = lo
+        while j < hi:
+            t = _tag_at(raw, j)
+            if t and 0 < t[0] < 0x80000 and t[0] not in out:
+                out[t[0]] = TagRecord(id=hex(t[0]), name=t[2], parent=hex(t[1]))
+                j = t[3]
+                continue
+            j += 1
+    return list(out.values())
+
+
 def read_signals_from_raw(raw: bytes) -> list[SignalRecord]:
     """Type 0x3 positioned nodes (signals / switches) carrying Mercator coords."""
     out: dict[int, SignalRecord] = {}

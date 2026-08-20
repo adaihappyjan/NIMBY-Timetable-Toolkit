@@ -898,6 +898,7 @@ function renderSaveOverview(r) {
     ['列车', c.trains, `${c.assigned_trains ?? 0} 已分配`],
     ['班次', c.total_shifts ?? 0, '个'],
     ['信号/道岔', c.signals, '个'],
+    ['标签', c.tags ?? 0, '分类'],
   ];
   const mg = $('#overview-metrics');
   mg.innerHTML = metrics.map(x => `<div class="metric-card"><small>${x[0]}</small><b>${(x[1] ?? 0).toLocaleString()}</b><em>${x[2]}</em></div>`).join('');
