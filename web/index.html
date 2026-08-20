@@ -263,13 +263,15 @@
               </label>
               <label class="map-toggle"><input type="checkbox" id="realnet-show-game" checked> 叠加游戏路网</label>
               <label class="map-toggle"><input type="checkbox" id="realnet-show-signals"> 显示信号/道岔</label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-tracks"> 显示真实轨道</label>
             </div>
           </div>
           <div class="realnet-importbar">
             <strong>从存档直读（无需 JSON）</strong>
             <button class="text-button" id="realnet-read-save">从当前存档直读路网（含信号）</button>
+            <button class="text-button" id="realnet-read-tracks">直读真实轨道几何</button>
             <span id="realnet-read-count" class="realnet-import-count"></span>
-            <small>直接解析所选存档的二进制，得到线路/站序/信号，连导出 JSON 都不需要。信号扫描较慢，请稍候。</small>
+            <small>直接解析所选存档的二进制，得到线路/站序/信号与<strong>真实轨道走向</strong>（曲线折线，非站点直连），连导出 JSON 都不需要。首次扫描较慢，请稍候。</small>
           </div>
           <div class="realnet-searchbar">
             <input id="realnet-search" type="search" placeholder="跳转到地点（如 Tokyo Station、上海、45.5,-73.6）" spellcheck="false">

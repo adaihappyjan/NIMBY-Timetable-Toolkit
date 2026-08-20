@@ -435,6 +435,9 @@ class TaskManager:
         if action == "line-timetable":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["line-timetable", "--save", str(save)]
+        if action == "track-geometry":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            return ["track-geometry", "--save", str(save)]
         if action == "ops-analyze":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             args = ["ops-analyze", "--save", str(save)]

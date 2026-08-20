@@ -17,6 +17,7 @@ from pathlib import Path
 from toolkit_binary import Zstd, split_save
 from toolkit_coordedit import (
     StationRecord,
+    lonlat_to_mercator,
     mercator_to_lonlat,
     read_stations_from_raw,
 )
@@ -575,6 +576,129 @@ def read_schedules_from_raw(raw: bytes) -> list[ScheduleRecord]:
         ScheduleRecord(id=ln.id, name=ln.name, color=ln.color, stop_count=len(ln.stops))
         for ln in lines
     ]
+
+
+@dataclass
+class TrackGeometry:
+    node_count: int
+    segment_count: int
+    total_length_m: float
+    # each segment is [lon1, lat1, lon2, lat2] — a real drawn track polyline edge
+    segments: list[list[float]] = field(default_factory=list)
+    nodes: list[list[float]] = field(default_factory=list)  # [lon, lat] per node
+
+
+def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    import math
+    r = 6_371_000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
+def read_track_geometry(
+    raw: bytes,
+    max_segment_m: float = 2000.0,
+    region_end: int = 6_500_000,
+    region_start: int = 170_000,
+) -> TrackGeometry:
+    """JSON-free real track geometry: the node graph the network is drawn from.
+
+    Every Track object (id high nibble ``0x1``) is a graph *node* with one Web
+    Mercator coordinate (same projection as stations), a small header
+    ``[00 <neighbour_count> 00 …]``, the ids of its neighbouring track nodes
+    (adjacency), and links to the station (0x2) / signals (0x3) it touches. We
+    walk record starts, map ``major_index -> (lon, lat)`` and draw an edge for
+    each neighbour whose coordinate is known. Segments longer than
+    ``max_segment_m`` are dropped as parse noise (real adjacent nodes sit tens of
+    metres apart; validated median 90 m, p90 ~470 m on the reference save).
+
+    Read-only. Returns node points + drawable segments + total track length.
+    """
+    n = len(raw)
+    stations = read_stations_from_raw(raw)
+    if not stations:
+        return TrackGeometry(0, 0, 0.0, [], [])
+    mxs = [lonlat_to_mercator(s.lon, s.lat) for s in stations]
+    xlo = min(x for x, _ in mxs) - 40_000
+    xhi = max(x for x, _ in mxs) + 40_000
+    ylo = min(y for _, y in mxs) - 40_000
+    yhi = max(y for _, y in mxs) + 40_000
+
+    coord_of: dict[int, tuple[float, float]] = {}
+    neighbors: dict[int, list[int]] = {}
+    end = min(n - 20, region_end)
+    i = max(0, region_start)
+    while i < end:
+        # Fast pre-filter: a track id is an 8-byte varint whose 8th byte == 0x1.
+        if raw[i + 7] != TYPE_TRACK:
+            i += 1
+            continue
+        r = _is_id(raw, i, {TYPE_TRACK})
+        if not r or r[1] - i < 7:
+            i += 1
+            continue
+        e = r[1]
+        # record-start header: [id][00 <neighbour_count<=12> 00 …]
+        if not (raw[e] == 0 and raw[e + 1] <= 12 and raw[e + 2] == 0):
+            i += 1
+            continue
+        own = (r[0] >> 16) & 0xFFFFFFFF
+        j = e
+        nbrs: list[int] = []
+        coord = None
+        limit = min(n - 16, e + 160)
+        while j < limit:
+            if raw[j + 7] in _HI and raw[j + 15] in _HI:
+                x = struct.unpack_from("<d", raw, j)[0]
+                y = struct.unpack_from("<d", raw, j + 8)[0]
+                if xlo < x < xhi and ylo < y < yhi:
+                    coord = mercator_to_lonlat(x, y)
+                    break
+            rr = _is_id(raw, j, {TYPE_TRACK})
+            if rr and rr[1] - j >= 7:
+                m = (rr[0] >> 16) & 0xFFFFFFFF
+                if m != own:
+                    nbrs.append(m)
+                j = rr[1]
+                continue
+            j += 1
+        if coord is not None and own not in coord_of:
+            coord_of[own] = (round(coord[0], 6), round(coord[1], 6))
+            neighbors[own] = nbrs
+        i = e
+
+    seen_edges: set[tuple[int, int]] = set()
+    segments: list[list[float]] = []
+    total = 0.0
+    for a, ns in neighbors.items():
+        pa = coord_of.get(a)
+        if not pa:
+            continue
+        for b in ns:
+            pb = coord_of.get(b)
+            if not pb:
+                continue
+            key = (a, b) if a < b else (b, a)
+            if key in seen_edges:
+                continue
+            d = _haversine_m(pa[0], pa[1], pb[0], pb[1])
+            if d > max_segment_m or d < 1.0:  # drop degenerate/zero-length edges
+                continue
+            seen_edges.add(key)
+            segments.append([pa[0], pa[1], pb[0], pb[1]])
+            total += d
+
+    nodes = [[lon, lat] for lon, lat in coord_of.values()]
+    return TrackGeometry(
+        node_count=len(coord_of),
+        segment_count=len(segments),
+        total_length_m=round(total, 1),
+        segments=segments,
+        nodes=nodes,
+    )
 
 
 def read_network(

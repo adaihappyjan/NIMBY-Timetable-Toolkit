@@ -1554,6 +1554,32 @@ def command_ops_analyze(args: argparse.Namespace) -> dict:
     }
 
 
+def command_track_geometry(args: argparse.Namespace) -> dict:
+    """JSON-free real track geometry (the drawn rail graph) straight from a save.
+
+    Reads every Track (0x1) node's Mercator coordinate + adjacency and emits the
+    drawable polyline segments plus total track length. Read-only; the export
+    JSON does not contain track geometry at all, so this is save-only.
+    """
+    import toolkit_savereader as savereader
+    from toolkit_binary import Zstd, split_save
+
+    path = Path(args.save)
+    emit_progress("track", 1, 2, "正在解压并直读轨道几何…")
+    _header, frame, _offset = split_save(path)
+    raw = Zstd().decompress(frame)
+    geo = savereader.read_track_geometry(raw)
+    emit_progress("track", 2, 2, "轨道几何就绪")
+    return {
+        "action": "track-geometry",
+        "save": str(path),
+        "node_count": geo.node_count,
+        "segment_count": geo.segment_count,
+        "total_length_km": round(geo.total_length_m / 1000.0, 1),
+        "segments": geo.segments,
+    }
+
+
 def command_network_read(args: argparse.Namespace) -> dict:
     """JSON-free: read the rail network (lines/stations/signals) from a save."""
     import toolkit_savereader as savereader
@@ -3055,6 +3081,8 @@ def build_parser() -> argparse.ArgumentParser:
     save_overview.add_argument("--save", type=Path, required=True)
     line_timetable = sub.add_parser("line-timetable")
     line_timetable.add_argument("--save", type=Path, required=True)
+    track_geometry = sub.add_parser("track-geometry")
+    track_geometry.add_argument("--save", type=Path, required=True)
     ops_analyze = sub.add_parser("ops-analyze")
     ops_analyze.add_argument("--save", type=Path, required=True)
     ops_analyze.add_argument("--export", type=Path)
@@ -3110,6 +3138,8 @@ def main() -> None:
             result = command_line_timetable(args)
         elif args.command == "ops-analyze":
             result = command_ops_analyze(args)
+        elif args.command == "track-geometry":
+            result = command_track_geometry(args)
         elif args.command == "network-read":
             result = command_network_read(args)
         elif args.command == "align-coords":

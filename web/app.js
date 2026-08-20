@@ -827,7 +827,7 @@ function renderNetworkDiff(r) {
   toast(`路网差分完成：${r.line_change_count} 条线路、${r.station_change_count} 个车站有变化`);
 }
 // ---- Real-world reference map (Leaflet + OpenRailwayMap overlay) ----------
-const REALNET = { map: null, ready: false, gameLayer: null, ormLayer: null, baseLayers: {}, pinLayer: null, pins: [], loader: null };
+const REALNET = { map: null, ready: false, gameLayer: null, ormLayer: null, baseLayers: {}, pinLayer: null, pins: [], loader: null, trackLayer: null, trackRenderer: null };
 function loadJson(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
 function saveJson(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
 function loadLeaflet() {
@@ -878,6 +878,29 @@ function realnetDrawSignals() {
     L.circleMarker([s.lat, s.lon], { radius: 2, color: '#c0392b', weight: 1, fillColor: '#e74c3c', fillOpacity: 0.8 })
       .addTo(REALNET.signalLayer);
   });
+}
+function realnetDrawTracks() {
+  if (!REALNET.ready || !REALNET.map) return;
+  // Canvas renderer keeps ~15k polyline edges smooth (SVG would choke).
+  if (!REALNET.trackRenderer) REALNET.trackRenderer = L.canvas({ padding: 0.5 });
+  if (!REALNET.trackLayer) REALNET.trackLayer = L.layerGroup().addTo(REALNET.map);
+  REALNET.trackLayer.clearLayers();
+  const show = $('#realnet-show-tracks')?.checked;
+  const segs = state.trackSegments;
+  if (!show || !segs || !segs.length) return;
+  segs.forEach(s => {
+    L.polyline([[s[1], s[0]], [s[3], s[2]]], {
+      color: '#6b7a83', weight: 1.4, opacity: 0.7, renderer: REALNET.trackRenderer, interactive: false,
+    }).addTo(REALNET.trackLayer);
+  });
+}
+function onTrackGeometry(result) {
+  state.trackSegments = result.segments || [];
+  const el = $('#realnet-read-count');
+  if (el) el.textContent = `真实轨道：${result.node_count} 节点 · ${result.segment_count} 段 · ${result.total_length_km} km`;
+  const box = $('#realnet-show-tracks'); if (box && !box.checked) box.checked = true;
+  if (REALNET.ready) realnetDrawTracks();
+  toast(`真实轨道直读完成：${result.node_count} 节点 / ${result.total_length_km} km`);
 }
 function calcHeadwayPlan() {
   const a = state.analysis;
@@ -1263,6 +1286,7 @@ async function initRealnet() {
   renderAlignList();
   populateAlignStations();
   if (state.network) { realnetDrawGame(); realnetDrawSignals(); } else realnetEnsureData();
+  if ((state.trackSegments || []).length) realnetDrawTracks();
   setTimeout(() => map.invalidateSize(), 80);
 }
 
@@ -1327,6 +1351,7 @@ async function pollOnce() {
       else if (s.action === 'line-timetable') { renderLineTimetable(s.result); }
       else if (s.action === 'ops-analyze') { renderOpsAnalyze(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
+      else if (s.action === 'track-geometry') { onTrackGeometry(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
@@ -1486,7 +1511,9 @@ $('#realnet-base').addEventListener('change',()=>realnetSetBase($('#realnet-base
 $('#realnet-overlay').addEventListener('change',()=>realnetSetOverlay($('#realnet-overlay').value));
 $('#realnet-show-game').addEventListener('change',realnetDrawGame);
 $('#realnet-show-signals')?.addEventListener('change',realnetDrawSignals);
+$('#realnet-show-tracks')?.addEventListener('change',()=>{ if($('#realnet-show-tracks').checked && !(state.trackSegments||[]).length){ const save=$('#save-select')?.value; if(!save)return toast('请先在“总览与体检”选择存档',true); return startTask('track-geometry',{save}); } realnetDrawTracks(); });
 $('#realnet-read-save')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先在“总览与体检”选择存档',true); startTask('network-read',{save}); });
+$('#realnet-read-tracks')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先在“总览与体检”选择存档',true); startTask('track-geometry',{save}); });
 $('#align-add')?.addEventListener('click',alignAdd);
 $('#align-generate')?.addEventListener('click',alignGenerate);
 $('#align-clear')?.addEventListener('click',()=>{ state.alignList=[]; renderAlignList(); });

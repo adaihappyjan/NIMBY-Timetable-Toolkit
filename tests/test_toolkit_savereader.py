@@ -220,6 +220,36 @@ def test_read_tags(tmp_path):
     assert tags["0x192"].name == "linear" and tags["0x192"].parent == "0x191"
 
 
+def _track_node_bytes(major: int, lon: float, lat: float, neighbours: list[int]) -> bytes:
+    """One drawn-track graph node: id + [00 ncount 00] + neighbour ids + Mercator coord."""
+    b = _id_varint(sr.TYPE_TRACK, (major << 16) | 1)
+    b += b"\x00" + bytes([len(neighbours)]) + b"\x00"
+    for m in neighbours:
+        b += _id_varint(sr.TYPE_TRACK, (m << 16) | 1)
+    x, y = ce.lonlat_to_mercator(lon, lat)
+    b += struct.pack("<dd", x, y)
+    return b
+
+
+def test_read_track_geometry():
+    # Three track nodes A-B-C plus stations to seed the bounding box.
+    raw = b"\x00" * 40
+    raw += _station_bytes(0x1, -79.3803, 43.6446, "A") + b"\x55" * 3
+    raw += _station_bytes(0x20001, -79.3790, 43.6455, "B") + b"\x55" * 3
+    raw += _station_bytes(0x30001, -79.3777, 43.6464, "C") + b"\x66" * 5
+    raw += _track_node_bytes(1, -79.3803, 43.6446, [2]) + b"\x11" * 3
+    raw += _track_node_bytes(2, -79.3790, 43.6455, [1, 3]) + b"\x11" * 3
+    raw += _track_node_bytes(3, -79.3777, 43.6464, [2]) + b"\x00" * 20
+    geo = sr.read_track_geometry(raw, region_start=0, region_end=len(raw))
+    assert geo.node_count == 3
+    assert geo.segment_count == 2          # A-B and B-C, deduped both directions
+    assert geo.total_length_m > 0
+    # every segment is a real drawn edge between two known node coords
+    for lon1, lat1, lon2, lat2 in geo.segments:
+        assert -80 < lon1 < -79 and 43 < lat1 < 44
+        assert -80 < lon2 < -79 and 43 < lat2 < 44
+
+
 def test_read_network(tmp_path):
     save = _make_save(tmp_path, _make_raw())
     net = sr.read_network(save, include_trains=True)
