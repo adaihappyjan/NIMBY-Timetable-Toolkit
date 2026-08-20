@@ -1,16 +1,23 @@
 :root {
-  --ink: #0b1d2a;
-  --muted: #667783;
-  --navy: #071827;
-  --navy-2: #0d2638;
-  --aqua: #19c6ba;
-  --aqua-soft: #dff8f5;
-  --cream: #f4f6f3;
-  --white: #ffffff;
-  --line: #dfe7e8;
-  --orange: #f5a543;
-  --red: #d95454;
-  --shadow: 0 18px 55px rgba(5, 29, 43, .09);
+  /* Professional dark operations-console theme */
+  --ink: #e6edf3;
+  --muted: #8f9fab;
+  --navy: #0a121a;
+  --navy-2: #0f2331;
+  --aqua: #2dd4c4;
+  --aqua-soft: #0f3735;
+  --cream: #0a1017;
+  --white: #131d28;
+  --line: #26333f;
+  --orange: #f2a640;
+  --red: #e5686a;
+  --shadow: 0 20px 55px rgba(0, 0, 0, .55);
+  /* semantic surface tokens */
+  --surface: #131d28;
+  --surface-2: #0f1822;
+  --hover: #1a2734;
+  --accent-ink: #04302d;
+  --border-soft: #1f2c37;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: var(--cream); color: var(--ink); font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; }
@@ -314,3 +321,123 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .ops-guard { flex-direction:row; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
 .ops-guard input { width:auto; }
 .tt-table .ov-swatch { display:inline-block; margin-right:7px; vertical-align:middle; }
+
+/* =====================================================================
+   DARK PROFESSIONAL THEME — override layer (appended last = wins).
+   Converts every hardcoded light surface/border/pill to dark tokens.
+   Intentional light areas kept: transit-map paper, Leaflet map, switch knob.
+   ===================================================================== */
+body { background:
+    radial-gradient(1200px 600px at 15% -10%, #10202e 0%, transparent 55%),
+    radial-gradient(1000px 500px at 100% 0%, #0d1a26 0%, transparent 50%),
+    var(--cream); }
+/* surfaces */
+.panel, .status-card, .metric-card, .a-detail-grid div,
+.road-item, .realnet-line-row, .cand-row { background: var(--surface); border-color: var(--line); }
+.panel { box-shadow: 0 8px 30px rgba(0,0,0,.35); border:1px solid var(--line); }
+.panel:hover { box-shadow: 0 16px 44px rgba(0,0,0,.5); }
+.overview-col, .save-dir, .map-advanced, .bind-sec, .tt-line,
+.analytics-row, .future-panel, .planner-form { background: var(--surface-2); border-color: var(--line); }
+.metric-card:hover, .road-item:hover { box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+/* nested / hover fills */
+.ov-row:hover, .cleanup-item:hover { background: var(--hover); }
+.pair-card:hover, .schedule-option:hover, .map-line-option:hover,
+.realnet-pin-row:hover, .cand-row:hover, .realnet-line-row:hover,
+.analytics-row summary:hover { border-color: #2f6f6a; background: var(--hover); }
+.text-button:hover { background:#16413d; color: var(--aqua); }
+/* inputs / selects / numbers */
+.file-grid select, .output-label input, .number-grid input,
+.script-builder>label input, .veh-form label>input, .veh-form label>select,
+.veh-grid input, .analytics-tools input[type="search"], .analytics-tools select,
+.realnet-tools select, .realnet-searchbar input[type="search"],
+.planner-form label>input, .save-dir-row input, .map-adv-grid input,
+.binder-meta input, .binder-rules input[type=number], .headway-controls input[type=number],
+.inline-number, .veh-color-row input[type="color"] {
+  background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+.file-grid select option, select option { background: var(--surface); color: var(--ink); }
+/* borders / dividers */
+.safety-strip, .cleanup-item, .cleanup-actions, .binder-result, .save-dir-body,
+.map-adv-grid, .analytics-detail, .compare-result .cleanup-item,
+.headway-table th, .headway-table td, .tt-table th, .tt-table td,
+#repair-panel .action-panel, .finding, .metric-card, .pair-card, .plan-stat,
+.schedule-option, .rule-option, .map-line-option, .map-canvas, .analytics-row,
+.realnet-pin-row { border-color: var(--line); }
+/* text tones that were near-black on light */
+.overview-meta strong, .ovh-meta strong, .metric-card b, .plan-stat b,
+.segmented button.active, .save-dir .sd-label, .map-advanced>summary,
+.map-adv-grid input, .veh-preview-head, .panel h3, .brand strong { color: var(--ink); }
+.a-cell, .cleanup-item span, .rl-stops, .bind-sec p, .analytics-row .a-cell,
+.tt-table td, .realnet-foot a, .install-steps li, .realnet-foot span { color: var(--muted); }
+/* badges / soft chips (aqua) */
+.count-badge, .segmented, .road-rank, .road-status,
+.finding-group-title span, .tt-line>summary span, .save-dir .sd-path,
+.cand-row .cand-tag { background: var(--surface-2); color: var(--muted); }
+.segmented button.active { background: var(--surface); }
+.text-button, .secondary-button { background:#123b38; color: var(--aqua); }
+.local-chip { background:#123b38; color: var(--aqua); box-shadow:0 0 0 4px rgba(45,212,196,.06); }
+.icon-button { background: var(--surface); border-color: var(--line); color: var(--ink); }
+/* accent-soft pills -> dark teal */
+.confidence, .verified-chip, .rl-tag, .bind-targets span, .ver-chip.ok,
+.change-tag.added, .hw-delta.ok, .health-pill.hgood, .ov-svc,
+.cand-row.has .cand-tag, .save-dir .sd-path.ok, .phase-badge, .phase-badge.safe,
+.feature-pills span, .departure.peak {
+  background:#0f3735 !important; color:#4fe0d1 !important; border-color:#1c534f !important; }
+/* warning pills -> dark amber */
+.change-tag.modified, .hw-delta.warn, .health-pill.hwarn, .ver-chip.warn,
+.finding-group-title.warning span, .save-dir .sd-path.warn, .realnet-import-count {
+  background:#3a2c10 !important; color:#f2c268 !important; }
+.finding-group-title.warning { color:#f2c268; }
+/* danger pills -> dark red */
+.change-tag.removed, .hw-delta.bad, .health-pill.hbad, .ver-chip.bad,
+.finding-group-title.critical span, .save-dir .sd-path.bad {
+  background:#3a1618 !important; color:#f0888a !important; }
+.finding-group-title.critical { color:#f0888a; }
+/* notes / callouts */
+.repair-note, .script-safety, .realnet-importbar { background:#221a0d; border-color:#3a2c10; }
+.realnet-importbar strong { color:#f2c268; } .realnet-importbar small { color:#c3a878; }
+.script-safety p { color:#c3a878; }
+.future-panel { background: linear-gradient(120deg,#0f2b29,#131d28); border-color:#1c534f; }
+/* health rings on dark */
+.health-ring { background: conic-gradient(var(--aqua) calc(var(--score)*1%), #223039 0); }
+.health-ring:before { background: var(--surface); }
+.health-ring.ovh-ring.good { background:conic-gradient(#2dd4a0 calc(var(--score)*1%), #223039 0); }
+.health-ring.ovh-ring.warn { background:conic-gradient(#f2a640 calc(var(--score)*1%), #223039 0); }
+.health-ring.ovh-ring.bad  { background:conic-gradient(#e5686a calc(var(--score)*1%), #223039 0); }
+.overview-health { background: linear-gradient(180deg, var(--surface), var(--surface-2)); border-color: var(--line); }
+.ovh-item { background: var(--surface-2); border-color: var(--line); }
+.ovh-meta em { color:#7c8b96; }
+/* overview meta path etc */
+.veh-preview-meta code, .save-dir-hint code { background: var(--surface-2); color: var(--aqua); }
+.veh-modtext { background:#0a1119; color:#bfe0dc; }
+/* depot/phase table dark chips already dark; departures */
+.departure { background: var(--surface-2); border-color: var(--line); color: var(--muted); }
+.install-steps b, .task-icon { background:#123b38; color: var(--aqua); }
+/* placeholders / dashed */
+.placeholder { color:#6f818c; border-color:#2b3a46; }
+/* scrollbars */
+* { scrollbar-color:#33444f transparent; }
+::-webkit-scrollbar-thumb { background:#2b3a46; border:2px solid var(--cream); }
+::-webkit-scrollbar-thumb:hover { background:#3a4c58; }
+/* switch knob stays light for contrast on the track */
+.switch:after { background:#e6edf3; }
+/* keep the printable transit diagram on white paper for export fidelity */
+.map-canvas { background:#ffffff; border-color: var(--line); }
+/* sticky table headers */
+.tt-table th { background: var(--surface-2); color: var(--muted); }
+/* selected option cards -> dark teal wash */
+.schedule-option:has(input:checked), .map-line-option:has(input:checked),
+.rule-option:has(>input:first-child:checked) { border-color:#2f6f6a; background:#12302e; }
+.tt-line[open] > summary { background: var(--surface); }
+/* toggles / small labels that were dark-on-light */
+.map-toggle, .realnet-tools .map-toggle, .realnet-searchbar .map-toggle,
+.headway-controls label, .binder-meta label, .map-adv-grid label { color: var(--muted); }
+/* colored small labels inside toggles keep accent */
+.map-toggle input, .switch-row input { accent-color: var(--aqua); }
+/* analytics severity row tints */
+.analytics-row.critical { border-color:#4a2529; } .analytics-row.warning { border-color:#4a3a1a; }
+/* rl-ref neutral pill */
+.rl-ref { background:#3a4750; color:#cdd9de; }
+/* pair arrow + confidence already handled; pair-route line color */
+.pair-route i { background:#3a4750; } .pair-route i:after { color:#6f818c; }
+/* dashed placeholders inside maps */
+.realnet-map { background: var(--surface-2); }
