@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071827">
+  <title>NIMBY Rails 运营工作台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div><strong>NIMBY</strong><small>运营工作台</small></div>
+      </div>
+      <nav id="main-nav" aria-label="主要功能">
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span>总览与体检</button>
+        <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
+        <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
+        <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
+        <button class="nav-item" data-view="timetable"><span>◫</span>时刻表配置</button>
+        <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
+        <button class="nav-item" data-view="vehicle"><span>▤</span>车辆工坊</button>
+        <button class="nav-item" data-view="scripts"><span>{ }</span>脚本规则</button>
+        <button class="nav-item" data-view="history"><span>◔</span>历史与性能</button>
+        <button class="nav-item" data-view="cleanup"><span>♲</span>清理与历史</button>
+        <button class="nav-item" data-view="roadmap"><span>⌁</span>开发路线</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="pulse-dot"></span>
+        <div><strong>本地安全模式</strong><small>不覆盖输入存档</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="view-eyebrow">CONTROL CENTER</p>
+          <h1 id="view-title">铁路运营总览</h1>
+        </div>
+        <div class="top-actions">
+          <span class="local-chip">● 仅在本机运行</span>
+          <button class="icon-button" id="refresh-files" title="刷新文件">↻</button>
+        </div>
+      </header>
+
+      <section class="view active" id="view-dashboard">
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="hero-copy">
+              <p class="eyebrow aqua">NETWORK READINESS</p>
+              <h2>先核对，再写入。</h2>
+              <p>自动选择最新存档与即时导出，完整核对全部时刻表和列车后才开放修改。</p>
+            </div>
+            <div class="route-art" aria-hidden="true">
+              <i class="line line-a"></i><i class="line line-b"></i><i class="line line-c"></i>
+              <b class="station s1"></b><b class="station s2"></b><b class="station s3"></b><b class="station s4"></b>
+            </div>
+          </article>
+          <article class="status-card" id="health-summary">
+            <div class="empty-health">
+              <span>◎</span><strong>等待体检</strong><small>选择文件后开始扫描</small>
+            </div>
+          </article>
+        </div>
+
+        <article class="panel file-panel">
+          <div class="panel-heading">
+            <div><p class="step">步骤 01</p><h3>选择同一时刻的文件</h3></div>
+            <button class="text-button" id="select-latest">自动选择最新</button>
+          </div>
+          <div class="file-grid">
+            <label>输入存档<select id="save-select" aria-label="输入存档"></select></label>
+            <label>时刻表导出 JSON<select id="export-select" aria-label="时刻表导出 JSON"></select></label>
+            <button class="primary-button scan-button" id="scan-button"><span>开始全面体检</span><small>通常需要 5–15 秒</small></button>
+          </div>
+          <div class="safety-strip"><span>✓</span>游戏应回到主菜单或关闭；所有写入只创建新文件。</div>
+        </article>
+
+        <div class="metric-grid" id="metric-grid" hidden></div>
+        <article class="panel" id="findings-panel" hidden>
+          <div class="panel-heading"><div><p class="step">诊断结果</p><h3>需要处理的项目</h3></div><span class="count-badge" id="finding-count">0</span></div>
+          <div class="finding-list" id="finding-list"></div>
+        </article>
+        <article class="panel" id="repair-panel" hidden>
+          <div class="panel-heading"><div><p class="step">一键修复</p><h3>可修复任务</h3></div><span class="count-badge" id="repair-count">0</span></div>
+          <div class="repair-note">工具只会修改导出数据已经证实的问题（连续车库循环、旧表抢班），并写入一个新存档；正式存档永不改动。</div>
+          <div id="repair-list" class="schedule-grid"></div>
+          <div class="action-panel">
+            <label class="output-label">修复后新存档<input id="fix-output" type="text" spellcheck="false"></label>
+            <button class="primary-button" id="fix-button">在新存档中修复所选</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-analytics">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">OPERATIONS ANALYTICS</p><h2>运营分析（只读）</h2><p>从导出 JSON 计算服务时段、班距均匀度、覆盖天数、车队规模等运营指标，绝不修改存档。</p></div>
+          <span class="phase-badge safe">零风险只读</span>
+        </div>
+        <div class="metric-grid" id="analytics-kpi"><div class="placeholder">请先在“总览与体检”完成一次体检。</div></div>
+        <article class="panel" id="analytics-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">逐表指标</p><h3>时刻表运营明细</h3></div>
+            <div class="analytics-tools">
+              <input id="analytics-search" type="search" placeholder="搜索时刻表 / 线路…" spellcheck="false">
+              <select id="analytics-filter" aria-label="风险筛选">
+                <option value="all">全部风险</option>
+                <option value="critical">仅严重</option>
+                <option value="warning">仅提醒</option>
+                <option value="issues">有问题</option>
+                <option value="good">健康</option>
+              </select>
+              <button class="text-button" id="export-report-csv">导出 CSV</button>
+              <button class="text-button" id="export-report-json">导出 JSON</button>
+            </div>
+          </div>
+          <div id="analytics-list" class="analytics-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-map">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">TRANSIT MAP</p><h2>一键线路图（只读）</h2><p>按车站经纬度绘制单条或多条线路的路网示意图，自动识别换乘站，可导出 SVG 打印或分享。</p></div>
+          <span class="phase-badge safe">零风险只读</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">第一步</p><h3>选择线路</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="load-lines">从当前导出载入线路</button>
+              <button class="text-button" id="map-select-service">仅载客线</button>
+              <button class="text-button" id="map-select-all">全选</button>
+              <button class="text-button" id="map-clear">清空</button>
+            </div>
+          </div>
+          <div id="map-line-list" class="map-line-grid"><div class="placeholder">点“从当前导出载入线路”，会读取上方所选的时刻表导出。</div></div>
+        </article>
+        <article class="panel" id="map-render-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">线路图</p><h3>路网示意图</h3></div>
+            <div class="analytics-tools">
+              <label class="map-toggle"><input type="checkbox" id="map-schematic"> 示意图（八向拉直）</label>
+              <label class="map-toggle"><input type="checkbox" id="map-all-labels"> 显示所有站名</label>
+              <label class="map-toggle"><input type="checkbox" id="map-curved" checked> 平滑曲线</label>
+              <button class="text-button" id="draw-map">绘制线路图</button>
+              <button class="text-button" id="export-map-svg">导出 SVG</button>
+            </div>
+          </div>
+          <div id="map-canvas" class="map-canvas"><div class="placeholder">选择线路后点“绘制线路图”。</div></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-realnet">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">REAL-WORLD REFERENCE</p><h2>现实路网参考图</h2><p>在真实世界地图上叠加 OpenRailwayMap 的铁路数据，并把你游戏里的线路/车站画在同一坐标系上，边看现实边复刻。规划针与视图会自动保存在浏览器本地。</p></div>
+          <span class="phase-badge">需要联网</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">底图与图层</p><h3>参考地图</h3></div>
+            <div class="analytics-tools realnet-tools">
+              <label class="map-toggle">底图
+                <select id="realnet-base" aria-label="底图">
+                  <option value="carto">浅色底图</option>
+                  <option value="osm">OpenStreetMap</option>
+                  <option value="dark">深色底图</option>
+                </select>
+              </label>
+              <label class="map-toggle">铁路层
+                <select id="realnet-overlay" aria-label="铁路层">
+                  <option value="standard">标准（线路/车站）</option>
+                  <option value="maxspeed">限速</option>
+                  <option value="signals">信号</option>
+                  <option value="none">关闭</option>
+                </select>
+              </label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-game" checked> 叠加游戏路网</label>
+            </div>
+          </div>
+          <div class="realnet-searchbar">
+            <input id="realnet-search" type="search" placeholder="跳转到地点（如 Tokyo Station、上海、45.5,-73.6）" spellcheck="false">
+            <button class="text-button" id="realnet-go">跳转</button>
+            <button class="text-button" id="realnet-fit-game">定位到游戏路网</button>
+            <label class="map-toggle"><input type="checkbox" id="realnet-pin-mode"> 点图放置规划针</label>
+            <button class="text-button" id="realnet-export-geojson">导出规划针 GeoJSON</button>
+            <button class="text-button" id="realnet-export-csv">导出规划针 CSV</button>
+            <button class="text-button danger-text" id="realnet-clear-pins">清空规划针</button>
+          </div>
+          <div class="realnet-importbar">
+            <strong>现实数据导入</strong>
+            <button class="text-button" id="realnet-import-stations">拉取此范围真实车站</button>
+            <button class="text-button" id="realnet-import-to-pins" disabled>全部加入规划针</button>
+            <button class="text-button danger-text" id="realnet-import-clear" disabled>清除导入</button>
+            <span id="realnet-import-count" class="realnet-import-count"></span>
+            <small>数据来自 OpenStreetMap（Overpass），用于对照复刻，请先放大到城市级别。</small>
+          </div>
+          <div id="realnet-map" class="realnet-map"><div class="placeholder">正在加载地图组件…（首次需要联网下载 Leaflet 与瓦片）</div></div>
+          <div class="realnet-foot">
+            <span id="realnet-pin-count">规划针 0 个</span>
+            <small>底图 © OpenStreetMap / CARTO；铁路层 © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noopener">OpenRailwayMap</a>（CC-BY-SA 2.0）。仅供个人参考使用。</small>
+          </div>
+        </article>
+        <article class="panel" id="realnet-pin-panel" hidden>
+          <div class="panel-heading"><div><p class="step">规划清单</p><h3>规划针（复刻检查表）</h3></div><span class="phase-badge safe">本地存储</span></div>
+          <div id="realnet-pin-list" class="realnet-pin-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-timetable">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>
+          <span class="phase-badge">能力 1–3</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">智能匹配</p><h3>可执行的迁移方案</h3></div><span class="count-badge" id="pair-count">0</span></div>
+          <div id="pair-list" class="pair-list"><div class="placeholder">请先在“总览与体检”完成扫描。</div></div>
+        </article>
+        <article class="panel action-panel">
+          <div>
+            <label class="switch-row"><input type="checkbox" id="garage-join" checked><span class="switch"></span><span><strong>同时加入车库接班扩展</strong><small>列车使用唯一 ID 定位，同名列车不会冲突</small></span></label>
+            <label class="output-label">新存档名称<input id="migration-output" type="text" spellcheck="false"></label>
+          </div>
+          <button class="primary-button" id="migrate-button">创建新存档</button>
+        </article>
+        <article class="panel planner-panel">
+          <div class="panel-heading"><div><p class="step">能力 03 · 已可用</p><h3>均匀相位编排器</h3></div><button class="text-button" id="export-plan">导出方案 JSON</button></div>
+          <div class="planner-layout">
+            <div class="planner-form">
+              <label>方案名称<input id="plan-name" value="新线路 Daily"></label>
+              <div class="planner-row"><label>首班<input id="plan-first" type="time" value="05:30"></label><label>末班<input id="plan-last" type="time" value="01:00"></label></div>
+              <div class="planner-row"><label>单车完整循环<input id="plan-cycle" type="number" min="5" max="1440" value="90"><span>分钟</span></label><label>相位起点<input id="plan-phase" type="number" min="0" max="60" step="0.5" value="0"><span>分钟</span></label></div>
+              <div class="planner-row"><label>高峰班距<input id="plan-peak" type="number" min="0.5" max="180" step="0.5" value="5"><span>分钟</span></label><label>平峰班距<input id="plan-offpeak" type="number" min="0.5" max="360" step="0.5" value="12"><span>分钟</span></label></div>
+              <label>高峰时段<input id="plan-windows" value="07:00-09:30, 15:30-18:30"><small>多个时段用逗号分开，可跨午夜</small></label>
+              <button class="primary-button full" id="calculate-plan">计算运行方案</button>
+            </div>
+            <div class="planner-results" id="planner-results">
+              <div class="placeholder">输入运行条件后点击“计算运行方案”。</div>
+            </div>
+          </div>
+        </article>
+        <article class="panel" id="recover-panel">
+          <div class="panel-heading"><div><p class="step">模板恢复</p><h3>从历史导出恢复车队</h3></div><span class="phase-badge safe">安全重建</span></div>
+          <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史导出里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。请先在“总览与体检”完成体检。</p>
+          <div class="file-grid recover-grid">
+            <label>目标模板（当前空白表）<select id="recover-target" aria-label="目标模板"></select></label>
+            <button class="secondary-button" id="find-reference-btn">自动查找历史车队</button>
+          </div>
+          <div id="reference-list" class="pair-list"><div class="placeholder">选择目标模板后点“自动查找历史车队”。</div></div>
+          <div class="action-panel">
+            <div>
+              <label class="switch-row"><input type="checkbox" id="recover-garage" checked><span class="switch"></span><span><strong>同时加入车库接班扩展</strong><small>列车使用唯一 ID 定位，同名列车不会冲突</small></span></label>
+              <label class="output-label">恢复后新存档<input id="recover-output" type="text" spellcheck="false"></label>
+            </div>
+            <button class="primary-button" id="recover-btn" disabled>恢复到该模板</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-extensions">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">DEPOT CONTROL</p><h2>车库接班扩展</h2><p>批量加入或移除 Timetable garage join，只影响所选时刻表已分配的列车。</p></div>
+          <span class="phase-badge">唯一 ID 模式</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">选择车队</p><h3>已配置的时刻表</h3></div><button class="text-button" id="toggle-schedules">全选</button></div>
+          <div id="schedule-list" class="schedule-grid"><div class="placeholder">完成体检后会显示可选车队。</div></div>
+        </article>
+        <article class="panel action-panel">
+          <label class="output-label">新存档名称<input id="extension-output" type="text" spellcheck="false"></label>
+          <div class="button-row"><button class="secondary-button" id="remove-extension">移除扩展</button><button class="primary-button" id="add-extension">加入扩展</button></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-vehicle">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">ROLLING STOCK WORKSHOP</p><h2>车辆与资产模组制作器</h2><p>按官方 schema=2 生成可直接加载的车辆模组（mod.txt + 占位贴图）。填好参数即得一个可上路的车型，之后随时替换贴图美化。绝不改动存档。</p></div>
+          <span class="phase-badge">能力 06 · 已可用</span>
+        </div>
+        <div class="script-layout">
+          <article class="panel script-builder">
+            <p class="step">模组信息</p><h3>车型定义</h3>
+            <div class="veh-form">
+              <label>模组名称<input id="veh-mod-name" value="Custom EMU pack"></label>
+              <div class="planner-row"><label>作者<input id="veh-author" value="Local toolbox"></label><label>版本<input id="veh-version" value="1.0.0"></label></div>
+              <label>车型名称<input id="veh-model-name" value="City Metro 100"></label>
+              <label>车型 ID<input id="veh-model-id" value="city_metro_100"><small>仅英文/数字/下划线，自动清洗</small></label>
+              <div class="planner-row">
+                <label>用途
+                  <select id="veh-role">
+                    <option value="metro">地铁 metro</option><option value="commuter" selected>通勤 commuter</option>
+                    <option value="regional">区域 regional</option><option value="intercity">城际 intercity</option>
+                    <option value="high-speed">高速 high-speed</option><option value="tram">有轨电车 tram</option>
+                    <option value="light-rail">轻轨 light-rail</option><option value="long-distance">长途 long-distance</option>
+                  </select>
+                </label>
+                <label>动力
+                  <select id="veh-power-type">
+                    <option value="electric" selected>电力 electric</option><option value="diesel">内燃 diesel</option>
+                    <option value="battery">电池 battery</option><option value="hydrogen">氢能 hydrogen</option>
+                    <option value="steam">蒸汽 steam</option><option value="cable">缆车 cable</option>
+                  </select>
+                </label>
+              </div>
+              <div class="planner-row">
+                <label>轨距
+                  <select id="veh-gauge"><option value="standard-gauge" selected>标准轨</option><option value="narrow-gauge">窄轨</option><option value="broad-gauge">宽轨</option><option value="meter-gauge">米轨</option></select>
+                </label>
+                <label>投产年份<input id="veh-year" type="number" min="1800" max="2100" value="2015"></label>
+                <label>国家代码<input id="veh-country" maxlength="2" placeholder="CN" value="CN"><small>ISO 两位</small></label>
+              </div>
+            </div>
+
+            <p class="step">编组</p>
+            <div class="veh-form">
+              <div class="rule-options">
+                <label class="rule-option"><input type="checkbox" id="veh-two-cabs" checked><span><strong>两端各一节司机室</strong><small>关闭则单端驾驶</small></span></label>
+                <label class="rule-option"><input type="checkbox" id="veh-middle-enabled" checked><span><strong>包含中间车</strong><small>关闭则只有司机室车</small></span></label>
+              </div>
+              <div class="planner-row"><label>中间车最少<input id="veh-middle-min" type="number" min="0" max="30" value="1"></label><label>默认<input id="veh-middle-def" type="number" min="0" max="30" value="2"></label><label>最多<input id="veh-middle-max" type="number" min="1" max="30" value="6"></label></div>
+            </div>
+
+            <p class="step">司机室车参数</p>
+            <div class="veh-grid">
+              <label>长度 m<input id="veh-head-length" type="number" step="0.1" min="1" max="30" value="20"></label>
+              <label>宽度 m<input id="veh-head-width" type="number" step="0.05" min="1" max="3.75" value="2.9"></label>
+              <label>最高速 km/h<input id="veh-head-max-speed" type="number" min="10" max="10000" value="120"></label>
+              <label>功率 kW<input id="veh-head-power" type="number" min="0" max="100000" value="1500"></label>
+              <label>空车质量 kg<input id="veh-head-empty-mass" type="number" min="1000" max="100000000" value="42000"></label>
+              <label>单价<input id="veh-head-price" type="number" min="0" value="2500000"></label>
+              <label>载客<input id="veh-head-max-pax" type="number" min="0" max="1000" value="150"></label>
+              <label>其中站席<input id="veh-head-standing-pax" type="number" min="0" max="1000" value="100"></label>
+            </div>
+
+            <p class="step">中间车参数</p>
+            <div class="veh-grid">
+              <label>长度 m<input id="veh-middle-length" type="number" step="0.1" min="1" max="30" value="20"></label>
+              <label>宽度 m<input id="veh-middle-width" type="number" step="0.05" min="1" max="3.75" value="2.9"></label>
+              <label>最高速 km/h<input id="veh-middle-max-speed" type="number" min="10" max="10000" value="120"></label>
+              <label>功率 kW<input id="veh-middle-power" type="number" min="0" max="100000" value="0"></label>
+              <label>空车质量 kg<input id="veh-middle-empty-mass" type="number" min="1000" max="100000000" value="34000"></label>
+              <label>单价<input id="veh-middle-price" type="number" min="0" value="1800000"></label>
+              <label>载客<input id="veh-middle-max-pax" type="number" min="0" max="1000" value="220"></label>
+              <label>其中站席<input id="veh-middle-standing-pax" type="number" min="0" max="1000" value="150"></label>
+            </div>
+
+            <p class="step">占位涂装（可后期替换贴图）</p>
+            <div class="veh-color-row">
+              <label>车身条<input id="veh-body-color" type="color" value="#c0392b"></label>
+              <label>车窗<input id="veh-window-color" type="color" value="#243244"></label>
+              <label>车门<input id="veh-door-color" type="color" value="#3c424e"></label>
+            </div>
+            <button class="primary-button full" id="generate-vehicle">生成车辆模组压缩包</button>
+          </article>
+          <article class="panel script-preview">
+            <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">schema=2 TrainUnit</span></div>
+            <ol class="install-steps"><li><b>1</b><span>下载并解压车辆包</span></li><li><b>2</b><span>把文件夹放进 NIMBY Rails 的 mods 目录</span></li><li><b>3</b><span>在游戏主菜单启用模组</span></li><li><b>4</b><span>购车时即可选到这个车型与编组</span></li></ol>
+            <div class="veh-preview" id="veh-preview"><div class="placeholder">点“生成车辆模组压缩包”后，这里会显示编组与 mod.txt 预览。</div></div>
+            <div class="script-safety"><strong>安全边界</strong><p>只生成模组文件，从不修改存档。贴图是程序化占位（1024×128、34.13 px/m），可随时用真实美术替换。物理牵引仍由游戏按功率/质量模拟。</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-scripts">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">SCRIPT WORKSHOP</p><h2>NimbyScript 规则生成器</h2><p>勾选经过官方接口核对的规则，生成一个可直接解压到 private mods 的完整模组包。</p></div>
+          <span class="phase-badge">能力 04 · 已可用</span>
+        </div>
+        <div class="script-layout">
+          <article class="panel script-builder">
+            <p class="step">模组信息</p><h3>运营规则包</h3>
+            <label>显示名称<input id="script-name" value="Das Rails operations rules"></label>
+            <label>脚本 ID<input id="script-id" value="das_rails_operations_rules"><small>仅使用英文、数字和下划线</small></label>
+            <div class="rule-options">
+              <label class="rule-option"><input type="checkbox" id="rule-garage" checked><span><strong>车库接班</strong><small>放宽接班位置匹配，不创建线路或绕过占用</small></span></label>
+              <label class="rule-option"><input type="checkbox" id="rule-hold"><span><strong>到站附加等待</strong><small>在选定停站到达后增加等待时间</small></span><input class="inline-number" id="rule-hold-seconds" type="number" min="0" max="3600" value="30"><em>秒</em></label>
+              <label class="rule-option"><input type="checkbox" id="rule-speed"><span><strong>信号前限速</strong><small>在选定信号前方通过 lookahead 施加限速</small></span><input class="inline-number" id="rule-speed-kmh" type="number" min="1" max="500" value="40"><em>km/h</em></label>
+            </div>
+            <button class="primary-button full" id="generate-script">生成 private mod 压缩包</button>
+          </article>
+          <article class="panel script-preview">
+            <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">官方 API 签名</span></div>
+            <ol class="install-steps"><li><b>1</b><span>下载并解压规则包</span></li><li><b>2</b><span>把整个文件夹复制到 NIMBY Rails 的 private mods</span></li><li><b>3</b><span>在游戏中启用模组</span></li><li><b>4</b><span>只在需要的列车、停站或信号上启用扩展</span></li></ol>
+            <div class="script-safety"><strong>规则边界</strong><p>生成器不会创建轨道、时刻表或列车，也不能绕过原生进路检查。到站等待只能增加时间，不能让晚点列车提前发车。</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-cleanup">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>副本清理中心</h2><p>所有清理目标先预览，再移入 Windows 回收站；正式存档和普通自动存档永不参与。</p></div>
+          <span class="phase-badge safe">可恢复清理</span>
+        </div>
+        <div class="cleanup-grid">
+          <article class="panel cleanup-settings">
+            <p class="step">自动规则</p><h3>保留策略</h3>
+            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>启动时自动检查</strong><small>只清理超过期限且超出保留数量的副本</small></span></label>
+            <div class="number-grid">
+              <label>超过天数<input id="cleanup-days" type="number" min="1" max="365"></label>
+              <label>至少保留<input id="cleanup-keep" type="number" min="1" max="50"></label>
+            </div>
+            <button class="secondary-button full" id="save-cleanup-settings">保存自动规则</button>
+          </article>
+          <article class="panel cleanup-summary" id="cleanup-summary"></article>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">候选文件</p><h3>清理预览</h3></div><div class="segmented"><button class="active" data-clean-mode="automatic">自动规则</button><button data-clean-mode="compact">立即瘦身</button></div></div>
+          <div id="cleanup-list" class="cleanup-list"></div>
+          <div class="cleanup-actions"><p id="cleanup-explanation"></p><button class="danger-button" id="execute-cleanup">移入回收站</button></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">FLEET HISTORY</p><h2>历史与性能</h2><p>并行盘点存档目录中的历史导出，并对比任意两份导出之间的时刻表变化。全部为只读操作。</p></div>
+          <span class="phase-badge">多核并行</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">批量盘点</p><h3>历史导出体检</h3></div><button class="text-button" id="run-inventory">并行盘点</button></div>
+          <div id="inventory-summary" class="clean-grid" hidden></div>
+          <div id="inventory-list" class="cleanup-list"><div class="placeholder">点击“并行盘点”扫描最近的历史导出。</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">版本对比</p><h3>两份导出的差异</h3></div></div>
+          <div class="file-grid compare-grid">
+            <label>较早导出<select id="compare-before" aria-label="较早导出"></select></label>
+            <label>较新导出<select id="compare-after" aria-label="较新导出"></select></label>
+            <button class="primary-button" id="run-compare">对比两份导出</button>
+          </div>
+          <div id="compare-result" class="compare-result"><div class="placeholder">选择两份导出后点击“对比”。</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">存档差分实验室</p><h3>线路与车站字段差分</h3></div><span class="phase-badge safe">只读</span></div>
+          <div class="file-grid compare-grid">
+            <label>较早导出<select id="netdiff-before" aria-label="较早导出（路网）"></select></label>
+            <label>较新导出<select id="netdiff-after" aria-label="较新导出（路网）"></select></label>
+            <button class="primary-button" id="run-netdiff">对比路网</button>
+          </div>
+          <div id="netdiff-result" class="compare-result"><div class="placeholder">逐项对比两份导出的线路、车站、站序和坐标变化。</div></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-roadmap">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">CAPABILITY LADDER</p><h2>按可靠性依次开发</h2><p>越靠前越稳定、越适合现在投入正式使用；涉及物理路网的功能必须经过存档差分验证。</p></div>
+        </div>
+        <div class="roadmap" id="roadmap-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="task-dock" id="task-dock" hidden>
+    <div class="task-icon">↻</div>
+    <div class="task-copy"><strong id="task-message">正在处理…</strong><small id="task-detail">后台运行，界面可以继续查看</small><div class="progress-track"><i id="task-progress"></i></div></div>
+    <button id="cancel-task">取消</button>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

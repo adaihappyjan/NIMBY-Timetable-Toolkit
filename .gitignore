@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Runtime task artifacts (progress/result files written next to the app)
+.*.json
+.*.progress
+*.progress
+_bat.log
+
+# Generated mod/download outputs
+downloads/
+*.zip
+
+# Player save files & game exports (never commit private saves)
+*.nimbyrails5
+*.nimbyrails5.partial
+*.manifest.json
+Das Rails*.json
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,6 @@
+# NIMBY Rails 运营工作台运行依赖
+#
+# 桌面单窗口界面基于 pywebview（Windows 使用 Edge WebView2 运行时）。
+# 若系统缺少 WebView2 运行时或 pywebview 未安装，工具会自动退回到
+# “本地服务 + 默认浏览器”模式，功能不受影响。
+pywebview>=6.0

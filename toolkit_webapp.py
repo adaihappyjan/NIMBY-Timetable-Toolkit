@@ -1,0 +1,739 @@
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import mimetypes
+import os
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+import webbrowser
+from datetime import datetime, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+
+ROOT = Path(__file__).resolve().parent
+WEB_ROOT = ROOT / "web"
+BACKEND = ROOT / "toolkit_backend.py"
+ASSET_VERSION = uuid.uuid4().hex[:8]
+SAVE_DIR = Path.home() / "Saved Games" / "Weird and Wry" / "NIMBY Rails"
+SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "NIMBY_Timetable_Toolkit"
+SETTINGS_FILE = SETTINGS_DIR / "settings.json"
+TASK_DIR = Path(tempfile.gettempdir()) / "NIMBY_Timetable_Toolkit_Web"
+
+sys.path.insert(0, str(ROOT))
+from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
+from toolkit_scriptgen import build_mod_zip  # noqa: E402
+from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
+
+
+def read_settings() -> dict:
+    defaults = {
+        "enabled": True,
+        "days": 14,
+        "keep": 5,
+        "workers": max(1, min(4, (os.cpu_count() or 2) - 1)),
+    }
+    try:
+        stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return defaults
+    aliases = {
+        "enabled": stored.get("enabled", stored.get("Enabled")),
+        "days": stored.get("days", stored.get("Days")),
+        "keep": stored.get("keep", stored.get("Keep")),
+        "workers": stored.get("workers", stored.get("Workers")),
+    }
+    for key, value in aliases.items():
+        if value is not None:
+            defaults[key] = value
+    defaults["enabled"] = bool(defaults["enabled"])
+    defaults["days"] = max(1, min(365, int(defaults["days"])))
+    defaults["keep"] = max(1, min(50, int(defaults["keep"])))
+    defaults["workers"] = max(1, min(32, int(defaults["workers"])))
+    return defaults
+
+
+def write_settings(settings: dict) -> dict:
+    current = read_settings()
+    for key in ("enabled", "days", "keep", "workers"):
+        if key in settings:
+            current[key] = settings[key]
+    current["enabled"] = bool(current["enabled"])
+    current["days"] = max(1, min(365, int(current["days"])))
+    current["keep"] = max(1, min(50, int(current["keep"])))
+    current["workers"] = max(1, min(32, int(current["workers"])))
+    SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+    partial = SETTINGS_FILE.with_suffix(".json.partial")
+    partial.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    partial.replace(SETTINGS_FILE)
+    return current
+
+
+def file_info(path: Path) -> dict:
+    stat = path.stat()
+    return {
+        "name": path.name,
+        "path": str(path),
+        "size": stat.st_size,
+        "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "tool_generated": any(
+            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_")
+        ),
+    }
+
+
+def recent_files() -> dict:
+    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    saves = sorted(SAVE_DIR.glob("*.nimbyrails5"), key=lambda path: path.stat().st_mtime, reverse=True)
+    exports = sorted(
+        SAVE_DIR.glob("*Timetable Export*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return {
+        "saves": [file_info(path) for path in saves[:40]],
+        "exports": [file_info(path) for path in exports[:40]],
+    }
+
+
+def validate_input_path(value: str, suffix: str) -> Path:
+    path = Path(value).resolve()
+    if path.parent != SAVE_DIR.resolve() or not path.is_file() or not path.name.lower().endswith(suffix):
+        raise RuntimeError(f"文件无效或不在 NIMBY Rails 存档目录中：{path}")
+    return path
+
+
+def ensure_directory_writable(directory: Path) -> None:
+    """Verify that this server instance can create output in the save folder."""
+    probe: Path | None = None
+    try:
+        descriptor, probe_name = tempfile.mkstemp(
+            prefix=".nimby_toolkit_write_test_",
+            dir=str(directory),
+        )
+        os.close(descriptor)
+        probe = Path(probe_name)
+        probe.unlink()
+    except PermissionError as exc:
+        if probe is not None:
+            try:
+                probe.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise RuntimeError(
+            "当前工具箱后台进程没有存档目录的写入权限。请关闭所有旧的工具箱窗口，"
+            "然后从资源管理器重新双击“启动工具箱.vbs”。存档目录："
+            f"{directory}"
+        ) from exc
+    except OSError as exc:
+        if probe is not None:
+            try:
+                probe.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise RuntimeError(f"无法在存档目录创建输出文件：{directory}（{exc}）") from exc
+
+
+def validate_output_path(value: str) -> Path:
+    path = Path(value).resolve()
+    if path.parent != SAVE_DIR.resolve() or path.suffix.lower() != ".nimbyrails5":
+        raise RuntimeError("新存档必须保存在 NIMBY Rails 存档目录中")
+    ensure_directory_writable(path.parent)
+    if path.exists():
+        raise RuntimeError("输出文件已经存在，请换一个名称")
+    return path
+
+
+class TaskManager:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.task: dict | None = None
+
+    def _build_args(self, action: str, payload: dict) -> list[str]:
+        if action == "inventory":
+            limit = max(1, min(60, int(payload.get("limit", 12))))
+            return [
+                "inventory",
+                "--directory",
+                str(SAVE_DIR.resolve()),
+                "--limit",
+                str(limit),
+            ]
+        if action == "compare":
+            before = validate_input_path(payload.get("before", ""), ".json")
+            after = validate_input_path(payload.get("after", ""), ".json")
+            if before == after:
+                raise RuntimeError("请选择两份不同的导出进行对比")
+            return ["compare", "--before", str(before), "--after", str(after)]
+        if action == "map-data":
+            export = validate_input_path(payload.get("export", ""), ".json")
+            return ["map-data", "--export", str(export)]
+        if action == "network-diff":
+            before = validate_input_path(payload.get("before", ""), ".json")
+            after = validate_input_path(payload.get("after", ""), ".json")
+            if before == after:
+                raise RuntimeError("请选择两份不同的导出进行对比")
+            return ["network-diff", "--before", str(before), "--after", str(after)]
+        if action == "find-reference":
+            current = validate_input_path(payload.get("export", ""), ".json")
+            target = str(payload.get("target", "")).strip()
+            if not target:
+                raise RuntimeError("请指定要恢复的目标时刻表")
+            if len(target) > 500:
+                raise RuntimeError("时刻表名称无效")
+            limit = max(1, min(60, int(payload.get("limit", 15))))
+            return [
+                "find-reference",
+                "--directory",
+                str(SAVE_DIR.resolve()),
+                "--current-export",
+                str(current),
+                "--target",
+                target,
+                "--limit",
+                str(limit),
+            ]
+        save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+        export = validate_input_path(payload.get("export", ""), ".json")
+        if action == "analyze":
+            return ["analyze", "--save", str(save), "--export", str(export)]
+        output = validate_output_path(payload.get("output", ""))
+        if action == "recover-template":
+            reference_export = validate_input_path(
+                payload.get("reference_export", ""), ".json"
+            )
+            reference_source = str(payload.get("reference_source", "")).strip()
+            target = str(payload.get("target", "")).strip()
+            if not reference_source or not target:
+                raise RuntimeError("请先选择历史来源车队和目标模板")
+            if len(reference_source) > 500 or len(target) > 500:
+                raise RuntimeError("时刻表名称无效")
+            args = [
+                "recover-template",
+                "--save",
+                str(save),
+                "--export",
+                str(export),
+                "--reference-export",
+                str(reference_export),
+                "--reference-source",
+                reference_source,
+                "--target",
+                target,
+                "--output",
+                str(output),
+            ]
+            if payload.get("garage_join", True):
+                args.append("--garage-join")
+            return args
+        if action == "fix-tasks":
+            pairs = payload.get("pairs") or []
+            depots = payload.get("depot_schedules") or []
+            if not pairs and not depots:
+                raise RuntimeError("请至少选择一个可修复任务")
+            args = [
+                "fix-tasks",
+                "--save",
+                str(save),
+                "--export",
+                str(export),
+                "--output",
+                str(output),
+            ]
+            for pair in pairs:
+                if "::" not in pair or len(pair) > 500:
+                    raise RuntimeError("修复配对格式无效")
+                args.extend(("--pair", pair))
+            for depot in depots:
+                if len(str(depot)) > 500:
+                    raise RuntimeError("时刻表名称无效")
+                args.extend(("--depot-schedule", str(depot)))
+            return args
+        if action == "batch-migrate":
+            pairs = payload.get("pairs") or []
+            if not pairs:
+                raise RuntimeError("请至少选择一组时刻表")
+            args = [
+                "batch-migrate",
+                "--save",
+                str(save),
+                "--export",
+                str(export),
+                "--output",
+                str(output),
+            ]
+            for pair in pairs:
+                if "::" not in pair or len(pair) > 500:
+                    raise RuntimeError("时刻表配对格式无效")
+                args.extend(("--pair", pair))
+            if payload.get("garage_join", True):
+                args.append("--garage-join")
+            return args
+        if action == "extension":
+            schedules = payload.get("schedules") or []
+            if not schedules:
+                raise RuntimeError("请至少选择一张时刻表")
+            mode = payload.get("mode")
+            if mode not in ("add", "remove"):
+                raise RuntimeError("扩展操作无效")
+            args = [
+                "extension",
+                "--save",
+                str(save),
+                "--export",
+                str(export),
+                "--output",
+                str(output),
+                "--mode",
+                mode,
+            ]
+            for schedule in schedules:
+                args.extend(("--schedule", str(schedule)))
+            return args
+        raise RuntimeError("尚未开放的操作")
+
+    def start(self, action: str, payload: dict, workers: int) -> dict:
+        with self.lock:
+            if self.task and self.task["process"].poll() is None:
+                raise RuntimeError("已有任务正在处理，请等待完成或先取消")
+            args = self._build_args(action, payload)
+            TASK_DIR.mkdir(parents=True, exist_ok=True)
+            token = uuid.uuid4().hex
+            result_path = TASK_DIR / f"{token}.result.json"
+            progress_path = TASK_DIR / f"{token}.progress.jsonl"
+            command = [
+                sys.executable,
+                str(BACKEND),
+                "--workers",
+                str(max(1, min(32, workers))),
+                "--result-file",
+                str(result_path),
+                "--progress-file",
+                str(progress_path),
+                *args,
+            ]
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            process = subprocess.Popen(
+                command,
+                cwd=str(ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags,
+            )
+            self.task = {
+                "id": token,
+                "action": action,
+                "process": process,
+                "result_path": result_path,
+                "progress_path": progress_path,
+                "started": time.time(),
+            }
+            return {"task_id": token, "action": action}
+
+    def status(self) -> dict:
+        with self.lock:
+            if not self.task:
+                return {"state": "idle"}
+            task = self.task
+            process = task["process"]
+            progress = None
+            try:
+                lines = task["progress_path"].read_text(encoding="utf-8").splitlines()
+                if lines:
+                    progress = json.loads(lines[-1])
+            except Exception:
+                pass
+            if process.poll() is None:
+                return {
+                    "state": "running",
+                    "task_id": task["id"],
+                    "action": task["action"],
+                    "progress": progress,
+                }
+            try:
+                result = json.loads(task["result_path"].read_text(encoding="utf-8"))
+            except Exception:
+                result = {"ok": False, "error": f"后台任务没有返回结果（代码 {process.returncode}）"}
+            return {
+                "state": "complete" if result.get("ok") else "failed",
+                "task_id": task["id"],
+                "action": task["action"],
+                "progress": progress,
+                "result": result,
+            }
+
+    def cancel(self) -> dict:
+        with self.lock:
+            if not self.task or self.task["process"].poll() is not None:
+                return {"cancelled": False}
+            self.task["process"].kill()
+            return {"cancelled": True}
+
+    def is_running(self) -> bool:
+        with self.lock:
+            return bool(self.task and self.task["process"].poll() is None)
+
+
+TASKS = TaskManager()
+LAST_PING = time.monotonic()
+HAD_CLIENT = False
+STARTUP_CLEANUP: dict | None = None
+
+
+CAPABILITIES = [
+    {"rank": 1, "name": "时刻表健康与安全修复", "status": "available", "detail": "存档匹配、缺日、循环、车队与相位诊断"},
+    {"rank": 2, "name": "智能迁移与车库接班", "status": "available", "detail": "按唯一 ID 迁移车队并批量绑定扩展"},
+    {"rank": 3, "name": "时刻表编排器", "status": "available", "detail": "计算高峰/平峰间隔、均匀相位、跨午夜班次和最低车数"},
+    {"rank": 4, "name": "NimbyScript 规则生成器", "status": "available", "detail": "生成车库接班、到站等待和信号限速 private mod"},
+    {"rank": 5, "name": "运营分析与运营报告", "status": "available", "detail": "服务时段、班距均匀度、覆盖天数、车队规模 KPI，导出 CSV/JSON"},
+    {"rank": 6, "name": "车辆与资产模组制作器", "status": "available", "detail": "按官方 schema=2 生成可加载车辆模组（mod.txt + 占位贴图），含编组与参数"},
+    {"rank": 7, "name": "一键线路图", "status": "available", "detail": "按经纬度绘制单/多线路网图，支持八向示意图风格与 SVG 导出"},
+    {"rank": 8, "name": "现实路网参考图", "status": "available", "detail": "叠加 OpenRailwayMap 与游戏路网，规划针本地存储、导出 GeoJSON/CSV"},
+    {"rank": 9, "name": "存档差分实验室", "status": "available", "detail": "逐项对比两份导出的线路、车站、站序与坐标变化"},
+    {"rank": 10, "name": "批量扩展绑定器", "status": "next", "detail": "线路 / 信号 / 轨道的批量配置（需先完成安全的二进制字段验证）"},
+    {"rank": 11, "name": "现实路网导入向导", "status": "research", "detail": "从 OSM/OpenRailwayMap 拉取真实线站，生成对照清单辅助在游戏内复刻（评估中）"},
+]
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "NIMBYToolkit/2"
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+    def send_json(self, payload: dict, status: int = 200) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def read_json(self) -> dict:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > 1_000_000:
+            raise RuntimeError("请求过大")
+        return json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+
+    def same_origin(self) -> bool:
+        """Reject cross-site requests so other local pages cannot drive the toolkit."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        host = self.headers.get("Host", "")
+        return origin in (f"http://{host}", f"https://{host}")
+
+    def do_GET(self) -> None:  # noqa: N802
+        global HAD_CLIENT, LAST_PING
+        route = urlparse(self.path).path
+        try:
+            if route == "/api/bootstrap":
+                files = recent_files()
+                settings = read_settings()
+                preview = cleanup_preview(SAVE_DIR, days=settings["days"], keep=settings["keep"])
+                self.send_json(
+                    {
+                        "ok": True,
+                        "save_dir": str(SAVE_DIR),
+                        "files": files,
+                        "settings": settings,
+                        "cleanup": preview,
+                        "startup_cleanup": STARTUP_CLEANUP,
+                        "capabilities": CAPABILITIES,
+                    }
+                )
+                return
+            if route == "/api/task/status":
+                self.send_json({"ok": True, **TASKS.status()})
+                return
+            if route.startswith("/downloads/") and route.endswith(".zip"):
+                token = Path(route).name
+                path = (TASK_DIR / token).resolve()
+                if path.parent != TASK_DIR.resolve() or not path.is_file():
+                    raise RuntimeError("下载文件已经过期")
+                data = path.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{token}"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if route == "/api/ping":
+                HAD_CLIENT = True
+                LAST_PING = time.monotonic()
+                self.send_json({"ok": True})
+                return
+            self.serve_static(route)
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def do_POST(self) -> None:  # noqa: N802
+        route = urlparse(self.path).path
+        try:
+            if not self.same_origin():
+                self.send_json({"ok": False, "error": "跨站请求已被拒绝"}, HTTPStatus.FORBIDDEN)
+                return
+            payload = self.read_json()
+            if route == "/api/task/start":
+                settings = read_settings()
+                result = TASKS.start(str(payload.get("action")), payload, settings["workers"])
+                self.send_json({"ok": True, **result})
+                return
+            if route == "/api/task/cancel":
+                self.send_json({"ok": True, **TASKS.cancel()})
+                return
+            if route == "/api/settings":
+                self.send_json({"ok": True, "settings": write_settings(payload)})
+                return
+            if route == "/api/cleanup/preview":
+                result = cleanup_preview(
+                    SAVE_DIR,
+                    days=int(payload.get("days", 14)),
+                    keep=int(payload.get("keep", 5)),
+                    compact=bool(payload.get("compact", False)),
+                )
+                self.send_json({"ok": True, "cleanup": result})
+                return
+            if route == "/api/cleanup/execute":
+                preview = cleanup_preview(
+                    SAVE_DIR,
+                    days=int(payload.get("days", 14)),
+                    keep=int(payload.get("keep", 5)),
+                    compact=bool(payload.get("compact", False)),
+                )
+                result = execute_cleanup(SAVE_DIR, preview)
+                self.send_json({"ok": True, "result": result, "files": recent_files()})
+                return
+            if route == "/api/script/generate":
+                data, meta = build_mod_zip(payload)
+                TASK_DIR.mkdir(parents=True, exist_ok=True)
+                filename = f"{meta['script_id']}_{uuid.uuid4().hex[:8]}.zip"
+                path = TASK_DIR / filename
+                path.write_bytes(data)
+                self.send_json(
+                    {
+                        "ok": True,
+                        "download_url": f"/downloads/{filename}",
+                        "meta": meta,
+                    }
+                )
+                return
+            if route == "/api/vehicle/generate":
+                data, meta = build_vehicle_mod_zip(payload)
+                TASK_DIR.mkdir(parents=True, exist_ok=True)
+                filename = f"{meta['mod_id']}_{uuid.uuid4().hex[:8]}.zip"
+                path = TASK_DIR / filename
+                path.write_bytes(data)
+                self.send_json(
+                    {
+                        "ok": True,
+                        "download_url": f"/downloads/{filename}",
+                        "meta": meta,
+                    }
+                )
+                return
+            raise RuntimeError("未知操作")
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def serve_static(self, route: str) -> None:
+        relative = "index.html" if route in ("", "/") else unquote(route.lstrip("/"))
+        path = (WEB_ROOT / relative).resolve()
+        if WEB_ROOT.resolve() not in path.parents and path != WEB_ROOT.resolve():
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if not path.is_file():
+            path = WEB_ROOT / "index.html"
+        data = path.read_bytes()
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if path.name == "index.html":
+            html = data.decode("utf-8")
+            html = html.replace('href="/styles.css"', f'href="/styles.css?v={ASSET_VERSION}"')
+            html = html.replace('src="/app.js"', f'src="/app.js?v={ASSET_VERSION}"')
+            html = html.replace("仅在本机运行", f"仅在本机运行 · v{ASSET_VERSION}")
+            data = html.encode("utf-8")
+        if content_type.startswith("text/") or content_type in ("application/javascript", "application/json"):
+            content_type += "; charset=utf-8"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def open_app(url: str) -> None:
+    candidates = [
+        Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        Path(os.environ.get("PROGRAMFILES", "")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+    ]
+    edge = next((path for path in candidates if path.is_file()), None)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if edge:
+        subprocess.Popen(
+            [
+                str(edge),
+                f"--app={url}",
+                "--start-maximized",
+                # Keep polling alive when the game takes focus / covers the window,
+                # otherwise Chromium throttles setTimeout to ~1/min and the task
+                # dock appears frozen even though the backend already finished.
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+                "--disk-cache-size=1",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    else:
+        webbrowser.open(url)
+
+
+def idle_monitor(server: ThreadingHTTPServer) -> None:
+    """Fallback shutdown for browser mode only.
+
+    Never fires while a background task is running (so a save write is never
+    killed), and uses a generous timeout so that a throttled background tab does
+    not trigger a false shutdown.
+    """
+    while True:
+        time.sleep(10)
+        if TASKS.is_running():
+            continue
+        if HAD_CLIENT and time.monotonic() - LAST_PING > 180:
+            server.shutdown()
+            return
+
+
+def run_startup_cleanup() -> dict | None:
+    settings = read_settings()
+    if not settings["enabled"]:
+        return None
+    preview = cleanup_preview(SAVE_DIR, days=settings["days"], keep=settings["keep"])
+    if not preview["candidate_count"]:
+        return {"preview": preview, "result": None}
+    return {"preview": preview, "result": execute_cleanup(SAVE_DIR, preview)}
+
+
+def safe_startup_cleanup() -> dict | None:
+    """Startup cleanup must never crash the app or block the window from opening."""
+    try:
+        return run_startup_cleanup()
+    except Exception as exc:
+        return {"preview": None, "result": None, "error": str(exc)}
+
+
+def purge_stale_task_files(max_age_seconds: int = 86_400) -> None:
+    """Remove leftover result/progress/download files from previous sessions."""
+    if not TASK_DIR.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for path in TASK_DIR.iterdir():
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            pass
+
+
+def make_server() -> ThreadingHTTPServer:
+    """Bind to an ephemeral loopback port so we never clash with other apps."""
+    return ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+
+
+def run_desktop_window(app_url: str, server: ThreadingHTTPServer) -> bool:
+    """Host the app in a native window. Returns False if pywebview is unavailable."""
+    # Must be set before the WebView2 environment is created: stop Chromium from
+    # throttling background timers when NIMBY Rails grabs focus, and disable the
+    # disk cache so a stale app.js can never be reused.
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
+        "--disable-background-timer-throttling "
+        "--disable-renderer-backgrounding "
+        "--disable-backgrounding-occluded-windows "
+        "--disk-cache-size=1"
+    )
+    try:
+        import webview
+    except Exception:
+        return False
+
+    def _shutdown() -> None:
+        with contextlib.suppress(Exception):
+            TASKS.cancel()
+        with contextlib.suppress(Exception):
+            server.shutdown()
+
+    try:
+        window = webview.create_window(
+            "NIMBY Rails 运营工作台",
+            app_url,
+            width=1280,
+            height=860,
+            min_size=(1024, 720),
+        )
+        window.events.closed += _shutdown
+        webview.start()
+    except Exception:
+        return False
+    return True
+
+
+def main() -> None:
+    global STARTUP_CLEANUP
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--headless", action="store_true", help="仅运行本地服务，不打开任何窗口")
+    args = parser.parse_args()
+    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    purge_stale_task_files()
+    STARTUP_CLEANUP = safe_startup_cleanup()
+
+    server = make_server()
+    actual_port = int(server.server_address[1])
+    app_url = f"http://127.0.0.1:{actual_port}/"
+    serve_thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True
+    )
+    serve_thread.start()
+
+    try:
+        if args.headless:
+            serve_thread.join()
+        elif run_desktop_window(app_url, server):
+            pass  # window closed -> _shutdown already stopped the server
+        else:
+            threading.Thread(target=idle_monitor, args=(server,), daemon=True).start()
+            if not args.no_browser:
+                threading.Timer(0.4, open_app, args=(app_url,)).start()
+            serve_thread.join()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            TASKS.cancel()
+        with contextlib.suppress(Exception):
+            server.shutdown()
+        with contextlib.suppress(Exception):
+            server.server_close()
+
+
+if __name__ == "__main__":
+    main()
