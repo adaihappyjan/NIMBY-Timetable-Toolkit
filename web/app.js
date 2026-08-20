@@ -452,15 +452,18 @@ function drawTransitMap() {
   const bg = document.createElementNS(SVG_NS, 'rect');
   bg.setAttribute('x', 0); bg.setAttribute('y', 0); bg.setAttribute('width', W); bg.setAttribute('height', H); bg.setAttribute('fill', '#ffffff');
   svg.appendChild(bg);
+  // Catmull-Rom spline -> cubic Béziers. Unlike the old quadratic version, this
+  // interpolates *through* every station point, so the curve always sits exactly
+  // on the dots (smoothing only bends the segments between stations).
   const pathFor = pts2 => {
     if (!curved || pts2.length < 3) return pts2.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
     let d = `M${pts2[0].x.toFixed(1)} ${pts2[0].y.toFixed(1)}`;
     for (let i = 0; i < pts2.length - 1; i++) {
-      const mx = (pts2[i].x + pts2[i + 1].x) / 2, my = (pts2[i].y + pts2[i + 1].y) / 2;
-      d += ` Q${pts2[i].x.toFixed(1)} ${pts2[i].y.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+      const p0 = pts2[i - 1] || pts2[i], p1 = pts2[i], p2 = pts2[i + 1], p3 = pts2[i + 2] || p2;
+      const cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
+      d += ` C${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${cp2x.toFixed(1)} ${cp2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
     }
-    const last = pts2[pts2.length - 1];
-    d += ` L${last.x.toFixed(1)} ${last.y.toFixed(1)}`;
     return d;
   };
   // Draw thicker lines first so shorter ones stay visible on top.
