@@ -5,6 +5,7 @@ import contextlib
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -445,6 +446,196 @@ class TaskManager:
         if action == "line-timetable":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["line-timetable", "--save", str(save)]
+        if action == "operating-rules":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            return ["operating-rules", "--save", str(save)]
+        if action == "operating-rule-write":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            output = validate_output_path(payload.get("output", ""))
+            schedule = str(payload.get("schedule", "")).strip()
+            if not schedule or len(schedule) > 500:
+                raise RuntimeError("请提供有效的运营时刻表 id 或名称")
+            entries = payload.get("entries") or []
+            if not isinstance(entries, list) or len(entries) > 32:
+                raise RuntimeError("运营规则项数量无效")
+            entry_plan = payload.get("entry_plan")
+            if entry_plan is not None and entries:
+                raise RuntimeError("不能同时提交局部运营项和完整指令计划")
+            args = [
+                "operating-rule-write", "--save", str(save), "--output", str(output),
+                "--schedule", schedule,
+            ]
+            if entry_plan is not None:
+                if not isinstance(entry_plan, list) or not 1 <= len(entry_plan) <= 32:
+                    raise RuntimeError("完整指令计划需包含 1–32 条顶层指令")
+                total_records = 0
+
+                def validate_plan_record(item: object, *, stacked: bool) -> dict:
+                    nonlocal total_records
+                    if not isinstance(item, dict):
+                        raise RuntimeError("完整指令计划中的记录格式无效")
+                    total_records += 1
+                    if total_records > 128:
+                        raise RuntimeError("完整指令计划最多包含 128 条记录")
+                    order_id = item.get("order_id")
+                    if order_id in (None, "", 0):
+                        order_id = None
+                    else:
+                        order_id = int(order_id)
+                        if order_id <= 0 or order_id & 1:
+                            raise RuntimeError("Order ID 必须为空或为正偶数")
+                    line_id = str(item.get("line_id", "")).strip()
+                    if not re.fullmatch(r"0x4[0-9a-fA-F]{12}", line_id):
+                        raise RuntimeError("Line ID 格式无效")
+                    seconds = float(item.get("time_seconds"))
+                    if not 0 <= seconds <= 172800 or seconds * 2 != round(seconds * 2):
+                        raise RuntimeError("指令时间需为 0–48 小时内的 0.5 秒值")
+                    days = int(item.get("days_mask"))
+                    offset_group = int(item.get("offset_group_index", 0))
+                    if not 1 <= days <= 0x7F or not 0 <= offset_group < 10:
+                        raise RuntimeError("指令星期或偏移组范围无效")
+                    repeat_is_max = item.get("repeat_is_max", False)
+                    if not isinstance(repeat_is_max, bool):
+                        raise RuntimeError("重复 Max 标记必须为布尔值")
+                    repeat_count = item.get("repeat_count")
+                    if not repeat_is_max:
+                        repeat_count = int(repeat_count)
+                        if not 1 <= repeat_count <= 100:
+                            raise RuntimeError("重复次数需在 1–100 之间")
+                    continue_into_next = item.get("continue_into_next", True)
+                    if not isinstance(continue_into_next, bool):
+                        raise RuntimeError("继续下一指令标记必须为布尔值")
+                    timing_event = int(item.get("timing_event", 2))
+                    if timing_event not in (0, 2, 4):
+                        raise RuntimeError("Timing 事件无效")
+                    selectors: dict[str, int] = {}
+                    for name in ("enter_selector", "exit_selector", "timing_selector"):
+                        value = int(item.get(name, 1))
+                        if value < 1 or (value != 1 and value & 1):
+                            raise RuntimeError(f"{name} 无效")
+                        selectors[name] = value
+                    loop_bias = int(item.get("timing_loop_bias", 0))
+                    if not 0 <= loop_bias <= 2:
+                        raise RuntimeError("Timing loop bias 无效")
+                    children = item.get("stacked_entries", []) or []
+                    if stacked and children:
+                        raise RuntimeError("堆积子指令不能再次嵌套")
+                    if not isinstance(children, list) or len(children) > 32:
+                        raise RuntimeError("每条指令最多可堆积 32 条子指令")
+                    normalized = {
+                        "order_id": order_id,
+                        "line_id": line_id,
+                        "time_seconds": seconds,
+                        "days_mask": days,
+                        "offset_group_index": offset_group,
+                        "repeat_is_max": repeat_is_max,
+                        "repeat_count": None if repeat_is_max else repeat_count,
+                        "continue_into_next": continue_into_next,
+                        "timing_event": timing_event,
+                        **selectors,
+                        "timing_loop_bias": loop_bias,
+                        "stacked_entries": [
+                            validate_plan_record(child, stacked=True) for child in children
+                        ],
+                    }
+                    return normalized
+
+                normalized_plan = [
+                    validate_plan_record(item, stacked=False) for item in entry_plan
+                ]
+                args += [
+                    "--entry-plan-json",
+                    json.dumps(normalized_plan, ensure_ascii=True, separators=(",", ":")),
+                ]
+            for item in entries:
+                if not isinstance(item, dict):
+                    raise RuntimeError("运营规则项格式无效")
+                index = int(item.get("index"))
+                seconds = float(item.get("time_seconds"))
+                days = int(item.get("days_mask"))
+                if not (0 <= index < 32 and 0 <= seconds <= 172800 and 1 <= days <= 0x7F):
+                    raise RuntimeError("运营时间或日期范围无效")
+                offset_group = int(item.get("offset_group_index", 0))
+                if not 0 <= offset_group < 10:
+                    raise RuntimeError("运营项偏移组需在 1–10 之间")
+                repeat_is_max = item.get("repeat_is_max", False)
+                if not isinstance(repeat_is_max, bool):
+                    raise RuntimeError("重复 Max 标记必须为布尔值")
+                repeat_count = item.get("repeat_count")
+                if not repeat_is_max:
+                    repeat_count = int(repeat_count)
+                    if not 1 <= repeat_count <= 100:
+                        raise RuntimeError("重复次数需在 1–100 之间")
+                continue_into_next = item.get("continue_into_next", True)
+                if not isinstance(continue_into_next, bool):
+                    raise RuntimeError("继续下一指令标记必须为布尔值")
+                entry = {
+                    "index": index,
+                    "time_seconds": seconds,
+                    "days_mask": days,
+                    "offset_group_index": offset_group,
+                    "repeat_is_max": repeat_is_max,
+                    "repeat_count": None if repeat_is_max else repeat_count,
+                    "continue_into_next": continue_into_next,
+                }
+                args += [
+                    "--entry-json",
+                    json.dumps(entry, ensure_ascii=True, separators=(",", ":")),
+                ]
+            distributions = payload.get("distributions") or []
+            if not isinstance(distributions, list) or len(distributions) > 10:
+                raise RuntimeError("偏移组数量无效")
+            seen_groups: set[int] = set()
+            for item in distributions:
+                if not isinstance(item, dict):
+                    raise RuntimeError("偏移组格式无效")
+                group_index = int(item.get("group_index"))
+                if not 0 <= group_index < 10 or group_index in seen_groups:
+                    raise RuntimeError("偏移组索引无效或重复")
+                seen_groups.add(group_index)
+                group_mode = str(item.get("mode", "")).strip()
+                if group_mode not in ("fixed", "manual-duration", "line-duration"):
+                    raise RuntimeError("偏移组模式无效")
+                fixed = float(item.get("fixed_interval_seconds", 0))
+                manual = float(item.get("manual_duration_seconds", 0))
+                if not (0 <= fixed <= 86400 and 0 <= manual <= 86400):
+                    raise RuntimeError("偏移间隔或均分时长范围无效")
+                duration_line = item.get("duration_line_id")
+                if duration_line not in (None, ""):
+                    duration_line = str(duration_line).strip()
+                    if not re.fullmatch(r"0x[0-9a-fA-F]+", duration_line):
+                        raise RuntimeError("偏移组时长来源 Line id 无效")
+                if group_mode == "line-duration" and not duration_line:
+                    raise RuntimeError(f"偏移组 {group_index + 1} 需要选择时长来源线路")
+                distribution = {
+                    "group_index": group_index,
+                    "mode": group_mode,
+                    "fixed_interval_seconds": fixed,
+                    "manual_duration_seconds": manual,
+                    "duration_line_id": duration_line or None,
+                }
+                args += [
+                    "--distribution-json",
+                    json.dumps(distribution, ensure_ascii=True, separators=(",", ":")),
+                ]
+            mode = str(payload.get("offset_mode", "")).strip()
+            if mode:
+                if mode not in ("fixed", "manual-duration", "line-duration"):
+                    raise RuntimeError("偏移模式无效")
+                args += ["--offset-mode", mode]
+                if mode == "fixed":
+                    interval = float(payload.get("fixed_interval_seconds"))
+                    if not (0 < interval <= 86400):
+                        raise RuntimeError("固定间隔需在 0–86400 秒之间")
+                    args += ["--fixed-interval", str(interval)]
+                elif mode == "manual-duration":
+                    duration = float(payload.get("manual_duration_seconds"))
+                    if not (0 < duration <= 86400):
+                        raise RuntimeError("手动总时长需在 0–86400 秒之间")
+                    args += ["--manual-duration", str(duration)]
+            if entry_plan is None and not entries and not distributions and not mode:
+                raise RuntimeError("没有要写入的运营规则")
+            return args
         if action == "timetable-write":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             output = validate_output_path(payload.get("output", ""))

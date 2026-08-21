@@ -423,6 +423,64 @@
             </div>
             <div class="ttd-write-result" id="ttd-w-result" hidden></div>
           </div>
+          <div class="ttd-write oprule-card" id="oprule-card">
+            <div class="ttd-write-head">
+              <div><p class="step">CUSTOM TIMETABLE · 免 JSON</p><h3>自定义运营时刻表编辑器</h3></div>
+              <span class="phase-badge">只写新档</span>
+            </div>
+            <p class="ttd-write-note">比游戏内更集中地编辑整张指令表：支持 Order ID 安全保留与自动分配、Line、Timing、Enter/Exit/Timing 站点、插入、真正的嵌套“堆积”、星期、重复，以及全部 10 个偏移组。站点选择来自该 Line 自己的线路顺序表；所有写入都会创建新档并做结构回读。</p>
+            <div class="oprule-toolbar">
+              <button class="secondary-button" id="oprule-read">从当前存档读取</button>
+              <label>时刻表<select id="oprule-schedule" disabled><option value="">请先直读</option></select></label>
+              <div class="oprule-file-actions">
+                <button class="text-button" id="oprule-reset" disabled>撤销全部修改</button>
+                <button class="text-button" id="oprule-export" disabled>导出方案</button>
+                <label class="text-button oprule-import">导入方案<input id="oprule-import" type="file" accept="application/json,.json" disabled></label>
+              </div>
+            </div>
+            <div id="oprule-editor" hidden>
+              <div class="oprule-summary" id="oprule-summary"></div>
+              <div class="oprule-audit" id="oprule-audit"></div>
+              <div class="oprule-timeline" id="oprule-timeline"></div>
+              <div class="oprule-smartbar">
+                <div class="oprule-smart-head"><b>智能生成发车序列</b><small>按起止时间和班距追加单次指令；新 Order ID 在写入时自动、连续、安全分配</small></div>
+                <label class="oprule-field">Line<select id="oprule-smart-line"></select></label>
+                <label class="oprule-field">开始<input id="oprule-smart-start" type="text" value="06:00"></label>
+                <label class="oprule-field">结束<input id="oprule-smart-end" type="text" value="09:00"></label>
+                <label class="oprule-field">间隔（分钟）<input id="oprule-smart-headway" type="number" min="0.5" max="1440" step="0.5" value="7"></label>
+                <label class="oprule-field">星期<select id="oprule-smart-days"><option value="31">工作日</option><option value="127">每天</option><option value="96">周末</option></select></label>
+                <label class="oprule-field">偏移组<select id="oprule-smart-group"><option value="0">组 1</option><option value="1">组 2</option><option value="2">组 3</option><option value="3">组 4</option><option value="4">组 5</option><option value="5">组 6</option><option value="6">组 7</option><option value="7">组 8</option><option value="8">组 9</option><option value="9">组 10</option></select></label>
+                <button type="button" class="secondary-button" id="oprule-smart-generate">生成并追加</button>
+              </div>
+              <div class="oprule-bulkbar">
+                <label class="oprule-selectall"><input id="oprule-select-all" type="checkbox" checked> 选择全部指令</label>
+                <span class="oprule-bulk-label">批量星期</span>
+                <button class="text-button" data-op-days="127">每天</button>
+                <button class="text-button" data-op-days="31">工作日</button>
+                <button class="text-button" data-op-days="96">周末</button>
+                <span class="oprule-bulk-label">平移时间</span>
+                <input id="oprule-shift" type="number" min="0.5" max="1440" step="0.5" value="5" aria-label="批量平移分钟">
+                <button class="text-button" data-op-shift="-1">−</button>
+                <button class="text-button" data-op-shift="1">＋</button>
+                <button class="text-button" id="oprule-sort">按时间排序</button>
+              </div>
+              <div class="oprule-entry-list" id="oprule-entry-list"></div>
+              <section class="oprule-groups">
+                <div class="oprule-section-head">
+                  <div><b>偏移组设置</b><small>指令可自由分配到组 1–10；每组拥有独立分布方式</small></div>
+                  <div><button class="text-button" id="oprule-copy-group">复制本组</button><button class="text-button" id="oprule-paste-group" disabled>粘贴到本组</button></div>
+                </div>
+                <div class="oprule-group-tabs" id="oprule-group-tabs"></div>
+                <div class="oprule-group-editor" id="oprule-group-editor"></div>
+              </section>
+              <div class="oprule-savebar">
+                <div class="oprule-save-copy"><b id="oprule-dirty">未修改</b><small>写入前会验证目标表、其它时刻表零波及与压缩回读</small></div>
+                <label class="ttd-w-out">输出文件名<input id="oprule-output" type="text" readonly></label>
+                <button class="primary-button" id="oprule-write">创建自定义时刻表存档</button>
+              </div>
+            </div>
+            <div class="ttd-write-result" id="oprule-result" hidden></div>
+          </div>
         </article>
         <div class="section-intro" style="margin-top:6px">
           <div><p class="eyebrow aqua">FLEET MIGRATION</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>

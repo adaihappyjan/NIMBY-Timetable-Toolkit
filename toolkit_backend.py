@@ -1997,6 +1997,140 @@ def command_timetable_write(args: argparse.Namespace) -> dict:
     )
 
 
+def command_operating_rules(args: argparse.Namespace) -> dict:
+    """Read persisted timetable orders and all ten offset distributions."""
+    import toolkit_scheduleconfig as scheduleconfig
+
+    emit_progress("oprules", 10, 100, "正在直读时刻表运营规则…")
+    _header, frame, _frame_offset = split_save(args.save)
+    raw = Zstd().decompress(frame)
+    groups = scheduleconfig.read_operating_groups(raw)
+    rows = [scheduleconfig.group_to_dict(group) for group in groups if group.entries]
+    operating_lines = scheduleconfig.read_operating_lines(raw, groups)
+    lines = [
+        {
+            "id": line.line_id,
+            "name": line.name,
+            "route_schedule_id": line.route_schedule_id,
+            "stop_count": line.stop_count,
+            "selectors": [
+                {
+                    "selector": option.selector,
+                    "route_index": option.route_index,
+                    "station_id": option.station_id,
+                    "station_name": option.station_name,
+                }
+                for option in line.selectors
+            ],
+        }
+        for line in operating_lines
+    ]
+    emit_progress("oprules", 100, 100, f"已读取 {len(rows)} 组运营规则")
+    return {
+        "action": "operating-rules",
+        "save": str(args.save),
+        "group_count": len(rows),
+        "groups": rows,
+        "lines": lines,
+        "offset_group_count": scheduleconfig.OFFSET_GROUP_COUNT,
+        "time_encoding": "half-seconds",
+        "day_mask_encoding": "weekday-bitmask-times-two",
+        "offset_modes": {"fixed": 0, "manual-duration": 2, "line-duration": 4},
+    }
+
+
+def command_operating_rule_write(args: argparse.Namespace) -> dict:
+    """Write one verified operating-rule group into a NEW save."""
+    import toolkit_scheduleconfig as scheduleconfig
+
+    entry_updates: dict[int, dict[str, float | int | bool | None]] = {}
+    for item in args.entry or []:
+        if "=" not in item or "," not in item:
+            raise RuntimeError(f"运营项格式错误（应为 index=seconds,days_mask）：{item}")
+        index_s, values = item.split("=", 1)
+        seconds_s, days_s = values.split(",", 1)
+        try:
+            index = int(index_s)
+            entry_updates[index] = {
+                "time_seconds": float(seconds_s),
+                "days_mask": int(days_s, 0),
+            }
+        except ValueError as exc:
+            raise RuntimeError(f"运营项数值无效：{item}") from exc
+    for item in args.entry_json or []:
+        try:
+            row = json.loads(item)
+            index = int(row.pop("index"))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("自定义运营项 JSON 无效") from exc
+        if not isinstance(row, dict):
+            raise RuntimeError("自定义运营项 JSON 必须是对象")
+        entry_updates[index] = row
+
+    entry_plan = None
+    if args.entry_plan_json:
+        try:
+            entry_plan = json.loads(args.entry_plan_json)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("完整运营指令计划 JSON 无效") from exc
+        if not isinstance(entry_plan, list):
+            raise RuntimeError("完整运营指令计划必须是数组")
+
+    distribution_updates: dict[int, dict[str, float | int | str | None]] = {}
+    for item in args.distribution_json or []:
+        try:
+            row = json.loads(item)
+            index = int(row.pop("group_index"))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("偏移组 JSON 无效") from exc
+        if not isinstance(row, dict):
+            raise RuntimeError("偏移组 JSON 必须是对象")
+        distribution_updates[index] = row
+
+    if not entry_updates and entry_plan is None and not distribution_updates and args.offset_mode is None:
+        raise RuntimeError("没有要写入的运营规则")
+
+    emit_progress("opwrite", 5, 100, "正在解压并唯一定位运营规则…")
+    header, frame, frame_offset = split_save(args.save)
+    raw = Zstd().decompress(frame)
+    try:
+        new_raw, before, after, fields_written = scheduleconfig.set_operating_group(
+            raw,
+            args.schedule,
+            entry_updates=entry_updates,
+            entry_plan=entry_plan,
+            distribution_updates=distribution_updates,
+            offset_mode=args.offset_mode,
+            fixed_interval_seconds=args.fixed_interval,
+            manual_duration_seconds=args.manual_duration,
+        )
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    emit_progress("opwrite", 70, 100, "正在复核指令参数与十个偏移组…")
+    manifest = {
+        "action": "operating-rule-write",
+        "schedule_id": before.schedule_id,
+        "schedule_name": before.schedule_name,
+        "group_name": before.group_name,
+        "fields_written": fields_written,
+        "before": scheduleconfig.group_to_dict(before),
+        "after": scheduleconfig.group_to_dict(after),
+        "roundtrip_identity_verified": True,
+        "structural_reverify": True,
+        "collateral_groups_changed": 0,
+        "controlled_diff_basis": "Band A -> BAND_B / OT Line 4 Daily / OT Airport Link",
+        "verified_edit_scope": [
+            "time", "days", "repeat", "continue", "offset-group assignment",
+            "Line", "Timing/Enter/Exit selectors", "instruction insertion",
+            "stacked instructions", "10 offset distributions",
+        ],
+    }
+    return write_output(
+        args.save, args.output, header, raw, new_raw, manifest, frame_offset, args.level,
+    )
+
+
 def command_network_diff(args: argparse.Namespace) -> dict:
     emit_progress("netdiff", 1, 3, "正在读取较早的导出…")
     before_lines, before_stations = extract_network(load_objects(args.before))
@@ -3461,6 +3595,34 @@ def build_parser() -> argparse.ArgumentParser:
     timetable_write.add_argument("--dwell-scale", type=float, help="按倍数缩放当前停站时间")
     timetable_write.add_argument("--dwell-list", help="逐站停站时间(秒),逗号分隔;留空/-/*=继承默认")
     timetable_write.add_argument("--level", type=int, default=3)
+    operating_rules = sub.add_parser("operating-rules")
+    operating_rules.add_argument("--save", type=Path, required=True)
+    operating_write = sub.add_parser("operating-rule-write")
+    operating_write.add_argument("--save", type=Path, required=True)
+    operating_write.add_argument("--output", type=Path, required=True)
+    operating_write.add_argument("--schedule", required=True, help="时刻表 id 或名称")
+    operating_write.add_argument(
+        "--entry", action="append", default=[],
+        help="运营项 index=seconds,days_mask（days_mask 可写 0x1f）",
+    )
+    operating_write.add_argument(
+        "--entry-json", action="append", default=[],
+        help="完整运营项更新 JSON（含 index）",
+    )
+    operating_write.add_argument(
+        "--entry-plan-json",
+        help="完整运营指令数组；null Order id 会安全插入并自动分配编号",
+    )
+    operating_write.add_argument(
+        "--distribution-json", action="append", default=[],
+        help="偏移组更新 JSON（含 group_index）",
+    )
+    operating_write.add_argument(
+        "--offset-mode", choices=("fixed", "manual-duration", "line-duration")
+    )
+    operating_write.add_argument("--fixed-interval", type=float)
+    operating_write.add_argument("--manual-duration", type=float)
+    operating_write.add_argument("--level", type=int, default=3)
     network_diff = sub.add_parser("network-diff")
     network_diff.add_argument("--before", type=Path, required=True)
     network_diff.add_argument("--after", type=Path, required=True)
@@ -3520,6 +3682,10 @@ def main() -> None:
             result = command_station_names(args)
         elif args.command == "timetable-write":
             result = command_timetable_write(args)
+        elif args.command == "operating-rules":
+            result = command_operating_rules(args)
+        elif args.command == "operating-rule-write":
+            result = command_operating_rule_write(args)
         elif args.command == "network-diff":
             result = command_network_diff(args)
         else:

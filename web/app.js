@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-20f';
+const APP_BUILD = '2026-08-21c';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
 const $ = (selector) => document.querySelector(selector);
@@ -50,11 +50,6 @@ function switchView(name) {
   $$('.view').forEach(el => el.classList.toggle('active', el.id === `view-${name}`));
   $('#view-eyebrow').textContent = viewMeta[name][0]; $('#view-title').textContent = viewMeta[name][1];
   if (name === 'realnet') initRealnet();
-  // Auto-load line timing when first entering the timetable studio so the user
-  // doesn't have to click "直读线路" separately (single-read across views).
-  if (name === 'timetable' && !TTD.routes.length && !state.taskActive && $('#save-select')?.value) {
-    startTask('line-timetable', { save: $('#save-select').value });
-  }
 }
 function setOptions(select, files) {
   select.innerHTML = files.map((file, index) => `<option value="${escapeHtml(file.path)}" ${index === 0 ? 'selected' : ''}>${escapeHtml(file.name)} · ${formatBytes(file.size)}</option>`).join('');
@@ -1411,7 +1406,7 @@ function finishTask() {
   if (worker) worker.postMessage('stop');
   clearTimeout(state.fallbackTimer);
 }
-const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write']);
+const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write']);
 async function startTask(action, payload) {
   if (WRITE_ACTIONS.has(action) && state.gameVersion && state.gameVersion.safe_to_write === false) {
     if (!confirm(`${state.gameVersion.note || '当前游戏版本尚未完全验证写入。'}\n\n工具仍只写入新存档、绝不覆盖原档。是否继续？`)) return;
@@ -1444,11 +1439,13 @@ async function pollOnce() {
       else if (s.action === 'save-health') { renderSaveHealth(s.result); }
       else if (s.action === 'save-overview') { renderSaveOverview(s.result); }
       else if (s.action === 'line-timetable') { renderLineTimetable(s.result); }
+      else if (s.action === 'operating-rules') { renderOperatingRules(s.result); }
       else if (s.action === 'ops-analyze') { renderOpsAnalyze(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
       else if (s.action === 'track-geometry') { onTrackGeometry(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'timetable-write') { onTimetableWriteDone(s.result); await refreshFileLists(); refreshOutputNames(); }
+      else if (s.action === 'operating-rule-write') { onOperatingRuleWriteDone(s.result); await refreshFileLists(); refreshOutputNames(); }
       else if (s.action === 'station-name-write') { onStationNamesDone(s.result); await refreshFileLists(); refreshOutputNames(); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
@@ -2011,6 +2008,435 @@ async function ttdWrite(){
   const box=$('#ttd-w-result'); if(box){ box.hidden=false; box.className='ttd-write-result'; box.textContent='正在写入新存档…'; }
   await startTask('timetable-write',payload);
 }
+
+/* ===== Custom persisted timetable editor ===== */
+const OPR = { groups:[], selected:null, original:null, draft:null, activeGroup:0, copiedGroup:null, lines:[], dirty:false, baseSave:null };
+const OPR_DAYS = [['一',1],['二',2],['三',4],['四',8],['五',16],['六',32],['日',64]];
+function opruleClone(value){ return JSON.parse(JSON.stringify(value)); }
+function opruleCurrent(){
+  const id=$('#oprule-schedule')?.value;
+  return OPR.groups.find(g=>g.schedule_id===id) || null;
+}
+function opruleFormatTime(seconds){
+  if(seconds==null || !Number.isFinite(+seconds)) return '';
+  const half=Math.round(+seconds*2), total=half/2, h=Math.floor(total/3600), m=Math.floor((total%3600)/60), s=total%60;
+  const base=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  if(!s) return base;
+  return `${base}:${String(Math.floor(s)).padStart(2,'0')}${s%1?'.5':''}`;
+}
+function opruleParseTime(value){
+  const m=/^(\d{1,2}):([0-5]\d)(?::([0-5]\d)(?:\.(5))?)?$/.exec((value||'').trim());
+  if(!m) return null;
+  const seconds=(+m[1])*3600+(+m[2])*60+(+(m[3]||0))+(m[4]?0.5:0);
+  return seconds<=172800 ? seconds : null;
+}
+function opruleDayText(mask){
+  if(mask===127) return '每天'; if(mask===31) return '工作日'; if(mask===96) return '周末';
+  return OPR_DAYS.filter(([,bit])=>mask&bit).map(([name])=>name).join('') || '未选择';
+}
+function opruleRefreshOutput(){
+  const el=$('#oprule-output'); if(!el) return;
+  const save=OPR.baseSave||$('#save-select')?.value;
+  if(!save){el.value='';return;}
+  const slash=Math.max(save.lastIndexOf('\\'),save.lastIndexOf('/')), dir=save.slice(0,slash+1), base=save.slice(slash+1).replace(/\.nimbyrails5$/i,'');
+  el.value=`${dir}${base}_CustomTimetable_${timestamp()}.nimbyrails5`;
+}
+function opruleSetDirty(value=true){
+  OPR.dirty=!!value;
+  const label=$('#oprule-dirty');
+  if(label){ label.textContent=OPR.dirty?'有未保存修改':'未修改'; label.classList.toggle('dirty',OPR.dirty); }
+  const reset=$('#oprule-reset'); if(reset) reset.disabled=!OPR.dirty;
+}
+function opruleEntryEditable(entry,index){
+  const p=entry.order_parameters||{};
+  const out={ order_id:entry.order_id??null, line_id:entry.line_id, time_seconds:entry.time_seconds, days_mask:entry.days_mask,
+    offset_group_index:entry.offset_group_index, repeat_is_max:!!entry.repeat_is_max,
+    repeat_count:entry.repeat_is_max?null:Number(entry.repeat_count||1), continue_into_next:!!entry.continue_into_next,
+    timing_event:Number(entry.timing_event??p.timing_event??2), enter_selector:Number(entry.enter_selector??p.enter_selector??1),
+    exit_selector:Number(entry.exit_selector??p.exit_selector??1), timing_selector:Number(entry.timing_selector??p.timing_selector??1),
+    timing_loop_bias:Number(entry.timing_loop_bias??p.timing_loop_bias??0),
+    stacked_entries:(entry.stacked_entries||[]).map(child=>opruleEntryEditable(child)) };
+  if(index!=null) out.index=index;
+  return out;
+}
+function opruleDistributionEditable(group,index){
+  return { group_index:index, mode:group.mode, fixed_interval_seconds:Number(group.fixed_interval_seconds||0),
+    manual_duration_seconds:Number(group.manual_duration_seconds||0), duration_line_id:group.duration_line_id||null };
+}
+function opruleSyncEntries(){
+  if(!OPR.draft) return [];
+  $$('#oprule-entry-list [data-record-path]').forEach(row=>{
+    const entry=opruleRecordAt(row.dataset.recordPath); if(!entry)return;
+    let days=0; row.querySelectorAll('[data-day]:checked').forEach(ch=>{days|=+ch.dataset.day;});
+    const repeatMax=!!row.querySelector('[data-repeat-max]')?.checked;
+    const lineId=row.querySelector('[data-line]')?.value||entry.line_id;
+    Object.assign(entry,{ line_id:lineId, line_name:OPR.lines.find(line=>line.id===lineId)?.name||lineId,
+      time_seconds:opruleParseTime(row.querySelector('[data-time]')?.value), days_mask:days,
+      offset_group_index:+row.querySelector('[data-offset-group]')?.value,
+      offset_group_number:(+row.querySelector('[data-offset-group]')?.value)+1,
+      repeat_is_max:repeatMax, repeat_count:repeatMax?null:+row.querySelector('[data-repeat-count]')?.value,
+      continue_into_next:!!row.querySelector('[data-continue]')?.checked,
+      timing_event:+row.querySelector('[data-timing-event]')?.value,
+      enter_selector:+row.querySelector('[data-enter-selector]')?.value,
+      exit_selector:+row.querySelector('[data-exit-selector]')?.value,
+      timing_selector:+row.querySelector('[data-timing-selector]')?.value });
+  });
+  return OPR.draft.entries.map((entry,index)=>opruleEntryEditable(entry,index));
+}
+function opruleRecordAt(path){
+  if(!OPR.draft||path==null)return null;
+  const parts=String(path).split(':').map(Number), top=OPR.draft.entries[parts[0]];
+  return parts.length===1?top:top?.stacked_entries?.[parts[1]]||null;
+}
+function opruleLine(selected){ return OPR.lines.find(line=>line.id===selected)||null; }
+function opruleEntryLineOptions(selected){
+  const lines=[...OPR.lines]; if(selected&&!lines.some(line=>line.id===selected))lines.push({id:selected,name:selected,selectors:[]});
+  return lines.map(line=>`<option value="${escapeHtml(line.id)}" ${line.id===selected?'selected':''}>${escapeHtml(line.name||line.id)} · ${line.stop_count??'?'}站</option>`).join('');
+}
+function opruleSelectorOptions(entry,kind){
+  const line=opruleLine(entry.line_id), selected=Number(entry[`${kind}_selector`]??entry.order_parameters?.[`${kind}_selector`]??1);
+  const sentinel={enter:'〈线路起点〉',exit:'〈线路终点〉',timing:'〈与进入站相同〉'}[kind];
+  let html=`<option value="1" ${selected===1?'selected':''}>${sentinel}</option>`;
+  for(const option of line?.selectors||[]){
+    html+=`<option value="${option.selector}" ${selected===option.selector?'selected':''}>${option.route_index+1}. ${escapeHtml(option.station_name||option.station_id||option.selector)}</option>`;
+  }
+  if(selected!==1&&!(line?.selectors||[]).some(option=>option.selector===selected)){
+    html+=`<option value="${selected}" selected>⚠ 旧选择 ${selected}（保留）</option>`;
+  }
+  return html;
+}
+function opruleRenderRecord(entry,path,{stacked=false}={}){
+  const p=entry.order_parameters||{}, topIndex=+String(path).split(':')[0];
+  const checks=OPR_DAYS.map(([label,bit])=>`<label title="星期${label}"><input type="checkbox" data-day="${bit}" ${(entry.days_mask&bit)?'checked':''}>${label}</label>`).join('');
+  const groups=Array.from({length:10},(_,i)=>`<option value="${i}" ${entry.offset_group_index===i?'selected':''}>组 ${i+1}</option>`).join('');
+  const timing=Number(entry.timing_event??p.timing_event??2), isNew=entry.order_id==null;
+  return `<div class="oprule-entry ${stacked?'stacked':''}" data-record-path="${path}" data-entry="${topIndex}">`
+    +(stacked?`<span class="oprule-stack-glyph" title="堆积子指令">↳</span>`:`<label class="oprule-rowpick" title="加入批量操作"><input type="checkbox" data-row-select checked></label>`)
+    +`<label class="oprule-field oprule-line">线路 / Line<select data-line>${opruleEntryLineOptions(entry.line_id)}</select><small>${stacked?'堆积':''}指令 · Order ${isNew?'自动分配':escapeHtml(entry.order_id)} · ${escapeHtml(entry.line_id)}</small></label>`
+    +`<label class="oprule-field">时间<input type="text" data-time value="${opruleFormatTime(entry.time_seconds)}" placeholder="HH:MM[:SS.5]"></label>`
+    +`<div class="oprule-dayblock"><span class="oprule-days">${checks}</span><span class="oprule-day-presets"><button type="button" data-row-days="127">每天</button><button type="button" data-row-days="31">工作日</button><button type="button" data-row-days="96">周末</button></span></div>`
+    +`<label class="oprule-field">偏移组<select data-offset-group>${groups}</select></label>`
+    +`<div class="oprule-field oprule-repeat">重复<div class="oprule-repeat-controls"><label><input type="checkbox" data-repeat-max ${entry.repeat_is_max?'checked':''}>∞</label><input type="number" min="1" max="100" step="1" data-repeat-count value="${entry.repeat_count||1}" ${entry.repeat_is_max?'disabled':''}></div></div>`
+    +`<label class="oprule-continue"><input type="checkbox" data-continue ${entry.continue_into_next?'checked':''}>继续下一指令</label>`
+    +`<div class="oprule-routing">`
+    +`<label class="oprule-field">Timing<select data-timing-event><option value="0" ${timing===0?'selected':''}>准确到达</option><option value="2" ${timing===2?'selected':''}>准确发车</option><option value="4" ${timing===4?'selected':''}>不迟于此时到达</option></select></label>`
+    +`<label class="oprule-field">Enter<select data-enter-selector>${opruleSelectorOptions(entry,'enter')}</select></label>`
+    +`<label class="oprule-field">Exit<select data-exit-selector>${opruleSelectorOptions(entry,'exit')}</select></label>`
+    +`<label class="oprule-field">Timing 站<select data-timing-selector>${opruleSelectorOptions(entry,'timing')}</select></label>`
+    +`</div><div class="oprule-entry-actions">`
+    +(!stacked?`<button type="button" class="text-button" data-entry-insert="${path}">在后插入</button><button type="button" class="text-button" data-entry-stack="${path}">添加堆积</button>`:'')
+    +(isNew?`<button type="button" class="text-button danger" data-entry-remove="${path}">移除新增</button>`:'')
+    +`</div><details class="oprule-advanced"><summary>结构详情 · ${isNew?'Order ID 将在写入时自动生成':`Order ${escapeHtml(entry.order_id)}`}</summary><div class="oprule-raw-grid">`
+    +`<span>Line ID<b>${escapeHtml(entry.line_id)}</b></span><span>Loop bias<b>${escapeHtml(entry.timing_loop_bias??p.timing_loop_bias??0)}</b></span><span>堆积数量<b>${(entry.stacked_entries||[]).length}</b></span><span>原始参数<b>${escapeHtml(entry.order_parameters_hex||'新增')}</b></span>`
+    +`</div></details></div>`;
+}
+function opruleRenderEntries(){
+  const list=$('#oprule-entry-list'); if(!list||!OPR.draft) return;
+  list.innerHTML=OPR.draft.entries.map((entry,index)=>`<div class="oprule-entry-block" data-entry-block="${index}">${opruleRenderRecord(entry,String(index))}<div class="oprule-stack-list">${(entry.stacked_entries||[]).map((child,childIndex)=>opruleRenderRecord(child,`${index}:${childIndex}`,{stacked:true})).join('')}</div></div>`).join('');
+}
+function opruleRenderSummary(){
+  const box=$('#oprule-summary'); if(!box||!OPR.draft) return;
+  const entries=OPR.draft.entries, all=entries.flatMap(entry=>[entry,...(entry.stacked_entries||[])]), valid=all.filter(e=>e.time_seconds!=null), times=valid.map(e=>e.time_seconds);
+  const used=new Set(entries.map(e=>e.offset_group_index)).size, dayTypes=new Set(entries.map(e=>e.days_mask)).size;
+  const audit=opruleAudit(all), status=audit.errors.length?`${audit.errors.length} 项错误`:audit.warnings.length?`${audit.warnings.length} 项提醒`:'全部通过';
+  box.innerHTML=[['顶层 / 堆积',`${entries.length} / ${all.length-entries.length}`,''],['时间范围',times.length?`${opruleFormatTime(Math.min(...times))}–${opruleFormatTime(Math.max(...times))}`:'待修正',''],['星期 / 偏移组',`${dayTypes} / ${used}`,''],['智能校验',status,'']]
+    .map(([label,value,unit])=>`<div><small>${label}</small><b>${escapeHtml(value)}${unit||''}</b></div>`).join('');
+  const auditBox=$('#oprule-audit'); if(auditBox){
+    const messages=[...audit.errors.map(text=>`<span class="error">${escapeHtml(text)}</span>`),...audit.warnings.map(text=>`<span>${escapeHtml(text)}</span>`)];
+    auditBox.classList.toggle('has-error',!!audit.errors.length);
+    auditBox.innerHTML=messages.length?messages.join(''):'<span class="ok">结构、Order ID 保留规则、线路站点选择与时间冲突检查通过。</span>';
+  }
+}
+function opruleAudit(entries){
+  const errors=[],warnings=[],slots=new Map();
+  for(const entry of entries){
+    if(entry.time_seconds==null)errors.push('存在无法识别的时间');
+    if(!entry.days_mask)errors.push('存在未选择星期的指令');
+    if(!entry.line_id)errors.push('存在未选择 Line 的指令');
+    const line=opruleLine(entry.line_id), selectors=line?.selectors||[];
+    for(const [label,value] of [['Enter',entry.enter_selector],['Exit',entry.exit_selector],['Timing',entry.timing_selector]]){
+      if(value!==1&&!selectors.some(option=>option.selector===Number(value)))warnings.push(`${label} ${value} 是该 Line 的旧站点选择；不改 Line 时会原样保留`);
+    }
+    if(entry.time_seconds!=null){
+      const key=`${entry.time_seconds}`;
+      for(const other of slots.get(key)||[]){if(other.days_mask&entry.days_mask)warnings.push(`${opruleFormatTime(entry.time_seconds)} 有星期重叠的并发指令`);}
+      slots.set(key,[...(slots.get(key)||[]),entry]);
+    }
+  }
+  return {errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
+}
+function opruleRenderTimeline(){
+  const box=$('#oprule-timeline'); if(!box||!OPR.draft) return;
+  const records=OPR.draft.entries.flatMap((entry,index)=>[{entry,path:String(index),stacked:false},...(entry.stacked_entries||[]).map((child,childIndex)=>({entry:child,path:`${index}:${childIndex}`,stacked:true}))]);
+  const markers=records.map(({entry,path,stacked})=>{
+    if(entry.time_seconds==null) return '';
+    const day=Math.floor(entry.time_seconds/86400), left=Math.max(1,Math.min(99,((entry.time_seconds%86400)/86400)*100));
+    return `<button type="button" class="oprule-time-marker ${stacked?'stacked':''}" data-jump-record="${path}" data-position="${left}" style="left:${left}%" title="${escapeHtml(entry.line_name||entry.line_id)}"><b>${opruleFormatTime(entry.time_seconds)}</b><em>${stacked?'堆积 · ':''}${day?`+${day}日 · `:''}${escapeHtml(entry.line_name||entry.line_id)}</em></button>`;
+  }).join('');
+  box.innerHTML='<div class="oprule-time-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div><div class="oprule-time-track">'+markers+'</div>';
+  requestAnimationFrame(opruleLayoutTimeline);
+}
+function opruleLayoutTimeline(){
+  const box=$('#oprule-timeline'),track=box?.querySelector('.oprule-time-track'); if(!box||!track)return;
+  const markers=[...track.querySelectorAll('.oprule-time-marker')], width=track.clientWidth; if(!width)return;
+  const laneEnds=[];
+  const measured=markers.map(marker=>{
+    marker.style.left='0px'; marker.style.top='8px';
+    const markerWidth=Math.min(width-8,marker.offsetWidth||120), position=(+marker.dataset.position||0)/100*width;
+    return {marker,markerWidth,position};
+  }).sort((a,b)=>a.position-b.position);
+  for(const item of measured){
+    const half=item.markerWidth/2, center=Math.max(half+4,Math.min(width-half-4,item.position));
+    const start=center-half, end=center+half; let lane=laneEnds.findIndex(right=>start>=right+10);
+    if(lane<0){lane=laneEnds.length;laneEnds.push(end);}else laneEnds[lane]=end;
+    item.marker.style.left=`${center}px`; item.marker.style.top=`${8+lane*48}px`; item.marker.style.setProperty('--stem',`${8+lane*48}px`);
+    item.marker.dataset.lane=String(lane);
+  }
+  box.style.minHeight=`${Math.max(112,58+Math.max(1,laneEnds.length)*48)}px`;
+}
+function opruleModeSummary(group){
+  if(group.mode==='fixed') return group.fixed_interval_seconds?`${group.fixed_interval_seconds/60}分`:'0分';
+  if(group.mode==='manual-duration') return group.manual_duration_seconds?`${group.manual_duration_seconds/60}分总长`:'0分总长';
+  return '线路时长';
+}
+function opruleRenderGroupTabs(){
+  const box=$('#oprule-group-tabs'); if(!box||!OPR.draft) return;
+  const used=Array(10).fill(0); OPR.draft.entries.flatMap(e=>[e,...(e.stacked_entries||[])]).forEach(e=>{if(e.offset_group_index>=0&&e.offset_group_index<10)used[e.offset_group_index]++;});
+  box.innerHTML=OPR.draft.offset_distributions.map((group,index)=>`<button type="button" class="oprule-group-tab ${used[index]?'used':''} ${OPR.activeGroup===index?'active':''}" data-offset-tab="${index}"><b>组 ${index+1}</b><small>${used[index]}项 · ${escapeHtml(opruleModeSummary(group))}</small></button>`).join('');
+}
+function opruleLineOptions(selected){
+  const lines=[...OPR.lines];
+  if(selected&&!lines.some(x=>x.id===selected)) lines.push({id:selected,name:selected});
+  return '<option value="">未设置</option>'+lines.map(line=>`<option value="${escapeHtml(line.id)}" ${line.id===selected?'selected':''}>${escapeHtml(line.name||line.id)}</option>`).join('');
+}
+function opruleRenderGroupEditor(){
+  const box=$('#oprule-group-editor'); if(!box||!OPR.draft) return;
+  const group=OPR.draft.offset_distributions[OPR.activeGroup]; if(!group) return;
+  const mins=value=>(Number(value||0)/60).toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');
+  box.innerHTML=`<label class="oprule-field">分布方式<select data-group-mode><option value="fixed" ${group.mode==='fixed'?'selected':''}>固定间隔</option><option value="manual-duration" ${group.mode==='manual-duration'?'selected':''}>按手动总时长均分</option><option value="line-duration" ${group.mode==='line-duration'?'selected':''}>按线路运行时长均分</option></select></label>`
+    +`<label class="oprule-field">固定间隔（分钟）<input type="number" min="0" max="1440" step="0.5" data-group-fixed value="${mins(group.fixed_interval_seconds)}"><small>${group.mode==='fixed'?'当前生效':'保留值'}</small></label>`
+    +`<label class="oprule-field">手动总时长（分钟）<input type="number" min="0" max="1440" step="0.5" data-group-manual value="${mins(group.manual_duration_seconds)}"><small>${group.mode==='manual-duration'?'当前生效':'保留值'}</small></label>`
+    +`<label class="oprule-field">时长来源线路<select data-group-line>${opruleLineOptions(group.duration_line_id)}</select><small>${group.mode==='line-duration'?'当前模式必须选择':'固定/手动模式不使用'}</small></label>`
+    +`<div class="oprule-quick-intervals">快速固定间隔：${[1,2,5,7,10,15,30].map(x=>`<button type="button" class="text-button" data-fixed-min="${x}">${x}分</button>`).join('')}</div>`
+    +`<div class="oprule-group-note">三个输入会分别保存在存档中，切换模式不会丢失暂不生效的值。固定间隔是列车在同一指令上的逐车偏移，不是线路站间运行时间。</div>`;
+}
+function opruleRenderDerived(){ opruleRenderSummary(); opruleRenderTimeline(); opruleRenderGroupTabs(); }
+function opruleRenderAll(){
+  const editor=$('#oprule-editor'); if(!editor) return;
+  editor.hidden=!OPR.draft;
+  if(!OPR.draft) return;
+  const smartLine=$('#oprule-smart-line'); if(smartLine){const selected=smartLine.value||OPR.draft.entries.at(-1)?.line_id;smartLine.innerHTML=opruleEntryLineOptions(selected);}
+  opruleRenderEntries(); opruleRenderDerived(); opruleRenderGroupEditor(); opruleRefreshOutput();
+  const result=$('#oprule-result'); if(result) result.hidden=true;
+}
+function opruleLoadGroup(group){
+  OPR.selected=group?.schedule_id||null; OPR.original=group?opruleClone(group):null; OPR.draft=group?opruleClone(group):null; OPR.activeGroup=0; OPR.copiedGroup=null;
+  opruleSetDirty(false); const paste=$('#oprule-paste-group'); if(paste) paste.disabled=true; opruleRenderAll();
+}
+function renderOperatingRules(res){
+  OPR.groups=(res.groups||[]).filter(g=>g.editable);
+  OPR.lines=res.lines||[];
+  OPR.baseSave=res.save||$('#save-select')?.value||null;
+  if(!OPR.lines.length){
+    const map=new Map(); OPR.groups.forEach(g=>g.entries.forEach(e=>map.set(e.line_id,e.line_name||e.line_id)));
+    OPR.lines=[...map].map(([id,name])=>({id,name}));
+  }
+  OPR.groups.sort((a,b)=>(a.entries.length>1?0:1)-(b.entries.length>1?0:1)||a.schedule_name.localeCompare(b.schedule_name,'zh-CN'));
+  const sel=$('#oprule-schedule'); if(!sel) return;
+  sel.disabled=!OPR.groups.length;
+  sel.innerHTML=OPR.groups.length?OPR.groups.map(g=>`<option value="${escapeHtml(g.schedule_id)}">${escapeHtml(g.schedule_name)} · ${escapeHtml(g.entries.map(e=>e.line_name||e.line_id).join(' → '))}</option>`).join(''):'<option value="">未找到可安全编辑的运营规则</option>';
+  const airport=OPR.groups.findIndex(g=>g.schedule_name==='OT Line 4 Daily'); if(airport>=0) sel.selectedIndex=airport;
+  ['#oprule-export','#oprule-import'].forEach(id=>{const el=$(id);if(el)el.disabled=!OPR.groups.length;});
+  opruleLoadGroup(opruleCurrent());
+  toast(`已读取 ${OPR.groups.length} 张时刻表和 ${OPR.lines.length} 条线路`);
+}
+function opruleSelectedRows(){ return $$('#oprule-entry-list [data-record-path]:not(.stacked)').filter(row=>row.querySelector('[data-row-select]')?.checked); }
+function opruleApplyDays(rows,mask){
+  rows.forEach(row=>row.querySelectorAll('[data-day]').forEach(ch=>{ch.checked=!!(mask&+ch.dataset.day);}));
+  opruleSyncEntries(); opruleSetDirty(); opruleRenderDerived();
+}
+function opruleApplyShift(direction){
+  const amount=+$('#oprule-shift')?.value;
+  if(!(amount>=0.5&&amount<=1440)) return toast('平移分钟需在 0.5–1440 之间',true);
+  const rows=opruleSelectedRows(); if(!rows.length) return toast('请先选择要平移的指令',true);
+  for(const row of rows){
+    const input=row.querySelector('[data-time]'), current=opruleParseTime(input?.value); if(current==null) return toast('请先修正选中指令的时间',true);
+    let next=current+direction*amount*60; while(next<0)next+=86400; while(next>172800)next-=86400; input.value=opruleFormatTime(next);
+  }
+  opruleSyncEntries(); opruleSetDirty(); opruleRenderDerived();
+}
+function opruleNewRecord(source,timeSeconds){
+  const record=opruleEntryEditable(source);
+  record.order_id=null; record.time_seconds=Math.min(172800,Math.max(0,timeSeconds)); record.stacked_entries=[];
+  record.enter_selector=1; record.exit_selector=1; record.timing_selector=1;
+  record.repeat_is_max=false; record.repeat_count=1;
+  record.line_name=opruleLine(record.line_id)?.name||record.line_id;
+  return record;
+}
+function opruleInsertAfter(path){
+  opruleSyncEntries(); const index=+String(path).split(':')[0], source=OPR.draft?.entries[index]; if(!source)return;
+  if(OPR.draft.entries.length>=32)return toast('顶层指令已达到安全上限 32 条',true);
+  const next=OPR.draft.entries[index+1], current=Number(source.time_seconds||0);
+  const suggested=next?.time_seconds>current+1?(current+next.time_seconds)/2:current+1800;
+  OPR.draft.entries.splice(index+1,0,opruleNewRecord(source,Math.round(suggested*2)/2));
+  opruleSetDirty(); opruleRenderAll();
+}
+function opruleAddStack(path){
+  opruleSyncEntries(); const index=+String(path).split(':')[0], parent=OPR.draft?.entries[index]; if(!parent)return;
+  parent.stacked_entries=parent.stacked_entries||[]; if(parent.stacked_entries.length>=32)return toast('该指令已达到 32 条堆积上限',true);
+  const source=parent.stacked_entries.at(-1)||parent;
+  let interval=420;
+  if(parent.stacked_entries.length>=2){
+    const a=parent.stacked_entries.at(-2).time_seconds,b=parent.stacked_entries.at(-1).time_seconds;
+    if(b>a)interval=b-a;
+  }else{
+    const group=OPR.draft.offset_distributions?.[source.offset_group_index];
+    if(group?.mode==='fixed'&&group.fixed_interval_seconds>0)interval=group.fixed_interval_seconds;
+  }
+  parent.stacked_entries.push(opruleNewRecord(source,Number(source.time_seconds||0)+interval));
+  opruleSetDirty(); opruleRenderAll();
+}
+function opruleRemoveNew(path){
+  opruleSyncEntries(); const parts=String(path).split(':').map(Number), record=opruleRecordAt(path); if(!record||record.order_id!=null)return toast('已存在于存档的 Order 不能在安全模式中删除',true);
+  if(parts.length===1){if(OPR.draft.entries.length<=1)return toast('时刻表至少需要一条顶层指令',true);OPR.draft.entries.splice(parts[0],1);}
+  else OPR.draft.entries[parts[0]].stacked_entries.splice(parts[1],1);
+  opruleSetDirty(); opruleRenderAll();
+}
+function opruleSortEntries(){
+  opruleSyncEntries(); OPR.draft.entries=OPR.draft.entries.map((entry,index)=>({entry,index})).sort((a,b)=>(a.entry.time_seconds??Infinity)-(b.entry.time_seconds??Infinity)||a.index-b.index).map(item=>item.entry);
+  opruleSetDirty(); opruleRenderAll(); toast('已按时间重排顶层指令；堆积子指令保持在父指令下');
+}
+function opruleGenerateSmart(){
+  if(!OPR.draft)return; opruleSyncEntries();
+  const lineId=$('#oprule-smart-line')?.value, start=opruleParseTime($('#oprule-smart-start')?.value), end=opruleParseTime($('#oprule-smart-end')?.value);
+  const headway=(+$('#oprule-smart-headway')?.value)*60, days=+$('#oprule-smart-days')?.value, offset=+$('#oprule-smart-group')?.value;
+  if(!lineId||start==null||end==null||end<start)return toast('请检查智能生成的线路和起止时间',true);
+  if(!(headway>=30&&headway<=86400))return toast('发车间隔需在 0.5–1440 分钟之间',true);
+  const count=Math.floor((end-start)/headway)+1;
+  if(count<1||OPR.draft.entries.length+count>32)return toast(`本次将生成 ${count} 条，顶层总数会超过安全上限 32`,true);
+  const seed=OPR.draft.entries.find(entry=>entry.line_id===lineId)||OPR.draft.entries[0];
+  for(let i=0;i<count;i++){
+    const record=opruleNewRecord({...seed,line_id:lineId,days_mask:days,offset_group_index:offset,timing_event:2},start+i*headway);
+    record.days_mask=days; record.offset_group_index=offset; record.timing_event=2;
+    OPR.draft.entries.push(record);
+  }
+  OPR.draft.entries.sort((a,b)=>(a.time_seconds??Infinity)-(b.time_seconds??Infinity));
+  opruleSetDirty(); opruleRenderAll(); toast(`已智能生成 ${count} 条精确发车指令；Order ID 将在写入时分配`);
+}
+function opruleSyncGroupFromEditor(){
+  const group=OPR.draft?.offset_distributions?.[OPR.activeGroup]; if(!group) return;
+  group.mode=$('[data-group-mode]')?.value||group.mode;
+  group.fixed_interval_seconds=Math.max(0,(+$('[data-group-fixed]')?.value||0)*60);
+  group.manual_duration_seconds=Math.max(0,(+$('[data-group-manual]')?.value||0)*60);
+  group.duration_line_id=$('[data-group-line]')?.value||null;
+  opruleSetDirty(); opruleRenderGroupTabs();
+}
+function opruleDiff(){
+  const entries=opruleSyncEntries(), all=entries.flatMap(entry=>[entry,...entry.stacked_entries]);
+  if(all.some(e=>e.time_seconds==null)) throw new Error('时间格式应为 HH:MM、HH:MM:SS 或 HH:MM:SS.5');
+  if(all.some(e=>!e.days_mask)) throw new Error('每条指令至少选择一天');
+  if(all.some(e=>!e.repeat_is_max&&!(e.repeat_count>=1&&e.repeat_count<=100))) throw new Error('重复次数需在 1–100 之间，或选择 ∞');
+  if(all.some(e=>![0,2,4].includes(e.timing_event)))throw new Error('存在无效的 Timing 事件');
+  if(all.some(e=>!OPR.lines.some(line=>line.id===e.line_id)))throw new Error('存在不属于当前存档的 Line ID');
+  const distributions=OPR.draft.offset_distributions.map(opruleDistributionEditable);
+  for(const group of distributions){
+    if(group.fixed_interval_seconds<0||group.fixed_interval_seconds>86400||group.manual_duration_seconds<0||group.manual_duration_seconds>86400) throw new Error(`偏移组 ${group.group_index+1} 的分钟数超出范围`);
+    if(group.group_index===0&&!group.duration_line_id) throw new Error('偏移组 1 必须保留时长来源线路');
+    if(group.mode==='line-duration'&&!group.duration_line_id) throw new Error(`偏移组 ${group.group_index+1} 使用线路时长时必须选择来源线路`);
+  }
+  const beforeEntries=OPR.original.entries.map(opruleEntryEditable);
+  const beforeGroups=OPR.original.offset_distributions.map(opruleDistributionEditable);
+  const entryChanged=JSON.stringify(entries)!==JSON.stringify(beforeEntries);
+  return { entry_plan:entryChanged?entries:null, entry_changes:entryChanged?all.length:0, distributions:distributions.filter((group,i)=>JSON.stringify(group)!==JSON.stringify(beforeGroups[i])) };
+}
+async function opruleWrite(){
+  const save=OPR.baseSave||$('#save-select')?.value;
+  if(!save) return toast('请先选择存档',true); if(!OPR.draft) return toast('请先读取并选择时刻表',true);
+  let changes; try{ changes=opruleDiff(); }catch(e){ return toast(e.message,true); }
+  if(!changes.entry_plan&&!changes.distributions.length) return toast('当前方案没有实际修改',true);
+  opruleRefreshOutput(); const output=$('#oprule-output')?.value; if(!output) return toast('无法生成输出文件名',true);
+  const newCount=(changes.entry_plan||[]).flatMap(entry=>[entry,...entry.stacked_entries]).filter(entry=>entry.order_id==null).length;
+  if(!confirm(`将写入完整指令计划${newCount?`（新增 ${newCount} 个 Order ID）`:''}、修改 ${changes.distributions.length} 个偏移组，并创建新存档。\n原存档不会被覆盖。继续吗？`)) return;
+  const box=$('#oprule-result'); if(box){box.hidden=false;box.className='ttd-write-result';box.textContent='正在创建并验证自定义时刻表存档…';}
+  await startTask('operating-rule-write',{save,output,schedule:OPR.draft.schedule_id,entry_plan:changes.entry_plan,distributions:changes.distributions});
+}
+function oprulePlan(){
+  const diff=opruleDiff();
+  return { format:'nimby-custom-timetable-v2', exported_at:new Date().toISOString(), schedule_id:OPR.draft.schedule_id, schedule_name:OPR.draft.schedule_name,
+    entries:OPR.draft.entries.map(opruleEntryEditable), offset_distributions:OPR.draft.offset_distributions.map(opruleDistributionEditable), changed:diff };
+}
+function opruleExportPlan(){
+  if(!OPR.draft) return;
+  let plan; try{plan=oprulePlan();}catch(e){return toast(e.message,true);}
+  const blob=new Blob([JSON.stringify(plan,null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), link=document.createElement('a');
+  link.href=url; link.download=`${OPR.draft.schedule_name.replace(/[\\/:*?"<>|]/g,'_')}_自定义时刻表.json`; link.click(); URL.revokeObjectURL(url); toast('已导出可复用的自定义时刻表方案');
+}
+async function opruleImportPlan(file){
+  if(!file||!OPR.draft) return;
+  try{
+    const plan=JSON.parse(await file.text());
+    if(!['nimby-custom-timetable-v1','nimby-custom-timetable-v2'].includes(plan.format)||!Array.isArray(plan.entries)||!Array.isArray(plan.offset_distributions)) throw new Error('不是本工具导出的自定义时刻表方案');
+    if(plan.offset_distributions.length!==10) throw new Error('方案必须包含 10 个偏移组');
+    if(plan.format==='nimby-custom-timetable-v1'){
+      if(plan.entries.length!==OPR.draft.entries.length)throw new Error('旧版方案的指令数量与当前时刻表不一致');
+      plan.entries.forEach((entry,index)=>Object.assign(OPR.draft.entries[index],opruleEntryEditable({...OPR.draft.entries[index],...entry},index)));
+    }else{
+      const persisted=new Set(OPR.original.entries.flatMap(entry=>[entry,...(entry.stacked_entries||[])]).map(entry=>entry.order_id).filter(id=>id!=null));
+      const imported=plan.entries.flatMap(entry=>[entry,...(entry.stacked_entries||[])]);
+      if(plan.entries.length<1||plan.entries.length>32||imported.length>128)throw new Error('方案超过 32 条顶层 / 128 条总记录的安全上限');
+      const ids=new Set(imported.map(entry=>entry.order_id).filter(id=>id!=null));
+      if([...persisted].some(id=>!ids.has(id))||[...ids].some(id=>!persisted.has(id)))throw new Error('方案必须完整保留当前存档中已有的 Order ID');
+      if(imported.some(entry=>!OPR.lines.some(line=>line.id===entry.line_id)))throw new Error('方案引用了当前存档不存在的 Line ID');
+      OPR.draft.entries=plan.entries.map((entry,index)=>opruleEntryEditable(entry,index));
+    }
+    plan.offset_distributions.forEach((group,index)=>Object.assign(OPR.draft.offset_distributions[index],opruleDistributionEditable(group,index)));
+    opruleSetDirty(); opruleRenderAll(); toast(`已导入方案：${plan.schedule_name||file.name}`);
+  }catch(e){toast(`导入失败：${e.message}`,true);}
+  finally{const input=$('#oprule-import');if(input)input.value='';}
+}
+function onOperatingRuleWriteDone(res){
+  const box=$('#oprule-result'), after=res.after||{}, file=(res.output_save||'').split(/[\\/]/).pop()||'新存档';
+  const index=OPR.groups.findIndex(g=>g.schedule_id===after.schedule_id); if(index>=0) OPR.groups[index]=after;
+  OPR.baseSave=res.output_save||OPR.baseSave; OPR.original=opruleClone(after); OPR.draft=opruleClone(after); opruleSetDirty(false); opruleRenderEntries(); opruleRenderDerived(); opruleRenderGroupEditor(); opruleRefreshOutput();
+  toast(`自定义时刻表存档已创建：${file}`); if(!box)return;
+  const rows=(after.entries||[]).map(e=>`${escapeHtml(e.line_name||e.line_id)} ${opruleFormatTime(e.time_seconds)} · ${opruleDayText(e.days_mask)} · 组 ${e.offset_group_number} · ${e.repeat_is_max?'∞':`x${e.repeat_count}`}`).join('<br>');
+  box.hidden=false; box.className='ttd-write-result ok'; box.innerHTML=`<b>✓ 自定义时刻表写入成功</b><br>${rows}<br>指令参数回读✓ · 十个偏移组回读✓ · 其它时刻表零波及✓ · 压缩回读✓<br>新存档：<code>${escapeHtml(file)}</code><br><small>原存档未改动；继续编辑会以上述新存档为基础。请在游戏暂停状态加载并核对“指令 / 偏移 / 时刻表”页。</small>`;
+}
+$('#oprule-read')?.addEventListener('click',()=>{const save=$('#save-select')?.value;if(!save)return toast('请先选择存档',true);startTask('operating-rules',{save});});
+$('#oprule-schedule')?.addEventListener('change',event=>{if(OPR.dirty&&!confirm('切换时刻表会放弃当前未保存修改，继续吗？')){event.target.value=OPR.selected;return;}opruleLoadGroup(opruleCurrent());});
+$('#oprule-entry-list')?.addEventListener('input',event=>{
+  if(event.target.matches('[data-row-select]'))return; const row=event.target.closest('[data-record-path]'); if(!row)return;
+  if(event.target.matches('[data-repeat-max]'))row.querySelector('[data-repeat-count]').disabled=event.target.checked;
+  opruleSyncEntries();
+  if(event.target.matches('[data-line]')){
+    const record=opruleRecordAt(row.dataset.recordPath); if(record){record.enter_selector=1;record.exit_selector=1;record.timing_selector=1;record.line_name=opruleLine(record.line_id)?.name||record.line_id;}
+    opruleRenderEntries();
+  }
+  opruleSetDirty();opruleRenderDerived();
+});
+$('#oprule-entry-list')?.addEventListener('click',event=>{
+  const days=event.target.closest('[data-row-days]'); if(days)return opruleApplyDays([days.closest('[data-record-path]')],+days.dataset.rowDays);
+  const insert=event.target.closest('[data-entry-insert]'); if(insert)return opruleInsertAfter(insert.dataset.entryInsert);
+  const stack=event.target.closest('[data-entry-stack]'); if(stack)return opruleAddStack(stack.dataset.entryStack);
+  const remove=event.target.closest('[data-entry-remove]'); if(remove)return opruleRemoveNew(remove.dataset.entryRemove);
+});
+$('#oprule-select-all')?.addEventListener('change',event=>$$('#oprule-entry-list [data-row-select]').forEach(ch=>{ch.checked=event.target.checked;}));
+$$('[data-op-days]').forEach(button=>button.addEventListener('click',()=>{const rows=opruleSelectedRows();if(!rows.length)return toast('请先选择指令',true);opruleApplyDays(rows,+button.dataset.opDays);}));
+$$('[data-op-shift]').forEach(button=>button.addEventListener('click',()=>opruleApplyShift(+button.dataset.opShift)));
+$('#oprule-timeline')?.addEventListener('click',event=>{const marker=event.target.closest('[data-jump-record]');if(marker)document.querySelector(`#oprule-entry-list [data-record-path="${marker.dataset.jumpRecord}"]`)?.scrollIntoView({behavior:'smooth',block:'center'});});
+$('#oprule-sort')?.addEventListener('click',opruleSortEntries);
+$('#oprule-smart-generate')?.addEventListener('click',opruleGenerateSmart);
+$('#oprule-group-tabs')?.addEventListener('click',event=>{const tab=event.target.closest('[data-offset-tab]');if(!tab)return;OPR.activeGroup=+tab.dataset.offsetTab;opruleRenderGroupTabs();opruleRenderGroupEditor();});
+$('#oprule-group-editor')?.addEventListener('input',opruleSyncGroupFromEditor);
+$('#oprule-group-editor')?.addEventListener('click',event=>{const button=event.target.closest('[data-fixed-min]');if(!button)return;const input=$('[data-group-fixed]');input.value=button.dataset.fixedMin;opruleSyncGroupFromEditor();opruleRenderGroupEditor();});
+$('#oprule-copy-group')?.addEventListener('click',()=>{if(!OPR.draft)return;OPR.copiedGroup=opruleClone(OPR.draft.offset_distributions[OPR.activeGroup]);$('#oprule-paste-group').disabled=false;toast(`已复制偏移组 ${OPR.activeGroup+1}`);});
+$('#oprule-paste-group')?.addEventListener('click',()=>{if(!OPR.copiedGroup||!OPR.draft)return;const index=OPR.activeGroup,current=OPR.draft.offset_distributions[index],pasted=opruleClone(OPR.copiedGroup);if(index===0&&!pasted.duration_line_id)pasted.duration_line_id=current.duration_line_id;OPR.draft.offset_distributions[index]={...pasted,group_index:index,group_number:index+1};opruleSetDirty();opruleRenderGroupTabs();opruleRenderGroupEditor();});
+$('#oprule-reset')?.addEventListener('click',()=>{if(!OPR.original||!confirm('撤销这张时刻表的全部未保存修改？'))return;OPR.draft=opruleClone(OPR.original);OPR.activeGroup=0;opruleSetDirty(false);opruleRenderAll();});
+$('#oprule-export')?.addEventListener('click',opruleExportPlan);
+$('#oprule-import')?.addEventListener('change',event=>opruleImportPlan(event.target.files?.[0]));
+$('#oprule-write')?.addEventListener('click',opruleWrite);
+$('#save-select')?.addEventListener('change',()=>{OPR.groups=[];OPR.original=null;OPR.draft=null;OPR.dirty=false;OPR.baseSave=null;const sel=$('#oprule-schedule');if(sel){sel.disabled=true;sel.innerHTML='<option value="">请重新读取</option>';}const ed=$('#oprule-editor');if(ed)ed.hidden=true;opruleRefreshOutput();});
+window.addEventListener('resize',()=>requestAnimationFrame(opruleLayoutTimeline));
 
 setInterval(()=>fetch(`/api/ping?_=${Date.now()}`,{cache:'no-store'}).catch(()=>{}),5000);
 loadBootstrap().catch(e=>toast(e.message,true));
