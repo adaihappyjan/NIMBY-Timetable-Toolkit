@@ -70,7 +70,10 @@ class MCPProtocolTests(unittest.TestCase):
                 self.assertIn("scan_vehicle_mods", names)
                 result = await client.call_tool("order_structure_schema", {})
                 self.assertFalse(result.is_error)
-                self.assertIsNotNone(result.structured_content)
+                # SDK v2 may return dict results as text content when the tool
+                # does not declare an explicit output schema. Either form is a
+                # valid successful MCP response; require an actual payload.
+                self.assertTrue(result.structured_content or result.content)
 
         asyncio.run(run())
 
