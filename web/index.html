@@ -100,6 +100,20 @@
           </details>
         </article>
 
+        <article class="panel" id="stationname-panel">
+          <div class="panel-heading">
+            <div><p class="step">写入 · 只建新存档</p><h3>真实站名写入</h3></div>
+            <span class="pill" id="stationname-count">未命名车站：—</span>
+          </div>
+          <p class="save-dir-hint">把游戏导出里每个车站的<b>真实名称（模组名称）</b>一键写回存档，让游戏内显示<b>真正站台名</b>而不是编号。默认只补写当前显示为编号的车站，永不改动原存档（生成新存档 + 反向解压校验）。</p>
+          <div class="file-grid">
+            <label>名称来源（导出 JSON）<select id="stationname-export" aria-label="站名来源导出 JSON"></select></label>
+            <label class="checkbox-label"><input type="checkbox" id="stationname-all"> 连已命名车站一并覆盖</label>
+            <button class="primary-button" id="stationname-write"><span>一键写入真实站名</span><small>生成新存档 · 校验后落盘</small></button>
+          </div>
+          <div id="stationname-result" class="mini-summary" hidden></div>
+        </article>
+
         <article class="panel" id="overview-panel">
           <div class="panel-heading">
             <div><p class="step">免 JSON</p><h3>从存档直读结构总览</h3></div>

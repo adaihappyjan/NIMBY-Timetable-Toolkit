@@ -13,11 +13,12 @@ Safety model (mirrors the rest of the toolkit):
 from __future__ import annotations
 
 import math
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from toolkit_binary import Zstd, split_save, read_uvarint
+from toolkit_binary import Zstd, split_save, read_uvarint, uvarint
 
 WGS84_R = 6378137.0
 TYPE_STATION = 0x2
@@ -228,6 +229,206 @@ def set_station_coordinates(
     }
 
 
+# ---------------------------------------------------------------------------
+# Station names (JSON-free binary write)
+# ---------------------------------------------------------------------------
+#
+# A station record stores its name right after the two f64 coordinates::
+#
+#     … [f64 x][f64 y] <namelen uvarint> <utf8 name> <flag> <b1> <b2> <plat_count> …
+#
+# ``flag`` is ``0x00`` when the player gave the station a custom name and
+# ``0x01`` when it inherits the auto/mod label (shown in game as an id number).
+# Renaming a station is therefore a variable-length rewrite of exactly
+# ``<namelen><name><flag>``: write the UTF-8 name and force ``flag = 0x00``.
+# Everything after the flag byte (b1/b2/platform tracks) is left byte-identical,
+# so the platform layout is never disturbed. Ground-truth verified: rebuilding
+# every station's original slot reproduces the input stream byte for byte.
+_MAX_NAME_BYTES = 200
+
+
+def _name_slot(raw: bytes, coord_off: int):
+    """Return ``(namelen, name_bytes, flag, span_off, span_end)`` for a station.
+
+    ``span`` = ``[span_off, span_end)`` covers ``<namelen uvarint><name><flag>``.
+    Returns ``None`` if the slot does not parse (unexpected flag, truncation…).
+    """
+    span_off = coord_off + 16
+    r = _try_uvarint(raw, span_off)
+    if not r:
+        return None
+    namelen, after = r
+    if not (0 <= namelen <= _MAX_NAME_BYTES) or after + namelen + 1 > len(raw):
+        return None
+    name_bytes = raw[after:after + namelen]
+    flag = raw[after + namelen]
+    if flag not in (0x00, 0x01):
+        return None
+    return namelen, name_bytes, flag, span_off, after + namelen + 1
+
+
+def _apply_spans(raw: bytes, edits: list[tuple[int, int, bytes]]) -> bytes:
+    """Rebuild ``raw`` replacing non-overlapping ``(offset, old_len, new)`` spans."""
+    edits = sorted(edits, key=lambda e: e[0])
+    out = bytearray()
+    cur = 0
+    for off, old_len, new_bytes in edits:
+        if off < cur:
+            raise ValueError("overlapping edit spans")
+        out += raw[cur:off]
+        out += new_bytes
+        cur = off + old_len
+    out += raw[cur:]
+    return bytes(out)
+
+
+def set_station_names(
+    input_save: Path,
+    output_save: Path,
+    names: dict[str, str],
+    only_unnamed: bool = True,
+    level: int = 3,
+) -> dict:
+    """Write real station names into a NEW save (JSON-free binary edit).
+
+    ``names`` maps station id (hex) or current name -> new display name.
+    ``only_unnamed`` skips stations that already carry a custom name (flag 0).
+    Never touches the input save; verifies via reverse decompression.
+    """
+    input_save = Path(input_save)
+    output_save = Path(output_save)
+    if input_save.resolve() == output_save.resolve():
+        raise RuntimeError("refusing to overwrite the input save")
+    if output_save.exists():
+        raise RuntimeError(f"output already exists: {output_save}")
+
+    header, frame, frame_offset = split_save(input_save)
+    raw = Zstd().decompress(frame)
+    stations = read_stations_from_raw(raw)
+    by_id = {s.id: s for s in stations}
+    by_name: dict[str, list[StationRecord]] = {}
+    for s in stations:
+        by_name.setdefault(s.name, []).append(s)
+
+    edits: list[tuple[int, int, bytes]] = []
+    changes: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[str] = []
+    seen_offsets: set[int] = set()
+
+    for key, new_name in names.items():
+        target = by_id.get(key)
+        if target is None:
+            matches = by_name.get(key, [])
+            if len(matches) == 1:
+                target = matches[0]
+            elif not matches:
+                continue  # id not present in this save; silently skip
+            else:
+                errors.append(f"车站名不唯一（{len(matches)} 个同名），请用 id: {key}")
+                continue
+        if target.coord_off in seen_offsets:
+            continue
+        slot = _name_slot(raw, target.coord_off)
+        if slot is None:
+            errors.append(f"无法定位站名槽位: {target.id}")
+            continue
+        namelen, name_bytes, flag, span_off, span_end = slot
+        # Correctness gate: re-encoding the original slot must reproduce it.
+        original = uvarint(namelen) + name_bytes + bytes([flag])
+        if raw[span_off:span_end] != original:
+            errors.append(f"站名槽位回环校验失败: {target.id}")
+            continue
+        if only_unnamed and flag == 0x00:
+            skipped.append({"id": target.id, "reason": "already named",
+                            "name": target.name})
+            continue
+        nb = new_name.encode("utf-8")
+        if not (1 <= len(nb) <= _MAX_NAME_BYTES):
+            errors.append(f"站名长度非法（1..{_MAX_NAME_BYTES} 字节）: {target.id}")
+            continue
+        if nb == name_bytes and flag == 0x00:
+            skipped.append({"id": target.id, "reason": "unchanged",
+                            "name": target.name})
+            continue
+        new_slot = uvarint(len(nb)) + nb + b"\x00"
+        edits.append((span_off, span_end - span_off, new_slot))
+        seen_offsets.add(target.coord_off)
+        changes.append({
+            "id": target.id,
+            "old_name": target.name,
+            "new_name": new_name,
+            "was_unnamed": flag == 0x01,
+        })
+
+    if errors:
+        raise RuntimeError("站名写入被拒绝：" + "；".join(errors))
+    if not edits:
+        raise RuntimeError("没有可写入的站名（可能都已命名或存档中不存在对应 id）")
+
+    raw_after = _apply_spans(raw, edits)
+    # Re-parse and confirm the intended names now read back from the new stream.
+    reparsed = {s.id: s for s in read_stations_from_raw(raw_after)}
+    for ch in changes:
+        got = reparsed.get(ch["id"])
+        if got is None or got.name != ch["new_name"]:
+            raise RuntimeError(
+                f"写入后复读校验失败: {ch['id']} 期望 {ch['new_name']!r} 实得 "
+                f"{None if got is None else got.name!r}")
+
+    output = header + Zstd().compress(raw_after, level)
+    if Zstd().decompress(output[frame_offset:]) != raw_after:
+        raise RuntimeError("压缩输出未通过反向解压校验")
+
+    output_save.parent.mkdir(parents=True, exist_ok=True)
+    partial = output_save.with_name(output_save.name + ".partial")
+    if partial.exists():
+        raise RuntimeError(f"发现残留临时文件: {partial}")
+    partial.write_bytes(output)
+    partial.replace(output_save)
+
+    return {
+        "input_save": str(input_save),
+        "output_save": str(output_save),
+        "changed_count": len(changes),
+        "skipped_count": len(skipped),
+        "changes": changes,
+        "skipped": skipped[:50],
+        "output_file_size": len(output),
+        "size_delta": len(raw_after) - len(raw),
+        "reverse_decompress_verified": True,
+    }
+
+
+_STATION_RE = re.compile(
+    r'"class"\s*:\s*"Station"\s*,\s*"id"\s*:\s*"(0x[0-9a-fA-F]+)"\s*,\s*'
+    r'"name"\s*:\s*("(?:[^"\\]|\\.)*")'
+)
+
+
+def station_names_from_export(export_path: Path) -> dict[str, str]:
+    """Extract ``{station_id_hex: name}`` from a game Timetable Export JSON.
+
+    Streams the (potentially huge) export line by line; no full JSON parse.
+    """
+    import json as _json
+
+    out: dict[str, str] = {}
+    with open(export_path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if '"class":"Station"' not in line and '"class" : "Station"' not in line:
+                continue
+            for m in _STATION_RE.finditer(line):
+                sid = m.group(1)
+                try:
+                    name = _json.loads(m.group(2))
+                except ValueError:
+                    continue
+                if name:
+                    out[sid] = name
+    return out
+
+
 def _cli(argv: list[str]) -> int:
     import argparse
     import json
@@ -258,7 +459,45 @@ def _cli(argv: list[str]) -> int:
     )
     p_set.add_argument("--level", type=int, default=3, help="zstd 压缩级别（默认 3）")
 
+    p_name = sub.add_parser(
+        "set-names",
+        help="把真实站名写入新存档（游戏内显示名称而非编号）",
+    )
+    p_name.add_argument("input", type=Path)
+    p_name.add_argument("output", type=Path)
+    p_name.add_argument(
+        "--from-export", type=Path,
+        help="从游戏导出的 Timetable Export JSON 读取每个车站的真实名称",
+    )
+    p_name.add_argument(
+        "pairs", nargs="*",
+        help='额外/覆盖用的名称，形如 "0x2000000370001=Barrie South"',
+    )
+    p_name.add_argument(
+        "--all", action="store_true",
+        help="连已命名的车站一起覆盖（默认只补写未命名/编号车站）",
+    )
+    p_name.add_argument("--level", type=int, default=3, help="zstd 压缩级别（默认 3）")
+
     args = parser.parse_args(argv)
+
+    if args.cmd == "set-names":
+        names: dict[str, str] = {}
+        if args.from_export:
+            names.update(station_names_from_export(args.from_export))
+        for item in args.pairs:
+            if "=" not in item:
+                parser.error(f'名称项格式错误（缺少 =）：{item}')
+            key, val = item.split("=", 1)
+            names[key.strip()] = val
+        if not names:
+            parser.error("没有提供任何站名来源（--from-export 或 id=名称）")
+        manifest = set_station_names(
+            args.input, args.output, names,
+            only_unnamed=not args.all, level=args.level,
+        )
+        print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        return 0
 
     if args.cmd == "list":
         stations = read_stations(args.save)

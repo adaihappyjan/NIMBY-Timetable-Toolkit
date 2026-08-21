@@ -213,6 +213,12 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .save-dir-body { padding:2px 14px 14px; border-top:1px solid #eef2f2; }
 .save-dir-hint { margin:11px 0; color:var(--muted); font-size:12px; line-height:1.7; }
 .save-dir-hint code { background:#eef3f3; padding:1px 6px; border-radius:6px; font-size:11px; }
+.pill { background:var(--aqua-soft); color:#137a72; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+.checkbox-label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+.checkbox-label input { width:16px; height:16px; }
+.mini-summary { margin-top:12px; padding:12px 14px; background:var(--aqua-soft); border-radius:12px; font-size:13px; line-height:1.7; }
+.mini-summary code { background:#eef3f3; padding:1px 6px; border-radius:6px; font-size:11px; }
+.mini-summary strong { color:#137a72; }
 .save-dir-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .save-dir-row input { flex:1; min-width:220px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; font-size:12px; font-family:ui-monospace,Consolas,monospace; }
 .save-dir-row input:focus { outline:none; border-color:var(--aqua); box-shadow:0 0 0 3px rgba(25,198,186,.15); }
@@ -394,8 +400,11 @@ body { background:
 .confidence, .verified-chip, .rl-tag, .bind-targets span, .ver-chip.ok,
 .change-tag.added, .hw-delta.ok, .health-pill.hgood, .ov-svc,
 .cand-row.has .cand-tag, .save-dir .sd-path.ok, .phase-badge, .phase-badge.safe,
-.feature-pills span, .departure.peak {
+.feature-pills span, .departure.peak, .pill {
   background:#0f3735 !important; color:#4fe0d1 !important; border-color:#1c534f !important; }
+.mini-summary { background:#0f2b29 !important; border:1px solid #1c534f; }
+.mini-summary strong { color:#4fe0d1; }
+.mini-summary code, .save-dir-hint code { background:#123b38 !important; color:#7fe9dc !important; }
 /* warning pills -> dark amber */
 .change-tag.modified, .hw-delta.warn, .health-pill.hwarn, .ver-chip.warn,
 .finding-group-title.warning span, .save-dir .sd-path.warn, .realnet-import-count {

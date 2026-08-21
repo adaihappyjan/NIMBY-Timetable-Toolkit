@@ -67,7 +67,7 @@ function outputPath(kind) {
   const dir = save.slice(0, slash + 1); const base = save.slice(slash + 1).replace(/\.nimbyrails5$/i, '');
   return `${dir}${base}_${kind}_${timestamp()}.nimbyrails5`;
 }
-function refreshOutputNames() { $('#migration-output').value = outputPath('Toolkit'); $('#extension-output').value = outputPath('Extension'); $('#fix-output').value = outputPath('Repair'); const rec = $('#recover-output'); if (rec) rec.value = outputPath('Recovery'); const bnd = $('#binder-output'); if (bnd) bnd.value = outputPath('GarageJoin'); }
+function refreshOutputNames() { $('#migration-output').value = outputPath('Toolkit'); $('#extension-output').value = outputPath('Extension'); $('#fix-output').value = outputPath('Repair'); const rec = $('#recover-output'); if (rec) rec.value = outputPath('Recovery'); const bnd = $('#binder-output'); if (bnd) bnd.value = outputPath('GarageJoin'); syncStationNameExport(); }
 
 function setCompareOptions(exports) {
   const options = exports.map(f => `<option value="${escapeHtml(f.path)}">${escapeHtml(f.name)}</option>`).join('');
@@ -1048,7 +1048,29 @@ function renderSaveHealth(r) {
   // Re-use the existing detailed renderers: save-health is a superset of both.
   renderSaveOverview(r);
   renderOpsAnalyze({ action: 'ops-analyze', routes: r.ops_routes || [], summary: r.ops_summary || {} });
+  const unnamed = Math.max(0, (c.stations ?? 0) - (c.named_stations ?? 0));
+  const snc = $('#stationname-count');
+  if (snc) snc.textContent = `未命名车站：${unnamed}`;
   toast(`存档直读体检完成：${c.routes ?? 0} 线 / ${c.trains ?? 0} 车 · 健康 ${sc}`);
+}
+function onStationNamesDone(result) {
+  const box = $('#stationname-result');
+  if (!box) return;
+  const changed = result.changed_count || 0;
+  const skipped = result.skipped_count || 0;
+  const out = (result.output_save || '').split(/[\\/]/).pop();
+  const sample = (result.changes || []).slice(0, 8)
+    .map(c => `${escapeHtml(c.new_name)}`).join('、');
+  box.hidden = false;
+  box.innerHTML = `<strong>已写入 ${changed} 个真实站名</strong>（跳过 ${skipped} 个已命名）`
+    + `<p>新存档：<code>${escapeHtml(out || '')}</code></p>`
+    + (sample ? `<p class="save-dir-hint">示例：${sample}${changed > 8 ? ' …' : ''}</p>` : '')
+    + `<p class="save-dir-hint">请在游戏中读取该新存档，确认站点显示真实名称而非编号。</p>`;
+  toast(`真实站名写入完成：${changed} 个车站`);
+}
+function syncStationNameExport() {
+  const src = $('#export-select'), dst = $('#stationname-export');
+  if (src && dst) dst.innerHTML = src.innerHTML;
 }
 function onNetworkRead(result) {
   state.network = { lines: result.lines || [], stations: result.stations || {} };
@@ -1389,7 +1411,7 @@ function finishTask() {
   if (worker) worker.postMessage('stop');
   clearTimeout(state.fallbackTimer);
 }
-const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write']);
+const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write']);
 async function startTask(action, payload) {
   if (WRITE_ACTIONS.has(action) && state.gameVersion && state.gameVersion.safe_to_write === false) {
     if (!confirm(`${state.gameVersion.note || '当前游戏版本尚未完全验证写入。'}\n\n工具仍只写入新存档、绝不覆盖原档。是否继续？`)) return;
@@ -1427,6 +1449,7 @@ async function pollOnce() {
       else if (s.action === 'track-geometry') { onTrackGeometry(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
       else if (s.action === 'timetable-write') { onTimetableWriteDone(s.result); await refreshFileLists(); refreshOutputNames(); }
+      else if (s.action === 'station-name-write') { onStationNamesDone(s.result); await refreshFileLists(); refreshOutputNames(); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
@@ -1572,6 +1595,11 @@ document.addEventListener('keydown', e => {
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
+$('#stationname-write')?.addEventListener('click',()=>{
+  const save=$('#save-select')?.value; if(!save) return toast('请先选择存档',true);
+  const exp=$('#stationname-export')?.value; if(!exp) return toast('请选择名称来源（导出 JSON）',true);
+  startTask('station-name-write',{ save, export: exp, output: outputPath('Names'), all: $('#stationname-all')?.checked });
+});
 $('#timetable-read')?.addEventListener('click', () => { const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true); startTask('line-timetable', { save }); });
 $('#ops-read')?.addEventListener('click', () => {
   const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true);

@@ -482,6 +482,27 @@ class TaskManager:
             else:
                 raise RuntimeError("请提供停站时间(秒)或缩放倍数")
             return args
+        if action == "station-name-write":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            output = validate_output_path(payload.get("output", ""))
+            args = ["station-name-write", "--save", str(save), "--output", str(output)]
+            export_value = str(payload.get("export", "")).strip()
+            if export_value:
+                export = validate_input_path(export_value, ".json")
+                args += ["--export", str(export)]
+            pairs = payload.get("pairs") or []
+            if isinstance(pairs, list):
+                if len(pairs) > 5000:
+                    raise RuntimeError("站名数量过多")
+                for item in pairs:
+                    if not isinstance(item, str) or "=" not in item or len(item) > 300:
+                        raise RuntimeError(f"站名项无效：{item!r}")
+                    args += ["--pair", item]
+            if payload.get("all"):
+                args.append("--all")
+            if not export_value and not pairs:
+                raise RuntimeError("请提供真实站名来源（导出 JSON 或手动 id=名称）")
+            return args
         if action == "track-geometry":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["track-geometry", "--save", str(save)]

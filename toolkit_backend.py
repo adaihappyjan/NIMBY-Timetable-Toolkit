@@ -1871,6 +1871,38 @@ def command_align_coords(args: argparse.Namespace) -> dict:
     return {"action": "align-coords", **manifest}
 
 
+def command_station_names(args: argparse.Namespace) -> dict:
+    """Write real station names into a NEW save (in-game names instead of ids).
+
+    Name source is the game's Timetable Export JSON (each station's真实名称,
+    the "模组名称"), optionally overridden by explicit ``id=名称`` pairs. By
+    default only stations that currently show an id number (未命名) are filled;
+    ``--all`` also rewrites already-named stations. Original save is never
+    touched; output is reverse-decompress + reparse verified.
+    """
+    import toolkit_coordedit as coordedit
+
+    names: dict[str, str] = {}
+    if args.export:
+        emit_progress("stnname", 10, 100, "正在从导出读取真实站名…")
+        names.update(coordedit.station_names_from_export(args.export))
+    for item in args.pair or []:
+        if "=" not in item:
+            raise RuntimeError(f"名称项格式错误（缺少 =）：{item}")
+        key, val = item.split("=", 1)
+        names[key.strip()] = val
+    if not names:
+        raise RuntimeError("没有可用的站名来源（请提供导出 JSON 或 id=名称）")
+    emit_progress("stnname", 45, 100, "正在写入站名并做字节级校验…")
+    manifest = coordedit.set_station_names(
+        args.save, args.output, names,
+        only_unnamed=not args.all, level=args.level,
+    )
+    emit_progress("stnname", 100, 100,
+                  f"站名写入完成：{manifest['changed_count']} 个车站")
+    return {"action": "station-name-write", **manifest}
+
+
 def command_timetable_write(args: argparse.Namespace) -> dict:
     """Write a custom stop time for one line into a NEW save.
 
@@ -3412,6 +3444,15 @@ def build_parser() -> argparse.ArgumentParser:
     align_coords.add_argument("--save", type=Path, required=True)
     align_coords.add_argument("--output", type=Path, required=True)
     align_coords.add_argument("--update", action="append", default=[])
+    station_names = sub.add_parser("station-name-write")
+    station_names.add_argument("--save", type=Path, required=True)
+    station_names.add_argument("--output", type=Path, required=True)
+    station_names.add_argument("--export", type=Path, help="真实站名来源(导出 JSON)")
+    station_names.add_argument("--pair", action="append", default=[],
+                              help='额外/覆盖站名，形如 "0x2…=名称"')
+    station_names.add_argument("--all", action="store_true",
+                              help="连已命名车站一起覆盖(默认只补写未命名)")
+    station_names.add_argument("--level", type=int, default=3)
     timetable_write = sub.add_parser("timetable-write")
     timetable_write.add_argument("--save", type=Path, required=True)
     timetable_write.add_argument("--output", type=Path, required=True)
@@ -3475,6 +3516,8 @@ def main() -> None:
             result = command_network_read(args)
         elif args.command == "align-coords":
             result = command_align_coords(args)
+        elif args.command == "station-name-write":
+            result = command_station_names(args)
         elif args.command == "timetable-write":
             result = command_timetable_write(args)
         elif args.command == "network-diff":
