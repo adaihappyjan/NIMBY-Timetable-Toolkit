@@ -432,9 +432,56 @@ class TaskManager:
         if action == "save-overview":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["save-overview", "--save", str(save)]
+        if action == "save-health":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            args = ["save-health", "--save", str(save)]
+            target = payload.get("target_headway")
+            if target not in (None, "", 0):
+                target_int = int(target)
+                if not (10 <= target_int <= 86400):
+                    raise RuntimeError("目标班距需在 10–86400 秒之间")
+                args += ["--target-headway", str(target_int)]
+            return args
         if action == "line-timetable":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["line-timetable", "--save", str(save)]
+        if action == "timetable-write":
+            save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
+            output = validate_output_path(payload.get("output", ""))
+            route = str(payload.get("route", "")).strip()
+            if not route or len(route) > 500:
+                raise RuntimeError("请提供有效的线路 id 或名称")
+            args = ["timetable-write", "--save", str(save), "--output", str(output),
+                    "--route", route]
+            dwell = payload.get("dwell")
+            scale = payload.get("dwell_scale")
+            dwell_list = payload.get("dwell_list")
+            if isinstance(dwell_list, list) and dwell_list:
+                if len(dwell_list) > 500:
+                    raise RuntimeError("停站数量过多")
+                parts = []
+                for v in dwell_list:
+                    if v in (None, "", "-", "*", "inherit"):
+                        parts.append("-")
+                        continue
+                    vf = float(v)
+                    if not (1.0 <= vf <= 3600.0):
+                        raise RuntimeError("逐站停站时间需在 1–3600 秒之间")
+                    parts.append(str(vf))
+                args += ["--dwell-list", ",".join(parts)]
+            elif dwell not in (None, "", 0):
+                dwell_f = float(dwell)
+                if not (1.0 <= dwell_f <= 7200.0):
+                    raise RuntimeError("停站时间需在 1–7200 秒之间")
+                args += ["--dwell", str(dwell_f)]
+            elif scale not in (None, "", 0):
+                scale_f = float(scale)
+                if not (0.05 <= scale_f <= 100.0):
+                    raise RuntimeError("缩放倍数需在 0.05–100 之间")
+                args += ["--dwell-scale", str(scale_f)]
+            else:
+                raise RuntimeError("请提供停站时间(秒)或缩放倍数")
+            return args
         if action == "track-geometry":
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             return ["track-geometry", "--save", str(save)]

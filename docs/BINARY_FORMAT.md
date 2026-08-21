@@ -305,3 +305,70 @@ lat = degrees(2*atan(exp(y / R)) - pi/2)
 - **提取（`_line_ids_in` + `read_schedule_assignments.line_ids`）：** 复用已可靠定位的 assignment 锚点，在 `[schedule_head, train_run_start)` 窗口内收集 0x4 line id——与 assignment 同一次扫描完成，无跨块串味。
 - **实测校验：** 对 35 个“有 run 的服务型时刻表”，与导出 `run.line_id` 集合对账 **34/35 精确 + 1 超集 + 0 错误**。route 模板（无 run）正确地不产出 line（其名与对应 Line 同名，无需再解 0x4 名字）。
 - **落地：** `AssignmentRecord.line_ids` 携带所服务线路；`save-overview` 每行新增 `is_service / served_lines`，Web“总览”页据此把 35 张运营时刻表标“运营·N线”，并新增 **JSON-free 存档直读体检**（健康分 + 问题清单：重名时刻表、闲置列车、未读到循环、疑似空模板）。**诚实边界：** 纯存档模式下天然没有“JSON↔存档不一致”可查（存档即真值）；发车时刻/精确班距仍不入档（§8.14），只作估算。
+
+### 8.17 自定义时刻表设计器（Timetable Studio）+ “写入自定义时刻表”可行性定论
+本轮新增前端 **自定义时刻表设计器**（Web“时刻表配置”页顶部）：
+
+- **输入（全部免 JSON）：** 复用 §8.11 的 `line-timetable` 逐站相对到发时刻（半秒单位，32/37 线精确到秒）+ 单程运行时间；用户设 首/末班、峰/平班距、高峰时段、终点折返、单/往返方向。
+- **计算（客户端）：** 按时段生成发车序列 → 用逐站相对时刻传播出每车次的逐站绝对到发；往返用 §8.11 模板的**对称反向**构造回程；用“最早空闲车”仿真求**所需车数**。
+- **产出：** ① **Marey 弦线运行图**（时间×车站，斜线=车次，峰段自动加密，SVG 可导出）② 逐站到发时刻板 ③ 指标（车数/日车次/班距/循环）④ **游戏内复刻清单** ⑤ CSV/JSON/SVG 导出。全部只读。
+
+### 8.18 写入自定义时刻表：两次失败 → 受控 diff 定位真正的输入字段
+
+本节记录一段完整的“假设—实验—证伪—再定位”过程。**前两次写入尝试都在游戏内失败了**，第三次靠**受控二进制 diff**拿到确定性答案。
+
+**外部调研：**
+- 存档＝自研 **serde v2**（版本化 visitor，见 devblog 2020-03）。社区只有读 JSON 导出的 [nimby2sql](https://github.com/rlvelte/nimby2sql)，**无任何写存档实现**。
+- 头部含 game data 哈希，但**本地加载不校验**（既有坐标/迁移写入都原样保留头部且能进游戏）→ 对象流可自由改写，只要结构合法。
+- wiki《Timetable》/《Simulation》：整张时刻表**在加载时（“initializing timetables”）重算**，且 “line timings 不入档，每次加载重新计算”。
+- devblog 2022-08：线路真正保存的输入是**每站 min. stop value + 每段 leg speed**，由“run 起跑时间”推算实际时刻；wiki《Line》的 *Default timings* 面板含 参考列车 / 巡航速度 / 最大加速 / 最大制动 / **Default stop time**（“未手动修改时赋给每个停站的停站时间”）。
+
+**失败尝试 ①：改累计 `arr/dep` 缓存。** 按 §8.11 的 `<idx=2k> 01 <leg*2> <arr*2> <dep*2>` 改写停站等待并级联，37/37 条线路通过字节级回环闸门，生成测试档。**游戏内无效**——停站仍≈35s。印证 wiki：该区是**加载时被重算覆盖的派生缓存**。
+
+**失败尝试 ②：改每站 stop time 副本。** 用导出 `leg_distance` 做锚点，定位到 `leg_distance_f32_off + 16` 处一个**全档 51 线 / 962 站恒为 60**（半秒制＝30s）的字节，改成 120（60s）。**游戏内仍无效**。
+
+**受控 diff（决定性）：** 请玩家**全程暂停**下连存两档——`DIFF_A`（默认停站 30s）→ 仅把 *Default stop time* 改成 59s → `DIFF_B`。暂停使模拟状态不变，diff 于是只剩目标字段。结果在 `OT Airport Link` 记录内干净地暴露出结构：
+
+```
+每个停站   <leg_distance f32> <leg_speed f32> <accel f32> <brake f32> <stop_time uvarint>
+线路默认   <cruise_speed f32> <accel f32>     <brake f32> <ref_train id 0x5> <stop_time uvarint>
+```
+
+- `accel/brake` 在“继承线路默认”的停站上为 `0.0`，正好对应 wiki 的 *Default timings* 面板。
+- `stop_time` 为 **半秒制 uvarint**：ground truth 对里 5 个字段整齐地 `60`(30s) → `118`(59s)。
+- **尝试②失败的原因由此确定：** wiki 说线路默认值“会赋给每个停站”，游戏**默认值与每站副本是一起写的**，加载时又用默认值刷回继承型停站——所以**只改每站副本会被静默还原**。必须**两者同写**。
+- 附带确认 `arr/dep` 缓存确为派生：stop0 出发 `40`(64＝32s)→`7e`(126＝63s)，其后各站到发整体顺延。
+
+**落地（`toolkit_timetable_writer.py` + 后端 `timetable-write`）：**
+- `find_line_timings()` 按上述签名**免 JSON**定位每线的每站 stop_time 与线路默认 stop_time；`_find_default_stop_time()` 以**参考列车 id(0x5)** 为锚。
+- **正确性闸门** `stop_time_roundtrip_identity()`：原值重编码后须与原 `raw` 逐字节相同（DIFF_A/DIFF_B 各 38 线，**失败 0**）。
+- `set_line_stop_time()` 同时改写**线路默认 + 全部每站副本**，复刻游戏自身写法。
+- **离线最强证明：** 让写入器把 `DIFF_A`(30s) 改成 59s，产出的 stop_time 字段与**游戏自己存的 `DIFF_B` 完全一致**（`[118]*5`），其它线路连带改动 **0**，文件长度不变。
+- **只新档 + 多重校验：** 回环闸门 → 改写 → 重解析（全部字段须等于目标半秒值）→ 全线路连带零变化 → 压缩后 read-back。
+
+**交叉校验与已知边界：** 严格定位器在全档得到 920 个 stop_time 字段（913 个为 60），17 条线路数量与站数精确吻合，20 条偏少（多为 GO 线，少 3 个）——推测是 `station_id = 0x0` 的**航点(waypoint)**结构不同（nimby2sql 亦专门过滤此类）。因此写入器在**找不到线路级默认字段时直接拒绝写入**。
+
+**发车间隔/时段窗口**这类无真值字段仍**不写**（§8.9/8.16 铁律不变）。
+
+### 8.19 逐站停站时间：破解每站“手动修改”标志位
+
+§8.18 只能整线统一改停站时间（写线路默认 + 全部每站副本）。要做**逐站不同**，需要每站的“手动覆盖”标志。再次用受控 diff 拿下：
+
+**受控实验：** `FLAG_A`（全线默认 45s，全部继承）→ 仅把**第 2 个停站**设为自定义 59s → `FLAG_B`（全程暂停）。diff 只在该站暴露两处变化，从而解出每站的完整结构：
+
+```
+每站   <leg_distance f32> <leg_speed f32> <mode 8 字节> <stop_time uvarint>
+   继承站  mode = 00 00 00 00 00 00 00 00
+   手动站  mode = 00 00 00 80 3f 00 00 02   （mode[1:5]=f32 1.0，mode[7]=0x02）
+```
+
+- 继承站：加载时被线路默认值刷回（§8.18）。手动站：`stop_time` 独立存活，不受默认值影响。
+- `FLAG_B` 仅第 2 站变手动（mode 置位、值 118=59s），其余继承、默认值 45s 未动——干净单点。
+
+**落地（`toolkit_timetable_writer.py`）：**
+- `_find_stop_time_fields` 升级为同时识别继承站（mode 全 0）与手动站（mode[1:5]=1.0），`StopTimeField` 记录 `mode_off / is_manual`。
+- `set_stop_times(raw, line, [秒 或 None], default_seconds=None)`：对给值的站写“手动模板 + 值”，对 `None` 的站写“继承模板 + 默认值”；带回环闸门。
+- **离线最强证明：** 让它把 `FLAG_A` 第 2 站改成 59s，产出的 **mode 区与 stop_time 与游戏自存的 `FLAG_B` 逐字段一致**（`000000803f000002`/118），其它线路连带 0。
+- **游戏内验证通过：** `Das Rails PERSTOP TEST` 把 OT Airport Link 四站设为 15/30/45/59s，进游戏逐站显示各不相同、与设定吻合。
+
+**后端/前端：** `timetable-write` 新增 `--dwell-list`（逐站秒数，逗号分隔，留空/`-`/`*`=继承）；Web“时刻表工作室 → 停站时间写入”新增“整线统一 / 逐站设置”切换，逐站模式按线路停站列出可逐格填写（占位显示当前继承值），一键“全部清空/全部填默认”。仍只写新档、带回环+零波及+压缩回读三校验。

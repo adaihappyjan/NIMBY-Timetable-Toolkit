@@ -1478,6 +1478,141 @@ def _overview_health(
     }
 
 
+def command_save_health(args: argparse.Namespace) -> dict:
+    """一次直读、免 JSON 的“总览 + 体检 + 运营估算”合并报告。
+
+    只解压存档一次，从二进制枚举站/线/信号/列车/分配/时刻模板/标签，产出：
+    结构计数、直读体检（评分 + 建议）、逐线循环时长与分配车数，并按
+    ``h ≈ 循环T / 车数N`` 估算班距；若给了 ``--target-headway`` 还会规划
+    每条线达到目标班距所需车数。全部只读，整个流程不需要任何导出 JSON。
+
+    返回结构是 ``save-overview`` 的超集（含 ``counts``/``routes``/``containers``/
+    ``health``），额外携带 ``ops_summary``/``ops_routes``，便于前端一屏呈现。
+    """
+    import toolkit_savereader as savereader
+    from toolkit_binary import Zstd, split_save
+
+    path = Path(args.save)
+    emit_progress("health", 1, 4, "正在解压并直读存档结构…")
+    header, frame, _offset = split_save(path)
+    raw = Zstd().decompress(frame)
+    stations = savereader.read_stations_from_raw(raw)
+    schedules = savereader.read_schedules_from_raw(raw)
+    signals = savereader.read_signals_from_raw(raw)
+    trains = savereader.read_trains_from_raw(raw)
+    assignments = savereader.read_schedule_assignments(raw)
+    timetables = savereader.read_line_timetables(raw)
+    tags = savereader.read_tags_from_raw(raw)
+    emit_progress("health", 2, 4, "正在归类线路与时刻表…")
+
+    assign_by_id = {a.schedule_id: a for a in assignments}
+    cycle_by_id = {t.id: t.cycle_seconds for t in timetables if t.cycle_seconds}
+    routes = [s for s in schedules if s.stop_count >= 2]
+    containers = [s for s in schedules if s.stop_count < 2]
+    named_stations = sum(1 for s in stations if not s.name.startswith("车站 "))
+    total_shifts = sum(a.count for a in assignments)
+    assigned_train_ids = {t for a in assignments for t in a.train_ids}
+
+    target = getattr(args, "target_headway", None)
+
+    def _row(s, with_stops):
+        a = assign_by_id.get(s.id)
+        row = {
+            "id": s.id, "name": s.name, "color": s.color,
+            "train_count": a.count if a else 0,
+            "shift_count": a.count if a else 0,
+            "served_lines": len(a.line_ids) if a else 0,
+            "is_service": bool(a and a.line_ids),
+        }
+        if with_stops:
+            row["stop_count"] = s.stop_count
+            cyc = cycle_by_id.get(s.id, 0)
+            row["cycle_seconds"] = cyc
+            n = a.count if a else 0
+            if cyc and n:
+                row["headway_estimate_seconds"] = estimate_headway(cyc, n)
+        return row
+
+    route_rows = sorted(
+        (_row(s, True) for s in routes),
+        key=lambda r: (-r["stop_count"], r["name"].casefold()),
+    )
+    container_rows = sorted(
+        (_row(s, False) for s in containers),
+        key=lambda r: (-r["train_count"], r["name"].casefold()),
+    )
+
+    emit_progress("health", 3, 4, "正在估算各线班距（h≈循环/车数）…")
+    ops_routes: list[dict] = []
+    for s in routes:
+        cyc = cycle_by_id.get(s.id, 0)
+        n = assign_by_id.get(s.id).count if assign_by_id.get(s.id) else 0
+        if not cyc or not n:
+            continue
+        h_est = estimate_headway(cyc, n)
+        row = {
+            "id": s.id, "name": s.name, "color": s.color,
+            "stop_count": s.stop_count, "cycle_seconds": cyc,
+            "train_count": n, "headway_estimate_seconds": h_est,
+        }
+        if target:
+            need = plan_train_count(cyc, target)
+            row["plan"] = {
+                "target_headway_seconds": target,
+                "required_train_count": need,
+                "delta_trains": (need - n) if need is not None else None,
+                "achieved_headway_seconds": estimate_headway(cyc, need) if need else None,
+            }
+        ops_routes.append(row)
+    ops_routes.sort(key=lambda r: (-r["stop_count"], r["name"].casefold()))
+    est_headways = [r["headway_estimate_seconds"] for r in ops_routes if r["headway_estimate_seconds"]]
+    ops_summary = {
+        "route_count": len(ops_routes),
+        "headway_estimate_median_seconds": round(statistics.median(est_headways)) if est_headways else None,
+        "headway_estimate_min_seconds": min(est_headways) if est_headways else None,
+        "headway_estimate_p90_seconds": percentile(est_headways, 0.9),
+        "total_assigned_trains": sum(r["train_count"] for r in ops_routes),
+    }
+
+    emit_progress("health", 4, 4, "正在做存档直读体检…")
+    idle_trains = max(0, len(trains) - len(assigned_train_ids))
+    schedules_with_trains = sum(
+        1 for r in (route_rows + container_rows) if r["train_count"] > 0
+    )
+    health = _overview_health(
+        route_rows, container_rows, idle_trains, len(trains), schedules_with_trains
+    )
+
+    stat = path.stat()
+    return {
+        "action": "save-health",
+        "save": str(path),
+        "save_name": path.name,
+        "file_size": stat.st_size,
+        "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "save_format_version_hint": list(header[8:12]) if len(header) >= 12 else [],
+        "counts": {
+            "stations": len(stations),
+            "named_stations": named_stations,
+            "routes": len(routes),
+            "schedules": len(schedules),
+            "active_schedules": len(assignments),
+            "signals": len(signals),
+            "trains": len(trains),
+            "assigned_trains": len(assigned_train_ids),
+            "idle_trains": idle_trains,
+            "total_shifts": total_shifts,
+            "tags": len(tags),
+        },
+        "routes": route_rows,
+        "containers": container_rows,
+        "health": health,
+        "ops_summary": ops_summary,
+        "ops_routes": ops_routes,
+        "target_headway": target,
+    }
+
+
 def command_line_timetable(args: argparse.Namespace) -> dict:
     """JSON-free per-line timetable: ordered stops + relative arr/dep + cycle time.
 
@@ -1734,6 +1869,100 @@ def command_align_coords(args: argparse.Namespace) -> dict:
     manifest = coordedit.set_station_coordinates(args.save, args.output, updates)
     emit_progress("align", 100, 100, "坐标对齐完成")
     return {"action": "align-coords", **manifest}
+
+
+def command_timetable_write(args: argparse.Namespace) -> dict:
+    """Write a custom stop time for one line into a NEW save.
+
+    Targets the inputs the game actually reads back on load: the line-level
+    default stop time plus every per-stop copy. This mirrors byte-for-byte what
+    the game itself writes when the player edits "Default stop time" (verified
+    against a controlled before/after save pair). Only creates a new save; the
+    original is never touched, and the output is read-back verified.
+    """
+    import toolkit_timetable_writer as ttw
+
+    emit_progress("ttwrite", 5, 100, "正在解压并定位线路停站时间…")
+    header, frame, frame_offset = split_save(args.save)
+    raw = Zstd().decompress(frame)
+    lines = ttw.find_line_timings(raw)
+    line = next((lt for lt in lines if lt.id == args.route or lt.name == args.route), None)
+    if not line:
+        raise RuntimeError(f"未在存档中找到可编辑停站时间的线路：{args.route}")
+    if line.default is None:
+        raise RuntimeError(
+            f"线路「{line.name}」未找到线路级默认停站时间字段；"
+            "仅改每站副本会在加载时被默认值刷回，出于安全已中止"
+        )
+
+    n_stops = len(line.stops)
+    before = {"default_seconds": line.default.seconds,
+              "stop_seconds": [f.seconds for f in line.stops]}
+    per_stop = None
+    if args.dwell_list:
+        parts = [p.strip() for p in args.dwell_list.split(",")]
+        if len(parts) != n_stops:
+            raise RuntimeError(f"该线路有 {n_stops} 个停站，需提供 {n_stops} 个值，收到 {len(parts)}")
+        per_stop = [None if p in ("", "-", "inherit", "*") else float(p) for p in parts]
+    elif args.dwell is not None:
+        uniform = float(args.dwell)
+    elif args.dwell_scale is not None:
+        uniform = line.default.seconds * float(args.dwell_scale)
+    else:
+        raise RuntimeError("请提供 --dwell（秒）/ --dwell-scale（倍数）/ --dwell-list（逐站）")
+
+    emit_progress("ttwrite", 40, 100, "正在校验字节级回环并改写停站时间…")
+    if per_stop is not None:
+        new_raw, _before, fields_written = ttw.set_stop_times(raw, line, per_stop)
+        mode = "per-stop"
+    else:
+        new_raw, _before, fields_written = ttw.set_line_stop_time(raw, line, uniform)
+        mode = "uniform"
+
+    emit_progress("ttwrite", 70, 100, "正在复核改写结果…")
+    after_lines = ttw.find_line_timings(new_raw)
+    reread = next((lt for lt in after_lines if lt.id == line.id), None)
+    if not reread or reread.default is None:
+        raise RuntimeError("改写后无法再解析该线路停站时间，已中止（未写任何文件）")
+    if per_stop is not None:
+        want = [line.default.half if s is None else int(round(s * 2)) for s in per_stop]
+        got = [f.half for f in reread.stops]
+        want_manual = [s is not None for s in per_stop]
+        got_manual = [f.is_manual for f in reread.stops]
+        if got != want or got_manual != want_manual:
+            raise RuntimeError(f"改写后校验失败：期望 {want}/{want_manual}，实读 {got}/{got_manual}")
+    else:
+        want_half = int(round(uniform * 2))
+        if any(f.half != want_half for f in reread.fields):
+            raise RuntimeError(f"改写后校验失败：期望全部 {want_half} 半秒，实读 {[f.half for f in reread.fields]}")
+
+    before_all = {lt.id: [(f.is_manual, f.half) for f in lt.fields] for lt in lines}
+    after_all = {lt.id: [(f.is_manual, f.half) for f in lt.fields] for lt in after_lines}
+    collateral = [k for k in before_all if k != line.id and before_all[k] != after_all.get(k)]
+    if collateral:
+        raise RuntimeError(f"改写波及了其它线路（{len(collateral)} 条），出于安全已中止")
+
+    manifest = {
+        "action": "timetable-write",
+        "mode": mode,
+        "line_id": line.id,
+        "line_name": line.name,
+        "stop_time_seconds": (None if per_stop is not None else uniform),
+        "per_stop_seconds": ([f.seconds for f in reread.stops] if per_stop is not None else None),
+        "fields_written": fields_written,
+        "stops_edited": n_stops,
+        "wrote_line_default": per_stop is None,
+        "before": before,
+        "after": {"default_seconds": reread.default.seconds,
+                  "stop_seconds": [f.seconds for f in reread.stops],
+                  "manual": [f.is_manual for f in reread.stops]},
+        "collateral_lines_changed": 0,
+        "roundtrip_identity_verified": True,
+        "structural_reverify": True,
+    }
+    return write_output(
+        args.save, args.output, header, raw, new_raw, manifest, frame_offset, args.level,
+    )
 
 
 def command_network_diff(args: argparse.Namespace) -> dict:
@@ -3168,6 +3397,9 @@ def build_parser() -> argparse.ArgumentParser:
     network_read.add_argument("--no-signals", action="store_true")
     save_overview = sub.add_parser("save-overview")
     save_overview.add_argument("--save", type=Path, required=True)
+    save_health = sub.add_parser("save-health")
+    save_health.add_argument("--save", type=Path, required=True)
+    save_health.add_argument("--target-headway", type=int, dest="target_headway")
     line_timetable = sub.add_parser("line-timetable")
     line_timetable.add_argument("--save", type=Path, required=True)
     track_geometry = sub.add_parser("track-geometry")
@@ -3180,6 +3412,14 @@ def build_parser() -> argparse.ArgumentParser:
     align_coords.add_argument("--save", type=Path, required=True)
     align_coords.add_argument("--output", type=Path, required=True)
     align_coords.add_argument("--update", action="append", default=[])
+    timetable_write = sub.add_parser("timetable-write")
+    timetable_write.add_argument("--save", type=Path, required=True)
+    timetable_write.add_argument("--output", type=Path, required=True)
+    timetable_write.add_argument("--route", required=True, help="线路 id(0x…) 或名称")
+    timetable_write.add_argument("--dwell", type=float, help="该线路统一停站时间(秒)")
+    timetable_write.add_argument("--dwell-scale", type=float, help="按倍数缩放当前停站时间")
+    timetable_write.add_argument("--dwell-list", help="逐站停站时间(秒),逗号分隔;留空/-/*=继承默认")
+    timetable_write.add_argument("--level", type=int, default=3)
     network_diff = sub.add_parser("network-diff")
     network_diff.add_argument("--before", type=Path, required=True)
     network_diff.add_argument("--after", type=Path, required=True)
@@ -3223,6 +3463,8 @@ def main() -> None:
             result = command_map_data(args)
         elif args.command == "save-overview":
             result = command_save_overview(args)
+        elif args.command == "save-health":
+            result = command_save_health(args)
         elif args.command == "line-timetable":
             result = command_line_timetable(args)
         elif args.command == "ops-analyze":
@@ -3233,6 +3475,8 @@ def main() -> None:
             result = command_network_read(args)
         elif args.command == "align-coords":
             result = command_align_coords(args)
+        elif args.command == "timetable-write":
+            result = command_timetable_write(args)
         elif args.command == "network-diff":
             result = command_network_diff(args)
         else:

@@ -50,6 +50,11 @@ function switchView(name) {
   $$('.view').forEach(el => el.classList.toggle('active', el.id === `view-${name}`));
   $('#view-eyebrow').textContent = viewMeta[name][0]; $('#view-title').textContent = viewMeta[name][1];
   if (name === 'realnet') initRealnet();
+  // Auto-load line timing when first entering the timetable studio so the user
+  // doesn't have to click "直读线路" separately (single-read across views).
+  if (name === 'timetable' && !TTD.routes.length && !state.taskActive && $('#save-select')?.value) {
+    startTask('line-timetable', { save: $('#save-select').value });
+  }
 }
 function setOptions(select, files) {
   select.innerHTML = files.map((file, index) => `<option value="${escapeHtml(file.path)}" ${index === 0 ? 'selected' : ''}>${escapeHtml(file.name)} · ${formatBytes(file.size)}</option>`).join('');
@@ -184,6 +189,7 @@ function renderLineTimetable(r) {
     return `<details class="tt-line"${i === 0 ? ' open' : ''}><summary><i class="ov-swatch" style="background:${lineColor(t.color)}"></i><strong>${escapeHtml(t.name)}</strong><span>${t.stop_count} 站</span><span>运行 ${durText(t.cycle_seconds)}</span></summary>`
       + `<div class="tt-scroll"><table class="tt-table"><thead><tr><th>车站</th><th>到达</th><th>发车</th><th>停站</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
   }).join('');
+  ttdPopulateLines(routes);
   toast(`逐站时刻直读完成：${routes.length} 条线路模板`);
 }
 function renderOpsAnalyze(r) {
@@ -903,22 +909,33 @@ function onTrackGeometry(result) {
   toast(`真实轨道直读完成：${result.node_count} 节点 / ${result.total_length_km} km`);
 }
 function calcHeadwayPlan() {
-  const a = state.analysis;
-  if (!a || !(a.health_schedules || []).length) { toast('请先在“总览与体检”完成体检', true); return; }
   const targetMin = +$('#headway-target').value;
   if (!(targetMin > 0)) { toast('请输入有效的目标班距（分钟）', true); return; }
   const targetSec = targetMin * 60;
   const onlyService = $('#headway-only-service').checked;
   const rows = [];
-  for (const s of a.health_schedules) {
-    const N = s.train_count || 0;
-    const h = (s.operations || {}).headway_median_seconds;
-    if (!N || !h) continue;                 // only schedules with a measured headway
-    if (onlyService && !(s.operations || {}).service_line) continue;
-    const T = h * N;                        // cycle time is invariant of N
-    const need = Math.max(1, Math.round(T / targetSec));
-    rows.push({ name: s.name, N, h, T, need, delta: need - N });
-  }
+  const a = state.analysis;
+  if (a && (a.health_schedules || []).length) {
+    // Preferred: JSON deep-check gives a measured headway per schedule.
+    for (const s of a.health_schedules) {
+      const N = s.train_count || 0;
+      const h = (s.operations || {}).headway_median_seconds;
+      if (!N || !h) continue;
+      if (onlyService && !(s.operations || {}).service_line) continue;
+      const T = h * N;                      // cycle time is invariant of N
+      const need = Math.max(1, Math.round(T / targetSec));
+      rows.push({ name: s.name, N, h, T, need, delta: need - N });
+    }
+  } else if (state.saveHealth && (state.saveHealth.ops_routes || []).length) {
+    // JSON-free: cycle time T and train count N read straight from the save.
+    for (const r of state.saveHealth.ops_routes) {
+      const N = r.train_count || 0, T = r.cycle_seconds || 0;
+      if (!N || !T) continue;
+      const h = r.headway_estimate_seconds || Math.round(T / N);
+      const need = Math.max(1, Math.round(T / targetSec));
+      rows.push({ name: r.name, N, h, T, need, delta: need - N });
+    }
+  } else { toast('请先在“总览与体检”完成一次体检（免 JSON 即可）', true); return; }
   rows.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta) || y.N - x.N);
   state.headwayPlan = { targetMin, rows };
   const add = rows.filter(r => r.delta > 0).reduce((s, r) => s + r.delta, 0);
@@ -1000,6 +1017,38 @@ function renderOverviewHealth(h, c) {
     </div>
     <div class="ovh-list">${items}</div>`;
   box.hidden = false;
+}
+function renderSaveHealth(r) {
+  state.saveHealth = r;
+  const c = r.counts || {};
+  const h = r.health || {};
+  const sc = h.health_score ?? 100;
+  const cls = sc >= 90 ? 'ok' : sc >= 70 ? 'warn' : 'bad';
+  const sev = h.severity_counts || {};
+  const opsMed = (r.ops_summary || {}).headway_estimate_median_seconds;
+  $('#health-summary').innerHTML = `<div class="health-wrap">`
+    + `<div class="health-ring ${cls}" style="--score:${sc}"><div><b>${sc}</b><small>/ 100</small></div></div>`
+    + `<div class="health-copy"><strong>存档直读体检 · 免 JSON</strong>`
+    + `<p>${c.routes ?? 0} 线 / ${c.schedules ?? 0} 时刻表 / ${c.trains ?? 0} 车（${c.assigned_trains ?? 0} 已分配）<br>严重 ${sev.critical || 0} · 警告 ${sev.warning || 0} · 提示 ${sev.info || 0}</p>`
+    + `<span class="ver-chip ok" title="全程只读存档，无需导出 JSON">仅用存档 · 不需要导出</span></div></div>`;
+  const metrics = [
+    ['车站', c.stations, `${c.named_stations ?? 0} 有名`],
+    ['线路', c.routes, '带几何'],
+    ['时刻表', c.schedules, `${c.active_schedules ?? 0} 有班次`],
+    ['列车', c.trains, `${c.idle_trains ?? 0} 闲置`],
+    ['信号/道岔', c.signals, '个'],
+    ['班距中位(估算)', headwayText(opsMed || 0), 'h≈T/N'],
+  ];
+  $('#metric-grid').innerHTML = metrics.map(x => `<div class="metric-card"><small>${x[0]}</small><b>${typeof x[1]==='number' ? (x[1] ?? 0).toLocaleString() : x[1]}</b><em>${x[2]}</em></div>`).join('');
+  $('#metric-grid').hidden = false;
+  const findings = h.findings || [];
+  $('#finding-count').textContent = findings.length;
+  $('#findings-panel').hidden = false;
+  $('#finding-list').innerHTML = renderFindingGroups(findings);
+  // Re-use the existing detailed renderers: save-health is a superset of both.
+  renderSaveOverview(r);
+  renderOpsAnalyze({ action: 'ops-analyze', routes: r.ops_routes || [], summary: r.ops_summary || {} });
+  toast(`存档直读体检完成：${c.routes ?? 0} 线 / ${c.trains ?? 0} 车 · 健康 ${sc}`);
 }
 function onNetworkRead(result) {
   state.network = { lines: result.lines || [], stations: result.stations || {} };
@@ -1340,7 +1389,7 @@ function finishTask() {
   if (worker) worker.postMessage('stop');
   clearTimeout(state.fallbackTimer);
 }
-const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template']);
+const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write']);
 async function startTask(action, payload) {
   if (WRITE_ACTIONS.has(action) && state.gameVersion && state.gameVersion.safe_to_write === false) {
     if (!confirm(`${state.gameVersion.note || '当前游戏版本尚未完全验证写入。'}\n\n工具仍只写入新存档、绝不覆盖原档。是否继续？`)) return;
@@ -1370,12 +1419,14 @@ async function pollOnce() {
       else if (s.action === 'compare') renderCompare(s.result);
       else if (s.action === 'find-reference') renderReference(s.result);
       else if (s.action === 'map-data') { renderMapData(s.result); renderBinderLines(); if (REALNET.ready) realnetDrawGame(); }
+      else if (s.action === 'save-health') { renderSaveHealth(s.result); }
       else if (s.action === 'save-overview') { renderSaveOverview(s.result); }
       else if (s.action === 'line-timetable') { renderLineTimetable(s.result); }
       else if (s.action === 'ops-analyze') { renderOpsAnalyze(s.result); }
       else if (s.action === 'network-read') { onNetworkRead(s.result); }
       else if (s.action === 'track-geometry') { onTrackGeometry(s.result); }
       else if (s.action === 'align-coords') { await onAlignDone(s.result); }
+      else if (s.action === 'timetable-write') { onTimetableWriteDone(s.result); await refreshFileLists(); refreshOutputNames(); }
       else if (s.action === 'network-diff') renderNetworkDiff(s.result);
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
@@ -1521,8 +1572,6 @@ document.addEventListener('keydown', e => {
 $('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
 $('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择最新存档和最新即时导出'); });
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
-$('#headway-calc')?.addEventListener('click', renderHeadwayPlan);
-$('#headway-export')?.addEventListener('click', exportHeadwayCsv);
 $('#timetable-read')?.addEventListener('click', () => { const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true); startTask('line-timetable', { save }); });
 $('#ops-read')?.addEventListener('click', () => {
   const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true);
@@ -1546,7 +1595,17 @@ $('#save-dir-detect')?.addEventListener('click', async () => {
     toast(res.save_status.has_saves ? `已重新检测，找到 ${res.save_status.save_count} 份存档` : '已重新检测，但未找到存档目录', !res.save_status.has_saves);
   } catch (e) { toast(e.message, true); }
 });
-$('#scan-button').addEventListener('click',()=>startTask('analyze',{save:$('#save-select').value,export:$('#export-select').value}));
+$('#scan-button').addEventListener('click',()=>{
+  const save=$('#save-select')?.value; if(!save) return toast('请先选择存档',true);
+  const payload={save}; const t=parseInt($('#ops-target')?.value,10); if(t>0) payload.target_headway=t;
+  startTask('save-health',payload);
+});
+$('#deep-scan-button')?.addEventListener('click',()=>{
+  const save=$('#save-select')?.value, exp=$('#export-select')?.value;
+  if(!save) return toast('请先选择存档',true);
+  if(!exp) return toast('深度核对需要选择与存档同一时刻的导出 JSON',true);
+  startTask('analyze',{save,export:exp});
+});
 $('#migrate-button').addEventListener('click',()=>{ const pairs=$$('.pair-check:checked').map(x=>x.dataset.pair); if(!pairs.length)return toast('请至少勾选一组迁移方案',true); startTask('batch-migrate',{save:$('#save-select').value,export:$('#export-select').value,output:$('#migration-output').value,pairs,garage_join:$('#garage-join').checked}); });
 $('#toggle-schedules').addEventListener('click',()=>{const boxes=$$('.schedule-check'); const all=boxes.length&&boxes.every(x=>x.checked); boxes.forEach(x=>x.checked=!all); $('#toggle-schedules').textContent=all?'全选':'清空';});
 $('#fix-button').addEventListener('click',()=>{
@@ -1668,5 +1727,262 @@ $('#generate-vehicle').addEventListener('click',async()=>{
 });
 $('#generate-script').addEventListener('click',async()=>{try{const data=await api('/api/script/generate',{method:'POST',body:JSON.stringify({name:$('#script-name').value,id:$('#script-id').value,garage_join:$('#rule-garage').checked,arrival_hold:$('#rule-hold').checked,hold_seconds:+$('#rule-hold-seconds').value,signal_speed_limit:$('#rule-speed').checked,speed_kmh:+$('#rule-speed-kmh').value})});const link=document.createElement('a');link.href=data.download_url;link.download=`${data.meta.script_id}.zip`;document.body.appendChild(link);link.click();link.remove();toast(`规则包已生成：${data.meta.enabled_rules.join('、')}`);}catch(e){toast(e.message,true);}});
 $('#cancel-task').addEventListener('click',async()=>{await api('/api/task/cancel',{method:'POST',body:'{}'});finishTask();toast('任务已取消');});
+
+/* ===== Timetable Designer (自定义时刻表设计器) ===== */
+const TTD = { routes: [], plan: null };
+function ttdPopulateLines(routes){
+  TTD.routes = (routes||[]).filter(r=>r.stops && r.stops.length>=2);
+  const sel = $('#ttd-line'); if(!sel) return;
+  if(!TTD.routes.length){ sel.innerHTML='<option value="">无带计时线路</option>'; }
+  else sel.innerHTML = TTD.routes.map((r,i)=>`<option value="${i}">${escapeHtml(r.name)} · ${r.stop_count}站 · ${durText(r.cycle_seconds)}</option>`).join('');
+  const wsel = $('#ttd-w-line');
+  if(wsel){
+    wsel.innerHTML = TTD.routes.length
+      ? TTD.routes.map((r,i)=>`<option value="${i}">${escapeHtml(r.name)} · ${r.stop_count}站</option>`).join('')
+      : '<option value="">无带计时线路</option>';
+  }
+  ttdSyncRun();
+  ttdSyncWriteLine();
+}
+// The stop-time write card follows the designer's line selector (single source
+// of truth) so the user never picks the same line twice.
+function ttdSyncWriteLine(){
+  const src=$('#ttd-line'), dst=$('#ttd-w-line'); if(!dst) return;
+  const i = src ? src.value : '';
+  if(i!=='' && dst.querySelector(`option[value="${i}"]`)) dst.value=i;
+  const r=ttdWriteRoute();
+  const nm=$('#ttd-w-linename'); if(nm) nm.textContent = r ? `${r.name} · ${r.stop_count}站` : '（先直读线路）';
+  ttdWriteRenderStops();
+  ttdWriteRefreshOutput();
+}
+function ttdWriteRoute(){ const i=+($('#ttd-w-line')?.value); return Number.isInteger(i)?TTD.routes[i]:null; }
+function ttdWriteMode(){ return $('#ttd-w-mode')?.value || 'uniform'; }
+function ttdWriteRefreshOutput(){
+  const el=$('#ttd-w-output'); if(!el) return;
+  const r=ttdWriteRoute();
+  const tag = (ttdWriteMode()==='perstop') ? 'StopTimes' : ('StopTime'+(Math.round(+$('#ttd-w-stop')?.value||0))+'s');
+  el.value = (typeof outputPath==='function' && $('#save-select')?.value) ? outputPath(r?tag:'StopTime') : '';
+}
+// De-duplicate leg-anchored stops into the game's stop list (a loop repeats the origin).
+function ttdWriteStops(r){ return (r && Array.isArray(r.stops)) ? r.stops : []; }
+function ttdWriteRenderStops(){
+  const wrap=$('#ttd-w-perstop'), list=$('#ttd-w-stoplist'); if(!wrap||!list) return;
+  const per = ttdWriteMode()==='perstop';
+  wrap.hidden=!per;
+  const stopWrap=$('#ttd-w-stop-wrap'); if(stopWrap) stopWrap.style.display = per?'none':'';
+  if(!per) return;
+  const r=ttdWriteRoute();
+  const stops=ttdWriteStops(r);
+  if(!stops.length){ list.innerHTML='<div class="placeholder">请先选择线路。</div>'; return; }
+  list.innerHTML = stops.map((s,i)=>{
+    const name = escapeHtml(s.station || s.station_id || ('站 '+(i+1)));
+    const cur = Math.round((s.dwell!=null? s.dwell : (s.departure-s.arrival))||0);
+    return `<div class="ttd-w-stoprow"><span class="idx">${i+1}</span><span class="nm" title="${name}">${name}</span>`
+      +`<input type="number" min="1" max="600" step="1" data-i="${i}" placeholder="继承(${cur}s)" aria-label="${name} 停站秒数"></div>`;
+  }).join('');
+}
+function ttdWriteCollectList(){
+  const inputs=[...document.querySelectorAll('#ttd-w-stoplist input[data-i]')];
+  return inputs.map(inp=>{ const v=inp.value.trim(); return v===''? null : Number(v); });
+}
+function ttdCurrentRoute(){ const i=+($('#ttd-line')?.value); return Number.isInteger(i)?TTD.routes[i]:null; }
+function ttdSyncRun(){ const r=ttdCurrentRoute(); const el=$('#ttd-run'); if(!r){ if(el) el.value='0'; return; } const dwellStr=($('#ttd-dwell')?.value||'').trim(); const stops=(dwellStr!=='' && +dwellStr>=0)?ttdApplyUniformDwell(r.stops,+dwellStr):r.stops; const run=stops[stops.length-1].arrival - stops[0].departure; if(el) el.value=(run/60).toFixed(1); }
+function ttdTime(str){ const m=/^(\d{1,2}):(\d{2})$/.exec((str||'').trim()); if(!m) return null; return (+m[1])*3600+(+m[2])*60; }
+function ttdWindows(str){ const out=[]; (str||'').split(',').forEach(p=>{ const m=/^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/.exec(p); if(!m) return; let a=(+m[1])*3600+(+m[2])*60, b=(+m[3])*3600+(+m[4])*60; if(b<=a) b+=86400; out.push([a,b]); }); return out; }
+function ttdInPeak(t, wins){ return wins.some(([a,b])=> (t>=a&&t<b) || (t+86400>=a && t+86400<b)); }
+function ttdReverse(stops){
+  const n=stops.length, base=stops[0].departure;
+  const rel=stops.map(s=>({station:s.station, arr:s.arrival-base, dep:s.departure-base}));
+  const run=rel[n-1].arr;
+  const out=[];
+  for(let k=0;k<n;k++){ const o=n-1-k; out.push({station:rel[o].station, arrival:run-rel[o].dep, departure:run-rel[o].arr}); }
+  const b2=out[0].departure;
+  return out.map(s=>({station:s.station, arrival:s.arrival-b2, departure:s.departure-b2}));
+}
+function ttdBuildTrip(tmpl, D){ const base=tmpl[0].departure; return tmpl.map(s=>({station:s.station, arr:D+s.arrival-base, dep:D+s.departure-base})); }
+// Rebuild cumulative arr/dep applying a uniform dwell d at every stop while
+// preserving each leg's travel time (arrival[i] - departure[i-1]).
+function ttdApplyUniformDwell(stops, d){
+  const out=[]; let prevDep=0;
+  stops.forEach((s,i)=>{
+    if(i===0){ out.push({station:s.station, arrival:0, departure:d, dwell:d}); prevDep=d; }
+    else { const leg=Math.max(0, s.arrival - stops[i-1].departure); const arr=prevDep+leg; const dep=arr+d; out.push({station:s.station, arrival:arr, departure:dep, dwell:d}); prevDep=dep; }
+  });
+  return out;
+}
+function ttdBackfill(){
+  const r=ttdCurrentRoute(); if(!r) return toast('请先选择线路',true);
+  ttdSyncWriteLine();
+  const dwellStr=($('#ttd-dwell')?.value||'').trim();
+  const mode=$('#ttd-w-mode');
+  if(dwellStr!=='' && +dwellStr>=1){
+    if(mode) mode.value='uniform';
+    ttdWriteRenderStops();
+    const st=$('#ttd-w-stop'); if(st) st.value=Math.round(+dwellStr);
+    toast(`已回填统一停站 ${Math.round(+dwellStr)}s 到写入表，确认后点“写入新存档”。`);
+  } else {
+    if(mode) mode.value='perstop';
+    ttdWriteRenderStops();
+    document.querySelectorAll('#ttd-w-stoplist input[data-i]').forEach((inp,i)=>{ const s=r.stops[i]; inp.value=Math.round((s?.dwell!=null?s.dwell:(s.departure-s.arrival))||0); });
+    toast('已按存档真值逐站回填到写入表，可微调后写入。');
+  }
+  ttdWriteRefreshOutput();
+  $('#ttd-write')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function ttdCompute(){
+  const r=ttdCurrentRoute(); if(!r) return toast('请先选择线路',true);
+  const first=ttdTime($('#ttd-first').value); let last=ttdTime($('#ttd-last').value);
+  if(first==null||last==null) return toast('请检查首/末班时间格式（HH:MM，末班可用 24:30 表示次日）',true);
+  if(last<=first) last+=86400;
+  const peakH=Math.max(0.5,+$('#ttd-peak').value)*60, offH=Math.max(0.5,+$('#ttd-offpeak').value)*60;
+  const wins=ttdWindows($('#ttd-windows').value), layover=Math.max(0,+$('#ttd-layover').value)*60;
+  const round=$('#ttd-dir').value==='round';
+  const dwellStr=($('#ttd-dwell')?.value||'').trim();
+  const dwell = dwellStr!=='' ? Math.max(0,+dwellStr) : null;
+  const srcStops = (dwell!=null && Number.isFinite(dwell)) ? ttdApplyUniformDwell(r.stops, dwell) : r.stops;
+  const outT=srcStops.map(s=>({station:s.station, arrival:s.arrival, departure:s.departure}));
+  const base=outT[0].departure, run=outT[outT.length-1].arrival-base;
+  const retT=ttdReverse(srcStops);
+  const deps=[]; let D=first, guard=0;
+  while(D<=last && guard++<5000){ deps.push({t:D, peak:ttdInPeak(D,wins)}); D += (ttdInPeak(D,wins)?peakH:offH); }
+  const vehCycle = round ? (2*run+2*layover) : (run+layover);
+  const trains=[]; const trips=[];
+  deps.forEach((d,idx)=>{
+    let ti=trains.findIndex(f=>f<=d.t);
+    if(ti<0){ ti=trains.length; trains.push(0); }
+    trains[ti]=d.t+vehCycle;
+    trips.push({dir:'out', train:ti+1, peak:d.peak, run:idx+1, stops:ttdBuildTrip(outT,d.t)});
+    if(round){ trips.push({dir:'ret', train:ti+1, peak:d.peak, run:idx+1, stops:ttdBuildTrip(retT, d.t+run+layover)}); }
+  });
+  const stationY={}; outT.forEach(s=>{ stationY[s.station]=s.arrival-base; });
+  const board={}; outT.forEach(s=>board[s.station]=[]);
+  trips.forEach(tp=>tp.stops.forEach(s=>{ if(board[s.station]==null) board[s.station]=[]; board[s.station].push({t:s.dep, dir:tp.dir, peak:tp.peak}); }));
+  Object.values(board).forEach(a=>a.sort((x,y)=>x.t-y.t));
+  const spans=deps.map((d,i)=> i? d.t-deps[i-1].t:null).filter(x=>x!=null);
+  TTD.plan={ line:r.name, color:r.color, round, run, layover, fleet:trains.length,
+    trips, board, stationY, stations:outT.map(s=>s.station),
+    deps, first, last, peakH, offH, wins,
+    tripsPerDay: trips.length, minGap: spans.length?Math.min(...spans):0, maxGap: spans.length?Math.max(...spans):0 };
+  ttdRender();
+  toast(`已生成：${r.name} · ${trips.length} 车次 · 需 ${trains.length} 列车`);
+}
+function ttdRender(){
+  const p=TTD.plan, box=$('#ttd-results'); if(!p||!box) return;
+  const svg=ttdMarey(p);
+  const metrics=`<div class="ttd-metrics">
+    <div class="metric-card"><small>所需车数</small><b>${p.fleet}</b><em>列（含折返 ${(p.layover/60).toFixed(1)}分）</em></div>
+    <div class="metric-card"><small>日车次</small><b>${p.tripsPerDay}</b><em>${p.round?'往返':'单向'}</em></div>
+    <div class="metric-card"><small>班距</small><b>${(p.peakH/60)}/${(p.offH/60)}</b><em>高峰/平峰 分</em></div>
+    <div class="metric-card"><small>单程运行</small><b>${durText(p.run)}</b><em>循环 ${durText(p.round?2*p.run+2*p.layover:p.run+p.layover)}</em></div>
+  </div>`;
+  const boards=ttdBoards(p);
+  box.innerHTML = metrics + `<div class="ttd-diagram-wrap">${svg}</div>` + boards + ttdChecklist(p);
+  $('#ttd-exports').hidden=false;
+}
+function ttdChecklist(p){
+  const wins = p.wins.length ? p.wins.map(w=>`${secToClock(w[0])}–${secToClock(w[1]%86400)}`).join('、') : '（无高峰时段）';
+  const steps = [
+    `打开线路 <b>${escapeHtml(p.line)}</b> 的时刻表（Timetable），方向设为 <b>${p.round?'往返':'单向'}</b>。`,
+    `首班发车设为 <b>${secToClock(p.first)}</b>，末班发车约 <b>${secToClock(p.last%86400)}</b>${p.last>=86400?'（次日）':''}。`,
+    `按时段设置发车间隔：高峰 <b>${p.peakH/60} 分</b>（${wins}），其余平峰 <b>${p.offH/60} 分</b>。`,
+    `终点站折返等待设为 <b>${(p.layover/60).toFixed(1)} 分</b>。`,
+    `为该线投入 <b>${p.fleet} 列</b>车（达成上述班距所需的最少车数）。`,
+    `如需列车跨班连续运行，可用“车库接班扩展”给这些列车批量加 garage join。`,
+  ];
+  return `<details class="ttd-board ttd-check" open><summary>游戏内复刻清单</summary><div class="ttd-check-body"><ol>${steps.map(s=>`<li>${s}</li>`).join('')}</ol><p class="repair-note">说明：NIMBY Rails 的发车时刻是<strong>规则驱动</strong>（首班 + 各时段间隔 + 车数），运行时才展开成具体车次；本设计器按已破解的“逐站相对时刻”真值精确推算，上表/运行图即为按此规则运行的结果。</p></div></details>`;
+}
+function ttdMarey(p){
+  const W=980, padL=150, padR=24, padT=28, padB=42, rowH=26;
+  const stns=p.stations, H=padT+padB+Math.max(1,stns.length-1)*rowH + rowH;
+  const yMax=Math.max(1,...stns.map(s=>p.stationY[s]));
+  const t0=p.first, t1=Math.max(...p.trips.flatMap(tp=>tp.stops.map(s=>s.dep)));
+  const span=Math.max(600,t1-t0);
+  const xOf=t=>padL+(t-t0)/span*(W-padL-padR);
+  const yOf=s=>padT+(p.stationY[s]/yMax)*((stns.length-1)*rowH);
+  const col=lineColor(p.color);
+  let g='';
+  for(let s=stns.length,hh=Math.floor(t0/3600); hh*3600<=t1; hh++){ const x=xOf(hh*3600); if(x<padL-1)continue; g+=`<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${padT+(stns.length-1)*rowH}" class="ttd-grid-v"/><text x="${x.toFixed(1)}" y="${padT+(stns.length-1)*rowH+16}" class="ttd-xlab">${String(hh%24).padStart(2,'0')}</text>`; }
+  stns.forEach(s=>{ const y=yOf(s); g+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" class="ttd-grid-h"/><text x="${padL-8}" y="${(y+3).toFixed(1)}" class="ttd-ylab">${escapeHtml(s.length>18?s.slice(0,17)+'…':s)}</text>`; });
+  let lines='';
+  p.trips.forEach(tp=>{ const pts=tp.stops.map(s=>`${xOf(s.dep).toFixed(1)},${yOf(s.station).toFixed(1)}`).join(' '); lines+=`<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="${tp.peak?1.8:1.1}" opacity="${tp.dir==='ret'?0.5:0.9}"/>`; });
+  return `<svg id="ttd-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="ttd-svg"><rect width="${W}" height="${H}" fill="var(--surface)"/><text x="${padL}" y="18" class="ttd-title">${escapeHtml(p.line)} · 运行图（Marey）</text>${g}${lines}</svg>`;
+}
+function ttdBoards(p){
+  const rows=p.stations.map(s=>{ const list=(p.board[s]||[]).map(e=>`<span class="ttd-dep ${e.dir==='ret'?'ret':''} ${e.peak?'peak':''}">${secToClock(e.t)}</span>`).join(''); return `<tr><th>${escapeHtml(s)}</th><td>${list||'—'}</td></tr>`; }).join('');
+  return `<details class="ttd-board"><summary>逐站发车时刻板（${p.round?'含往返':'单向'}）</summary><div class="ttd-board-scroll"><table><tbody>${rows}</tbody></table></div></details>`;
+}
+function ttdExportCsv(){ const p=TTD.plan; if(!p) return toast('请先生成时刻表',true);
+  let csv='trip,train,direction,band,station,arrival,departure\n';
+  p.trips.forEach(tp=>tp.stops.forEach(s=>{ csv+=`${tp.run},${tp.train},${tp.dir},${tp.peak?'peak':'offpeak'},"${(s.station||'').replace(/"/g,'""')}",${secToClock(s.arr)},${secToClock(s.dep)}\n`; }));
+  ttdDownload(csv,`${p.line.replace(/[\\/:*?"<>|]/g,'_')}_timetable.csv`,'text/csv');
+}
+function ttdExportJson(){ const p=TTD.plan; if(!p) return toast('请先生成时刻表',true);
+  const out={ line:p.line, direction:p.round?'round':'single', fleet_required:p.fleet, trips_per_day:p.tripsPerDay, run_seconds:p.run, layover_seconds:p.layover, peak_headway_min:p.peakH/60, offpeak_headway_min:p.offH/60, peak_windows:p.wins.map(w=>`${secToClock(w[0])}-${secToClock(w[1]%86400)}`), stations:p.stations, trips:p.trips.map(t=>({run:t.run,train:t.train,dir:t.dir,band:t.peak?'peak':'offpeak',stops:t.stops.map(s=>({station:s.station,arrival:secToClock(s.arr),departure:secToClock(s.dep)}))})) };
+  ttdDownload(JSON.stringify(out,null,2),`${p.line.replace(/[\\/:*?"<>|]/g,'_')}_timetable.json`,'application/json');
+}
+function ttdExportSvg(){ const svg=$('#ttd-svg'); if(!svg) return toast('请先生成运行图',true); const s=new XMLSerializer().serializeToString(svg); ttdDownload(s,`${(TTD.plan?.line||'line').replace(/[\\/:*?"<>|]/g,'_')}_stringline.svg`,'image/svg+xml'); }
+function ttdDownload(text,name,type){ const blob=new Blob([text],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),500); }
+$('#ttd-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save) return toast('请先选择存档',true); startTask('line-timetable',{save}); });
+$('#ttd-line')?.addEventListener('change',()=>{ ttdSyncRun(); ttdSyncWriteLine(); });
+$('#ttd-generate')?.addEventListener('click',ttdCompute);
+$('#ttd-export-csv')?.addEventListener('click',ttdExportCsv);
+$('#ttd-export-json')?.addEventListener('click',ttdExportJson);
+$('#ttd-export-svg')?.addEventListener('click',ttdExportSvg);
+$('#ttd-backfill')?.addEventListener('click',ttdBackfill);
+$('#ttd-dwell')?.addEventListener('input',()=>{ ttdSyncRun(); });
+$('#ttd-w-line')?.addEventListener('change',()=>{ ttdWriteRenderStops(); ttdWriteRefreshOutput(); });
+$('#ttd-w-mode')?.addEventListener('change',()=>{ ttdWriteRenderStops(); ttdWriteRefreshOutput(); });
+$('#ttd-w-stop')?.addEventListener('input',ttdWriteRefreshOutput);
+$('#save-select')?.addEventListener('change',ttdWriteRefreshOutput);
+$('#ttd-w-write')?.addEventListener('click',ttdWrite);
+$('#ttd-w-perstop')?.addEventListener('click',(e)=>{
+  const btn=e.target.closest('[data-fill]'); if(!btn) return;
+  const r=ttdWriteRoute(); const stops=ttdWriteStops(r);
+  document.querySelectorAll('#ttd-w-stoplist input[data-i]').forEach((inp,i)=>{
+    if(btn.dataset.fill==='clear') inp.value='';
+    else { const s=stops[i]; inp.value=Math.round((s?.dwell!=null? s.dwell : (s.departure-s.arrival))||0); }
+  });
+});
+function onTimetableWriteDone(res){
+  const box=$('#ttd-w-result');
+  const file=(res.output_save||'').split(/[\\/]/).pop()||'新存档';
+  toast(`已写入新存档：${file}`);
+  if(!box) return;
+  box.hidden=false; box.className='ttd-write-result ok';
+  let head;
+  if(res.mode==='per-stop' && Array.isArray(res.per_stop_seconds)){
+    const man=res.after?.manual||[];
+    const parts=res.per_stop_seconds.map((s,i)=> man[i]===false? `<span class="inh">站${i+1}:继承</span>` : `<span>站${i+1}:${s}s</span>`);
+    head=`<b>✓ 逐站写入成功</b><br>线路「${escapeHtml(res.line_name||'')}」：<span class="ttd-w-chips">${parts.join('')}</span>`;
+  } else {
+    const secs=res.stop_time_seconds; const b=res.before?.default_seconds;
+    head=`<b>✓ 写入成功</b><br>线路「${escapeHtml(res.line_name||'')}」停站时间 ${b??'?'}s → <b>${secs}s</b>（默认值 + ${res.stops_edited} 个每站副本，共 ${res.fields_written} 个字段）。`;
+  }
+  box.innerHTML=head
+    +`<br>字节级回环校验✓ · 其它线路零波及✓ · 压缩回读✓`
+    +`<br>新存档：<code>${escapeHtml(file)}</code>`
+    +`<br><small>加载后即生效；实际停站 ≈ 设定值 + 上下客时间。只创建了新存档，原档未改动。</small>`;
+}
+async function ttdWrite(){
+  const save=$('#save-select')?.value; if(!save) return toast('请先选择存档',true);
+  const r=ttdWriteRoute(); if(!r) return toast('请先“直读线路”并选择线路',true);
+  ttdWriteRefreshOutput();
+  const output=$('#ttd-w-output')?.value; if(!output) return toast('无法生成输出文件名',true);
+  const payload={ save, output, route: (r.id||r.name) };
+  if(ttdWriteMode()==='perstop'){
+    const list=ttdWriteCollectList();
+    if(!list.length) return toast('该线路没有可设置的停站',true);
+    if(list.every(v=>v===null)) return toast('请至少给一个停站填入秒数（其余留空＝继承）',true);
+    for(const v of list){ if(v!==null && !(v>=1 && v<=600)) return toast('逐站停站时间需在 1–600 秒之间',true); }
+    payload.dwell_list=list.map(v=>v===null?'':v);
+  } else {
+    const stop=+$('#ttd-w-stop')?.value;
+    if(!(stop>=1 && stop<=600)) return toast('停站时间需在 1–600 秒之间',true);
+    payload.dwell=stop;
+  }
+  const box=$('#ttd-w-result'); if(box){ box.hidden=false; box.className='ttd-write-result'; box.textContent='正在写入新存档…'; }
+  await startTask('timetable-write',payload);
+}
+
 setInterval(()=>fetch(`/api/ping?_=${Date.now()}`,{cache:'no-store'}).catch(()=>{}),5000);
 loadBootstrap().catch(e=>toast(e.message,true));

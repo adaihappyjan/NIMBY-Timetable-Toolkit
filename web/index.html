@@ -51,8 +51,8 @@
           <article class="hero-card">
             <div class="hero-copy">
               <p class="eyebrow aqua">NETWORK READINESS</p>
-              <h2>先核对，再写入。</h2>
-              <p>自动选择最新存档与即时导出，完整核对全部时刻表和列车后才开放修改。</p>
+              <h2>只读存档，一键体检。</h2>
+              <p>选一个存档即可完成结构总览、直读体检与班距估算——<b>全程只用存档，不需要导出 JSON</b>。所有写入永远只创建新存档。</p>
             </div>
             <div class="route-art" aria-hidden="true">
               <i class="line line-a"></i><i class="line line-b"></i><i class="line line-c"></i>
@@ -68,15 +68,24 @@
 
         <article class="panel file-panel">
           <div class="panel-heading">
-            <div><p class="step">步骤 01</p><h3>选择同一时刻的文件</h3></div>
+            <div><p class="step">步骤 01 · 免 JSON</p><h3>选择一个存档即可</h3></div>
             <button class="text-button" id="select-latest">自动选择最新</button>
           </div>
-          <div class="file-grid">
+          <div class="file-grid file-grid-solo">
             <label>输入存档<select id="save-select" aria-label="输入存档"></select></label>
-            <label>时刻表导出 JSON<select id="export-select" aria-label="时刻表导出 JSON"></select></label>
-            <button class="primary-button scan-button" id="scan-button"><span>开始全面体检</span><small>通常需要 5–15 秒</small></button>
+            <button class="primary-button scan-button" id="scan-button"><span>开始体检 · 免 JSON</span><small>只读存档 · 几秒完成</small></button>
           </div>
-          <div class="safety-strip"><span>✓</span>游戏应回到主菜单或关闭；所有写入只创建新文件。</div>
+          <div class="safety-strip"><span>✓</span>整套体检只解压并读取存档，不写任何文件；写入类功能永远只创建新存档。</div>
+          <details class="adv-json" id="adv-json-box">
+            <summary><span class="sd-label">高级（可选）：导出 JSON 深度核对</span><span class="sd-path">迁移 / 恢复 / 运营明细需要它</span></summary>
+            <div class="adv-json-body">
+              <p class="save-dir-hint">多数功能已无需导出。仅当你要做<b>智能迁移、模板恢复、逐表运营明细（服务时段/覆盖天数/相位）</b>时，才需要与存档<b>同一时刻</b>导出的时刻表 JSON，并在此做一次深度核对。</p>
+              <div class="file-grid">
+                <label>时刻表导出 JSON<select id="export-select" aria-label="时刻表导出 JSON"></select></label>
+                <button class="secondary-button" id="deep-scan-button">深度核对（需导出）</button>
+              </div>
+            </div>
+          </details>
           <details class="save-dir" id="save-dir-box">
             <summary><span class="sd-label">存档目录</span><span class="sd-path" id="save-dir-current">检测中…</span></summary>
             <div class="save-dir-body">
@@ -94,7 +103,7 @@
         <article class="panel" id="overview-panel">
           <div class="panel-heading">
             <div><p class="step">免 JSON</p><h3>从存档直读结构总览</h3></div>
-            <button class="secondary-button" id="overview-read">直读当前存档结构</button>
+            <button class="secondary-button" id="overview-read">重新读取结构</button>
           </div>
           <div class="repair-note">无需导出 JSON：直接解压存档并从二进制枚举站点、线路、信号、列车与时刻表。全部只读，正式存档不受影响。首次读取较慢（深度扫描），请稍候。</div>
           <div class="metric-grid" id="overview-metrics" hidden></div>
@@ -124,7 +133,7 @@
         <article class="panel" id="ops-panel">
           <div class="panel-heading">
             <div><p class="step">免 JSON · 估算</p><h3>仅用存档估算运营指标</h3></div>
-            <button class="secondary-button" id="ops-read">仅用存档体检（估算）</button>
+            <button class="secondary-button" id="ops-read">按目标班距重算</button>
           </div>
           <div class="repair-note">
             班距为规则推导量、<b>不入档</b>，故直接从存档估算：<code>h ≈ 循环时长 T ÷ 车数 N</code>（T、N 均从二进制直读）。
@@ -160,7 +169,7 @@
           <div><p class="eyebrow aqua">OPERATIONS ANALYTICS</p><h2>运营分析（只读）</h2><p>从导出 JSON 计算服务时段、班距均匀度、覆盖天数、车队规模等运营指标，绝不修改存档。</p></div>
           <span class="phase-badge safe">零风险只读</span>
         </div>
-        <div class="metric-grid" id="analytics-kpi"><div class="placeholder">请先在“总览与体检”完成一次体检。</div></div>
+        <div class="metric-grid" id="analytics-kpi"><div class="placeholder">逐表运营明细（服务时段/覆盖天数/相位）来自导出：请在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对。班距估算可直接在“总览与体检”免 JSON 查看。</div></div>
         <article class="panel" id="analytics-panel" hidden>
           <div class="panel-heading">
             <div><p class="step">逐表指标</p><h3>时刻表运营明细</h3></div>
@@ -337,12 +346,77 @@
 
       <section class="view" id="view-timetable">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>
+          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>自定义时刻表设计器</h2><p>选一条线，设定运营时段与高峰/平峰班距，即时算出完整时刻表并绘制专业运行图（Marey 弦线图），给出所需车数与逐站发车板，可导出与在游戏内复刻。</p></div>
+          <span class="phase-badge safe">基于逐站真值 · 只读</span>
+        </div>
+        <article class="panel" id="ttd-panel">
+          <div class="panel-heading"><div><p class="step">时刻表工作室</p><h3>运行图设计</h3></div>
+            <button class="secondary-button" id="ttd-read">重新直读线路（免 JSON）</button>
+          </div>
+          <div class="ttd-layout">
+            <div class="ttd-form">
+              <label>线路<select id="ttd-line" aria-label="线路"><option value="">先点“直读线路”</option></select></label>
+              <label>运行方向
+                <select id="ttd-dir">
+                  <option value="round" selected>往返（双向）</option>
+                  <option value="single">单向</option>
+                </select>
+              </label>
+              <div class="ttd-row"><label>首班<input id="ttd-first" type="text" value="05:30" placeholder="05:30"></label><label>末班<input id="ttd-last" type="text" value="24:30" placeholder="24:30"><small>次日可写 24:30 / 25:00</small></label></div>
+              <div class="ttd-row"><label>高峰班距<input id="ttd-peak" type="number" min="0.5" max="180" step="0.5" value="4"><span>分</span></label><label>平峰班距<input id="ttd-offpeak" type="number" min="0.5" max="360" step="0.5" value="10"><span>分</span></label></div>
+              <label>高峰时段<input id="ttd-windows" value="07:00-09:30, 16:00-19:00"><small>多个时段用逗号分开，可跨午夜</small></label>
+              <div class="ttd-row"><label>终点折返<input id="ttd-layover" type="number" min="0" max="60" step="0.5" value="4"><span>分</span></label><label>单程运行<input id="ttd-run" type="number" min="1" max="600" step="0.1" value="0" readonly><span>分</span></label></div>
+              <div class="ttd-row"><label>统一停站<input id="ttd-dwell" type="number" min="0" max="600" step="1" placeholder="用存档真值"><span>秒</span><small>留空＝用存档每站真实停站；填数则全线按此停站重算运行/车数</small></label></div>
+              <button class="primary-button full" id="ttd-generate">生成时刻表与运行图</button>
+              <div class="ttd-exports" hidden id="ttd-exports">
+                <button class="text-button" id="ttd-backfill" title="把当前停站设置回填到下方“停站时间写入”">↓ 回填到停站写入</button>
+                <button class="text-button" id="ttd-export-csv">导出 CSV</button>
+                <button class="text-button" id="ttd-export-json">导出 JSON</button>
+                <button class="text-button" id="ttd-export-svg">导出运行图 SVG</button>
+              </div>
+            </div>
+            <div class="ttd-results" id="ttd-results">
+              <div class="placeholder">先“直读线路”，选好线路与参数后点“生成时刻表与运行图”。</div>
+            </div>
+          </div>
+          <div class="ttd-write" id="ttd-write">
+            <div class="ttd-write-head">
+              <div><p class="step">写入存档 · 已通过游戏内验证</p><h3>停站时间写入</h3></div>
+              <span class="phase-badge">只写新档</span>
+            </div>
+            <p class="ttd-write-note">直接改写线路的“停站时间”输入（线路默认 + 每站副本一起写，与游戏本体写法一致）。游戏加载后即生效，实际停站 ≈ 设定值 + 上下客时间。<b>只创建新存档，绝不改动原档。</b></p>
+            <div class="ttd-w-lineinfo">写入线路：<b id="ttd-w-linename">跟随上方设计器</b><select id="ttd-w-line" hidden aria-label="写入线路"></select></div>
+            <div class="ttd-write-form">
+              <label>写入模式
+                <select id="ttd-w-mode">
+                  <option value="uniform" selected>整线统一</option>
+                  <option value="perstop">逐站设置</option>
+                </select>
+              </label>
+              <label id="ttd-w-stop-wrap">停站时间<input id="ttd-w-stop" type="number" min="1" max="600" step="1" value="45"><span>秒</span></label>
+              <label class="ttd-w-out">输出文件名<input id="ttd-w-output" type="text" readonly></label>
+              <button class="primary-button" id="ttd-w-write">写入新存档</button>
+            </div>
+            <div class="ttd-w-perstop" id="ttd-w-perstop" hidden>
+              <div class="ttd-w-perstop-bar">
+                <span>逐站停站时间（秒）。留空＝继承线路默认。</span>
+                <span class="ttd-w-fill">
+                  <button type="button" class="text-button" data-fill="clear">全部清空</button>
+                  <button type="button" class="text-button" data-fill="default">全部填默认</button>
+                </span>
+              </div>
+              <div class="ttd-w-stoplist" id="ttd-w-stoplist"></div>
+            </div>
+            <div class="ttd-write-result" id="ttd-w-result" hidden></div>
+          </div>
+        </article>
+        <div class="section-intro" style="margin-top:6px">
+          <div><p class="eyebrow aqua">FLEET MIGRATION</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>
           <span class="phase-badge">能力 1–3</span>
         </div>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">智能匹配</p><h3>可执行的迁移方案</h3></div><span class="count-badge" id="pair-count">0</span></div>
-          <div id="pair-list" class="pair-list"><div class="placeholder">请先在“总览与体检”完成扫描。</div></div>
+          <div id="pair-list" class="pair-list"><div class="placeholder">迁移需要导出数据：请在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对后显示可执行方案。</div></div>
         </article>
         <article class="panel action-panel">
           <div>
@@ -369,7 +443,7 @@
         </article>
         <article class="panel" id="headway-panel">
           <div class="panel-heading"><div><p class="step">能力 04 · 已可用</p><h3>班距规划器（目标班距 → 所需车数）</h3></div><span class="phase-badge safe">零风险 · 建议</span></div>
-          <p class="repair-note">基于体检实测：每条线的<strong>单车循环时间 T = 当前班距 × 当前车数</strong>是与车数无关的常量（实档 35/35 精确成立）。设定目标班距后，工具算出各时刻表所需车数与增减量，供你在游戏内加/减车——不写任何存档。请先在“总览与体检”完成体检。</p>
+          <p class="repair-note">每条线的<strong>单车循环时间 T</strong> 与车数无关：默认从存档直读（T=循环时长、N=分配车数，<b>免 JSON</b>）；若做过“深度核对（需导出）”，则改用导出实测班距。设定目标班距后算出各时刻表所需车数与增减量，供你在游戏内加/减车——不写任何存档。请先在“总览与体检”完成一次体检。</p>
           <div class="headway-controls">
             <label>目标班距<input id="headway-target" type="number" min="0.5" max="240" step="0.5" value="5"><span>分钟</span></label>
             <label class="map-toggle"><input type="checkbox" id="headway-only-service" checked> 只看载客线路</label>
@@ -381,7 +455,7 @@
         </article>
         <article class="panel" id="recover-panel">
           <div class="panel-heading"><div><p class="step">模板恢复</p><h3>从历史导出恢复车队</h3></div><span class="phase-badge safe">安全重建</span></div>
-          <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史导出里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。请先在“总览与体检”完成体检。</p>
+          <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史导出里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。此功能依赖导出：请先在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对。</p>
           <div class="file-grid recover-grid">
             <label>目标模板（当前空白表）<select id="recover-target" aria-label="目标模板"></select></label>
             <button class="secondary-button" id="find-reference-btn">自动查找历史车队</button>
