@@ -32,6 +32,7 @@ from toolkit_binary import (  # noqa: E402
 
 SECONDS_PER_DAY = 86_400
 SECONDS_PER_WEEK = 7 * SECONDS_PER_DAY
+GARAGE_JOIN_SCRIPT_ID = "stm_timetable_garage_join_1"
 DAY_NAMES_ZH = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 DEFAULT_WORKERS = max(1, min(4, (os.cpu_count() or 2) - 1))
 _PROGRESS_FILE: Path | None = None
@@ -2804,8 +2805,22 @@ def extension_record_bounds(
 
 
 def ensure_extensions(
-    raw: bytes, objects: list[dict], target_train_ids: set[str]
+    raw: bytes,
+    objects: list[dict],
+    target_train_ids: set[str],
+    expected_script_id: str | None = None,
 ) -> tuple[bytes, dict]:
+    if expected_script_id is not None:
+        if expected_script_id != GARAGE_JOIN_SCRIPT_ID:
+            raise RuntimeError(
+                f"扩展 ID 不匹配：存档向量只对应 {GARAGE_JOIN_SCRIPT_ID}，"
+                f"不能写入 {expected_script_id}"
+            )
+        if expected_script_id.encode("utf-8") not in raw:
+            raise RuntimeError(
+                "存档内没有找到已启用的车库接班脚本定义。请先安装并启用 "
+                f"{GARAGE_JOIN_SCRIPT_ID}，进入游戏保存一次后再批量绑定。"
+            )
     selected, starts, ends = extension_record_bounds(raw, objects, target_train_ids)
     replacements = []
     already_enabled: list[str] = []
@@ -2849,6 +2864,7 @@ def ensure_extensions(
         "already_enabled_count": len(already_enabled),
         "changed_train_names": changed,
         "already_enabled_train_names": already_enabled,
+        "verified_script_id": expected_script_id,
     }
 
 
@@ -2979,7 +2995,9 @@ def command_migrate(args: argparse.Namespace) -> dict:
     )
     extension = None
     if args.garage_join:
-        patched, extension = ensure_extensions(patched, objects, set(train_ids))
+        patched, extension = ensure_extensions(
+            patched, objects, set(train_ids), GARAGE_JOIN_SCRIPT_ID
+        )
     return write_output(
         args.save,
         args.output,
@@ -3032,7 +3050,9 @@ def command_batch_migrate(args: argparse.Namespace) -> dict:
         )
     extension = None
     if args.garage_join:
-        patched, extension = ensure_extensions(patched, objects, all_train_ids)
+        patched, extension = ensure_extensions(
+            patched, objects, all_train_ids, GARAGE_JOIN_SCRIPT_ID
+        )
     return write_output(
         args.save,
         args.output,
@@ -3349,7 +3369,9 @@ def command_recover_template(args: argparse.Namespace) -> dict:
     )
     extension = None
     if args.garage_join:
-        patched, extension = ensure_extensions(patched, current_objects, set(train_ids))
+        patched, extension = ensure_extensions(
+            patched, current_objects, set(train_ids), GARAGE_JOIN_SCRIPT_ID
+        )
     return write_output(
         args.save,
         args.output,
@@ -3371,7 +3393,9 @@ def command_extension(args: argparse.Namespace) -> dict:
     preflight = validate_save_export(raw, objects)
     emit_progress("extension", 60, 100, "正在修改车库接班扩展…")
     if args.mode == "add":
-        patched, extension = ensure_extensions(raw, objects, set(train_ids))
+        patched, extension = ensure_extensions(
+            raw, objects, set(train_ids), args.script_id
+        )
     else:
         patched, extension = remove_extensions(raw, objects, set(train_ids))
     return write_output(
@@ -3464,7 +3488,9 @@ def command_repair(args: argparse.Namespace) -> dict:
     if args.garage_join:
         train_ids = train_ids_for_schedules(objects, schedule_names)
         emit_progress("repair", 72, 100, "正在核对车库接班扩展…")
-        patched, extension = ensure_extensions(patched, objects, set(train_ids))
+        patched, extension = ensure_extensions(
+            patched, objects, set(train_ids), GARAGE_JOIN_SCRIPT_ID
+        )
     emit_progress("repair", 88, 100, "正在压缩并反向校验新存档…")
     result = write_output(
         args.save,
@@ -3539,6 +3565,7 @@ def build_parser() -> argparse.ArgumentParser:
     extension.add_argument("--export", type=Path, required=True)
     extension.add_argument("--schedule", action="append", required=True)
     extension.add_argument("--mode", choices=("add", "remove"), required=True)
+    extension.add_argument("--script-id", default=GARAGE_JOIN_SCRIPT_ID)
     extension.add_argument("--output", type=Path, required=True)
     extension.add_argument("--level", type=int, default=3)
     repair = sub.add_parser("repair")

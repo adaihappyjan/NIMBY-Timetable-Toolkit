@@ -67,8 +67,36 @@ class VehicleGeneratorTests(unittest.TestCase):
     def test_invalid_tags_fall_back_to_valid_defaults(self) -> None:
         _, meta = build_vehicle_mod_zip({"role": "spaceship", "gauge": "weird", "power_type": "warp"})
         self.assertIn("commuter", meta["tags"])
-        self.assertIn("standard-gauge", meta["tags"])
+        self.assertIn("standard", meta["tags"])
         self.assertIn("electric", meta["tags"])
+
+    def test_advanced_units_compositions_and_physics(self) -> None:
+        _, meta = build_vehicle_mod_zip(
+            {
+                "model_id": "flex_train",
+                "model_name": "Flex Train",
+                "units": [
+                    {
+                        "id": "motor", "name_en": "Motor", "tags": ["control", "electric", "standard"],
+                        "length": 18, "width": 2.8, "max_speed": 160, "power": 1000,
+                        "empty_mass": 40000, "max_pax": 100, "max_acceleration": 1.2,
+                        "max_regular_braking": 1.1, "max_emergency_braking": 1.5,
+                        "max_tractive_effort": 180000, "pax_doors_per_side": 2,
+                    },
+                    {"id": "trailer", "name_en": "Trailer", "tags": ["coach", "standard"], "length": 20, "empty_mass": 30000, "max_pax": 150},
+                ],
+                "compositions": [
+                    {"id": "short", "name": "Short", "parts": [{"unit_id": "motor"}, {"unit_id": "trailer", "min": 1, "default": 2, "max": 4}, {"unit_id": "motor", "flip": True}]},
+                    {"id": "single", "name": "Single", "parts": [{"unit_id": "motor"}]},
+                ],
+            }
+        )
+        self.assertEqual(meta["unit_definitions"], 2)
+        self.assertEqual(len(meta["compositions"]), 2)
+        self.assertEqual(meta["physics"][0]["cars"], 4)
+        self.assertEqual(meta["physics"][0]["power_kw"], 2000)
+        self.assertIn("max_tractive_effort=180000", meta["mod_text"])
+        self.assertIn("composition=short,Short,motor,trailer 1 2 4,motor flip", meta["mod_text"])
 
 
 if __name__ == "__main__":

@@ -62,9 +62,10 @@ python -m pip install -r requirements.txt
 - **时刻表配置**：勾选智能匹配方案迁移到 Daily 模板；含均匀相位编排器、**班距规划器**与模板恢复。班距规划器基于实测规律 **线路班距 = 单车循环时间 ÷ 车数（`h = T/N`，实档 35/35 精确成立）**：设定目标班距即算出各时刻表所需车数与增减量（可导出 CSV），供你在游戏内加/减车——**零风险、绝不写存档**。
 - **自定义运营时刻表编辑器**（`toolkit_scheduleconfig.py`）：直接显示并编辑每张时刻表持久化的 Order ID（已有只读保留、新增自动分配）、Line、Timing（准确到达／准确发车／不迟于到达）、Enter/Exit/Timing 站点、时间、日期、重复、继续状态和偏移组。支持在后插入、游戏原生的嵌套“堆积”、智能班距序列生成、冲突/旧 selector 检查、批量平移、10 组独立编辑及 v2 方案导入导出；时间支持半秒精度与次日 24:00–48:00。受控 `ORDER_INSERT/STACK` 与 `TIMING` 存档锁定了变长记录、全局 Order 分配器和线路 selector 表；写入只创建新存档，带原值回环、目标重解析、其它时刻表零波及和压缩反读校验。
 - **车库接班**：按列车唯一 ID 批量加入或移除扩展，同名列车不会冲突。
-- **批量绑定**（批量扩展绑定器）：一次为多条线路/多张车队批量配置运营扩展——生成一个可加载的 private mod（车库接班 / 到站附加等待 / 信号前限速）与“逐对象启用清单”（可导出 JSON/CSV），并可把**已通过前后校验**的车库接班一次性写入新存档。只新建存档、绝不改写任意二进制字段。
-- **车辆工坊**：按官方 `schema=2` 生成**可直接加载的车辆模组**（`mod.txt` + 程序化占位贴图），可设编组、参数与涂装，之后随时替换美术。只生成模组文件，从不改动存档。
-- **脚本规则**：生成包含车库接班、到站附加等待和信号前限速的 private mod 压缩包。
+- **批量绑定**（批量扩展绑定器）：一次为多条线路/多张车队生成 private mod（车库接班 / 到站附加等待 / 信号前分段限速）与逐对象清单（JSON/CSV）。二进制批量绑定只接受已验证的固定脚本 ID `stm_timetable_garage_join_1`：会先核对该脚本定义确实存在于存档，遇到 ID 不符、模组未启用保存或未知扩展向量一律拒写；成功时也只创建新存档。
+- **车辆工坊**：按官方 `schema=2` 生成**可直接加载的车辆模组**。既有简易两端司机室表单，也有任意数量 `TrainUnit`、多套 `composition` 的高级 JSON 编辑器；覆盖加速度、制动、牵引力、功率、质量、载客、车门、联挂器和三类成本等完整字段。可只读扫描游戏内置、private mods 与 Steam 工坊，导入已有车型并检查重复引用、缺失贴图和 1024×128 尺寸；按游戏公开牵引公式预估满载性能和速度—加速度曲线。只生成新模组，从不改动来源或存档。
+- **脚本规则**：生成车库接班、到站附加等待和**有明确生效距离**的信号前限速 private mod；生成前静态检查 meta/API、结构与回调对应、花括号、高频事件日志和无距离前瞻限速，并返回完整源码预览。静态检查不是游戏编译器的替代品，最终仍需在游戏内启用验证。
+- **MCP Server**：`toolkit_mcp_server.py` 通过官方 MCP Python SDK v2 和本地 `stdio` 暴露 Order 结构说明、存档 Order List 只读检查、编辑/插入/堆积内存预演、新存档安全写入、车辆工坊扫描/生成和 NimbyScript 检查/生成。详见 [MCP Server 使用说明](docs/MCP_SERVER.md)。
 - **历史与性能**：并行盘点历史导出、版本对比、以及**存档差分实验室**（逐项对比线路/车站/站序/坐标变化）。
 - **清理与历史**：清楚显示现有副本、受保护副本、候选数量和可释放空间。
 - **开发路线**：按可靠性列出已可用、下一阶段和研究阶段功能。
@@ -241,7 +242,7 @@ NIMBY Rails 仍在更新行车时间模型。游戏升级、改轨、改停车�
 
 ## 开发与回归测试
 
-核心功能在 `toolkit_backend.py`，二进制存档解析在 `toolkit_binary.py`，运营规则读写在 `toolkit_scheduleconfig.py`，桌面界面入口在 `toolkit_webapp.py`（前端在 `web/`）。`NIMBY_Timetable_Toolkit.ps1` 为应急界面。自动测试位于 `tests`：
+核心功能在 `toolkit_backend.py`，二进制存档解析在 `toolkit_binary.py`，运营规则读写在 `toolkit_scheduleconfig.py`，车辆生成与物理预估在 `toolkit_vehiclegen.py`，已安装车辆只读扫描在 `toolkit_modcatalog.py`，NimbyScript 生成/静态检查在 `toolkit_scriptgen.py`，MCP 入口在 `toolkit_mcp_server.py`。桌面界面入口为 `toolkit_webapp.py`（前端在 `web/`），`NIMBY_Timetable_Toolkit.ps1` 为应急界面。自动测试位于 `tests`：
 
 ```powershell
 python -m unittest discover -s tests -v

@@ -1,6 +1,6 @@
-const APP_BUILD = '2026-08-21d';
+const APP_BUILD = '2026-08-21e';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
-const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
+const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -1500,7 +1500,7 @@ function renderBinderFleets() {
 }
 function selectedBinderLines() { return $$('.binder-line-check:checked').map(x => ({ id: x.value, name: x.dataset.name, code: x.dataset.code })); }
 async function generateBinderMod() {
-  const rules = { garage_join: $('#binder-garage').checked, arrival_hold: $('#binder-hold').checked, hold_seconds: +$('#binder-hold-s').value || 0, signal_speed_limit: $('#binder-speed').checked, speed_kmh: +$('#binder-speed-kmh').value || 40 };
+  const rules = { garage_join: $('#binder-garage').checked, arrival_hold: $('#binder-hold').checked, hold_seconds: +$('#binder-hold-s').value || 0, signal_speed_limit: $('#binder-speed').checked, speed_kmh: +$('#binder-speed-kmh').value || 40, speed_distance_m: +$('#binder-speed-distance').value || 800 };
   if (!rules.garage_join && !rules.arrival_hold && !rules.signal_speed_limit) { toast('请至少勾选一条规则', true); return; }
   const lines = selectedBinderLines();
   if ((rules.arrival_hold) && !lines.length) { toast('到站附加等待需要至少选择一条线路', true); return; }
@@ -1509,6 +1509,7 @@ async function generateBinderMod() {
   try {
     const res = await api('/api/script/generate', { method: 'POST', body: JSON.stringify(payload) });
     state.binderChecklist = buildBinderChecklist(rules, lines, res.meta);
+    state.binderBinding = res.meta.binding;
     renderBinderResult(res, rules, lines);
     toast('已生成绑定模组与启用清单');
   } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
@@ -1517,14 +1518,15 @@ function buildBinderChecklist(rules, lines, meta) {
   const sections = [];
   if (rules.garage_join) sections.push({ rule: 'Timetable garage join', apply_to: '列车', how: '在游戏中给相关列车启用；或用下方“批量车库接班·写入新存档”一次性绑定。', targets: [] });
   if (rules.arrival_hold) sections.push({ rule: `Arrival hold (+${rules.hold_seconds}s)`, apply_to: '线路停站 (Line::Stop)', how: '在游戏中打开每条线路，给需要的停站启用 Arrival hold 扩展。', targets: lines.map(l => l.name + (l.code ? ` (${l.code})` : '')) });
-  if (rules.signal_speed_limit) sections.push({ rule: `Signal speed limit (${rules.speed_kmh} km/h)`, apply_to: '信号 (Signal)', how: '在游戏中框选目标信号并启用 Signal speed limit 扩展，按需调节限速。', targets: [] });
+  if (rules.signal_speed_limit) sections.push({ rule: `Signal speed limit (${rules.speed_kmh} km/h · ${rules.speed_distance_m} m 内)`, apply_to: '信号 (Signal)', how: '在游戏中框选目标信号并启用 Signal speed limit 扩展，按需调节限速和生效距离。', targets: [] });
   return { mod_id: meta?.script_id, mod_name: meta?.display_name, generated: new Date().toISOString(), sections };
 }
 function renderBinderResult(res, rules, lines) {
   const el = $('#binder-result'); el.hidden = false;
   const cl = state.binderChecklist;
   const secHtml = cl.sections.map(s => `<div class="bind-sec"><div class="bind-sec-head"><strong>${escapeHtml(s.rule)}</strong><span>作用对象：${escapeHtml(s.apply_to)}</span></div><p>${escapeHtml(s.how)}</p>${s.targets.length ? `<div class="bind-targets">${s.targets.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}</div>`).join('');
-  el.innerHTML = `<div class="binder-dl"><a class="primary-button" href="${res.download_url}" download>下载模组 ZIP（${escapeHtml(res.meta.script_id)}）</a><button class="text-button" id="binder-export-json">导出清单 JSON</button><button class="text-button" id="binder-export-csv">导出清单 CSV</button></div><p class="plan-note">解压到 NIMBY Rails 的 private mods 目录并在游戏内启用模组，然后按下面的清单逐对象启用扩展。</p><div class="bind-list">${secHtml}</div>`;
+  const binding=res.meta.binding||{};
+  el.innerHTML = `<div class="binder-dl"><a class="primary-button" href="${res.download_url}" download>下载模组 ZIP（${escapeHtml(res.meta.script_id)}）</a><button class="text-button" id="binder-export-json">导出清单 JSON</button><button class="text-button" id="binder-export-csv">导出清单 CSV</button></div><p class="plan-note">解压到 NIMBY Rails 的 private mods 目录并在游戏内启用模组，然后按下面的清单逐对象启用扩展。</p><div class="script-safety"><strong>${binding.binary_write_supported?'可批量写入':'仅游戏内绑定'}</strong><p>${escapeHtml(binding.binary_write_supported?'该包是固定 ID 的纯车库接班规则；保存一次后可使用第三步。':binding.reason||'')}</p></div><div class="bind-list">${secHtml}</div>`;
   $('#binder-export-json').addEventListener('click', () => exportBinderChecklist('json'));
   $('#binder-export-csv').addEventListener('click', () => exportBinderChecklist('csv'));
 }
@@ -1546,7 +1548,8 @@ function binderWriteGarage() {
   const schedules = $$('.binder-fleet-check:checked').map(x => x.value);
   if (!schedules.length) { toast('请至少选择一张车队', true); return; }
   if (!$('#save-select').value || !$('#export-select').value) { toast('请先在“总览与体检”选择存档与导出并完成体检', true); return; }
-  startTask('extension', { save: $('#save-select').value, export: $('#export-select').value, output: $('#binder-output').value, schedules, mode: 'add' });
+  if (state.binderBinding && !state.binderBinding.binary_write_supported) { toast(state.binderBinding.reason || '当前模组不能用于二进制批量绑定', true); return; }
+  startTask('extension', { save: $('#save-select').value, export: $('#export-select').value, output: $('#binder-output').value, schedules, mode: 'add', script_id: 'stm_timetable_garage_join_1' });
 }
 
 $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-view]'); if(b) switchView(b.dataset.view); });
@@ -1725,7 +1728,7 @@ $('#planner-results').addEventListener('click',async e=>{const btn=e.target.clos
 $('#export-plan').addEventListener('click',()=>{if(!state.plan)calculatePlan();if(!state.plan)return;const blob=new Blob([JSON.stringify(state.plan,null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`${state.plan.name.replace(/[\\/:*?"<>|]/g,'_')}_plan.json`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),500);});
 function vehiclePayload(){
   const num=(id)=>Number($(id).value);
-  return {
+  const payload = {
     mod_name:$('#veh-mod-name').value, author:$('#veh-author').value, version:$('#veh-version').value,
     model_name:$('#veh-model-name').value, model_id:$('#veh-model-id').value,
     role:$('#veh-role').value, power_type:$('#veh-power-type').value, gauge:$('#veh-gauge').value,
@@ -1740,17 +1743,95 @@ function vehiclePayload(){
     middle_max_pax:num('#veh-middle-max-pax'), middle_standing_pax:num('#veh-middle-standing-pax'),
     body_color:$('#veh-body-color').value, window_color:$('#veh-window-color').value, door_color:$('#veh-door-color').value,
   };
+  if ($('#veh-advanced-enabled').checked) {
+    let advanced;
+    try { advanced = JSON.parse($('#veh-advanced-json').value || '{}'); }
+    catch (e) { throw new Error(`高级结构 JSON 无法解析：${e.message}`); }
+    if (!Array.isArray(advanced.units) || !advanced.units.length) throw new Error('高级结构至少需要一个 units 项');
+    payload.units = advanced.units;
+    payload.compositions = advanced.compositions;
+    if (advanced.tags) payload.tags = advanced.tags;
+  }
+  return payload;
 }
+function cleanVehicleId(value, fallback='custom_train') {
+  let id=String(value||'').trim().replace(/[^a-zA-Z0-9_]+/g,'_').replace(/^_+|_+$/g,'').toLowerCase() || fallback;
+  if (/^\d/.test(id)) id='t_'+id; return id.slice(0,48);
+}
+function currentAdvancedVehicle(){
+  const advanced=$('#veh-advanced-enabled').checked;$('#veh-advanced-enabled').checked=false;
+  let p;try{p={...vehiclePayload()};}finally{$('#veh-advanced-enabled').checked=advanced;}
+  const base=cleanVehicleId(p.model_id), cab=`${base}_cab`, car=`${base}_car`;
+  const common=(prefix,id,name,tags,cabEnds)=>({
+    id,name_en:name,category:p.model_name,tags,length:p[`${prefix}_length`],width:p[`${prefix}_width`],max_speed:p[`${prefix}_max_speed`],
+    max_acceleration:1,max_regular_braking:1,max_emergency_braking:1.4,max_tractive_effort:0,power:p[`${prefix}_power`],empty_mass:p[`${prefix}_empty_mass`],
+    price:p[`${prefix}_price`],max_pax:p[`${prefix}_max_pax`],standing_pax:p[`${prefix}_standing_pax`],pax_doors_per_side:2,
+    allow_player_composition:true,cost_per_km:0,cost_per_km_per_pax:.02,cost_per_day:prefix==='head'?400:300,
+    front_coupler:true,back_coupler:true,cab_ends:cabEnds
+  });
+  const units=[common('head',cab,`${p.model_name} cab car`,['control','sitting',p.power_type,p.gauge],'both')];
+  const parts=[{unit_id:cab}];
+  if(p.middle_enabled){units.push(common('middle',car,`${p.model_name} car`,['coach','sitting',p.gauge],'none'));parts.push({unit_id:car,min:p.middle_min,default:p.middle_def,max:p.middle_max});}
+  if(p.two_cabs)parts.push({unit_id:cab,flip:true});
+  return {units,compositions:[{id:`${base}_compo`,name:p.model_name,parts}]};
+}
+$('#veh-build-advanced').addEventListener('click',()=>{
+  try{$('#veh-advanced-json').value=JSON.stringify(currentAdvancedVehicle(),null,2);$('#veh-advanced-enabled').checked=true;toast('已转换，可直接增删车辆单元和编组');}catch(e){toast(e.message,true);}
+});
+async function scanVehicleCatalog(){
+  const button=$('#veh-scan-mods');button.disabled=true;
+  try{
+    const data=await api('/api/vehicle/catalog',{timeoutMs:60000});state.vehicleCatalog=data.catalog;
+    const t=data.catalog.totals;
+    $('#veh-catalog-summary').innerHTML=`发现 <strong>${t.mods}</strong> 个车辆模组 · ${t.units} 个 TrainUnit · ${t.models} 个车型 · ${t.compositions} 套编组 · ${t.duplicate_ids} 个跨模组重复 ID · <span class="${t.errors?'risk-critical':''}">${t.errors} 个错误</span> · ${t.warnings} 个提醒`;
+    $('#veh-catalog').innerHTML='<option value="">选择一个模组</option>'+data.catalog.mods.map(m=>`<option value="${m.token}">[${escapeHtml(m.kind)}] ${escapeHtml(m.name)} · ${m.model_count} 车型 / ${m.unit_count} 单元${m.issues.length?` · ${m.issues.length} 提醒`:''}</option>`).join('');
+    $('#veh-catalog-model').innerHTML='<option value="">先载入模组</option>';toast(`车辆库扫描完成：${t.mods} 个模组`);
+  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
+}
+async function loadVehicleCatalogMod(){
+  const token=$('#veh-catalog').value;if(!token){state.vehicleMod=null;return;}
+  try{const data=await api('/api/vehicle/import',{method:'POST',body:JSON.stringify({token}),timeoutMs:60000});state.vehicleMod=data.mod;
+    $('#veh-catalog-model').innerHTML='<option value="">选择车型</option>'+data.mod.models.map((m,i)=>`<option value="${i}">${escapeHtml(m.name)} · ${m.compositions.length} 编组</option>`).join('');
+    const errors=data.mod.issues.filter(x=>x.level==='error').length,warnings=data.mod.issues.length-errors;
+    $('#veh-catalog-summary').innerHTML=`<strong>${escapeHtml(data.mod.meta.name)}</strong> · ${data.mod.units.length} 单元 · ${data.mod.models.length} 车型 · ${errors} 错误 / ${warnings} 提醒`;
+  }catch(e){toast(e.message,true);}
+}
+function importVehicleModel(){
+  const mod=state.vehicleMod,index=Number($('#veh-catalog-model').value);if(!mod||!Number.isInteger(index)||!mod.models[index])return toast('请选择要导入的车型',true);
+  const model=mod.models[index],used=new Set(model.compositions.flatMap(c=>c.parts.map(p=>p.unit_id)));
+  const units=mod.units.filter(u=>used.has(u.id)).map(u=>{const copy={...u};delete copy.textures;return copy;});
+  $('#veh-mod-name').value=mod.meta.name;$('#veh-author').value=mod.meta.author||'Unknown';$('#veh-version').value=mod.meta.version||'1.0.0';
+  $('#veh-model-name').value=model.name;$('#veh-model-id').value=model.id;$('#veh-year').value=model.year_introduced||2000;$('#veh-country').value=(model.countries_operated||'').split(',')[0].toUpperCase();
+  const role=model.tags.find(t=>[...$('#veh-role').options].some(o=>o.value===t));if(role)$('#veh-role').value=role;
+  const power=model.tags.find(t=>[...$('#veh-power-type').options].some(o=>o.value===t));if(power)$('#veh-power-type').value=power;
+  const gauge=model.tags.find(t=>[...$('#veh-gauge').options].some(o=>o.value===t));if(gauge)$('#veh-gauge').value=gauge;
+  $('#veh-advanced-json').value=JSON.stringify({tags:model.tags,units,compositions:model.compositions},null,2);$('#veh-advanced-enabled').checked=true;
+  toast(`已导入 ${model.name}，原模组保持只读`);
+}
+$('#veh-scan-mods').addEventListener('click',scanVehicleCatalog);$('#veh-catalog').addEventListener('change',loadVehicleCatalogMod);$('#veh-import-model').addEventListener('click',importVehicleModel);
 $('#generate-vehicle').addEventListener('click',async()=>{
   try{
     const data=await api('/api/vehicle/generate',{method:'POST',body:JSON.stringify(vehiclePayload())});
     const link=document.createElement('a');link.href=data.download_url;link.download=`${data.meta.mod_id}.zip`;document.body.appendChild(link);link.click();link.remove();
     const m=data.meta;
-    $('#veh-preview').innerHTML=`<div class="veh-preview-head"><strong>${escapeHtml(m.model_name)}</strong><span class="verified-chip">${escapeHtml(m.tags)}</span></div><div class="veh-preview-meta">编组 ${m.units} 节 · 组成：<code>${escapeHtml(m.composition)}</code></div><pre class="veh-modtext">${escapeHtml(m.mod_text)}</pre>`;
+    const physics=m.physics.map(p=>`<div class="bind-sec"><div class="bind-sec-head"><strong>${escapeHtml(p.name)}</strong><span>${p.cars} 节 · ${p.length_m} m · ${p.max_pax} 人</span></div><p>${p.empty_mass_kg.toLocaleString()} kg 空载 · ${p.power_kw.toLocaleString()} kW · ${p.max_speed_kmh} km/h · ${p.max_acceleration_mps2} m/s²</p><small>加速度曲线：${p.acceleration_curve.map(x=>`${x.speed_kmh} km/h=${x.acceleration_mps2}`).join(' · ')}</small></div>`).join('');
+    const issues=m.issues.length?`<div class="script-safety"><strong>检查提醒（${m.issues.length}）</strong><p>${m.issues.map(x=>escapeHtml(x.message)).join('<br>')}</p></div>`:'<span class="verified-chip">结构检查通过</span>';
+    $('#veh-preview').innerHTML=`<div class="veh-preview-head"><strong>${escapeHtml(m.model_name)}</strong><span class="verified-chip">${escapeHtml(m.tags)}</span></div><div class="veh-preview-meta">${m.unit_definitions} 种车辆单元 · ${m.compositions.length} 套编组</div>${physics}${issues}<details><summary>查看生成的 mod.txt</summary><pre class="veh-modtext">${escapeHtml(m.mod_text)}</pre></details>`;
     toast(`车辆模组已生成：${m.model_name}`);
   }catch(e){toast(e.message,true);}
 });
-$('#generate-script').addEventListener('click',async()=>{try{const data=await api('/api/script/generate',{method:'POST',body:JSON.stringify({name:$('#script-name').value,id:$('#script-id').value,garage_join:$('#rule-garage').checked,arrival_hold:$('#rule-hold').checked,hold_seconds:+$('#rule-hold-seconds').value,signal_speed_limit:$('#rule-speed').checked,speed_kmh:+$('#rule-speed-kmh').value})});const link=document.createElement('a');link.href=data.download_url;link.download=`${data.meta.script_id}.zip`;document.body.appendChild(link);link.click();link.remove();toast(`规则包已生成：${data.meta.enabled_rules.join('、')}`);}catch(e){toast(e.message,true);}});
+$('#generate-script').addEventListener('click',async()=>{try{
+  const data=await api('/api/script/generate',{method:'POST',body:JSON.stringify({name:$('#script-name').value,id:$('#script-id').value,garage_join:$('#rule-garage').checked,arrival_hold:$('#rule-hold').checked,hold_seconds:+$('#rule-hold-seconds').value,signal_speed_limit:$('#rule-speed').checked,speed_kmh:+$('#rule-speed-kmh').value,speed_distance_m:+$('#rule-speed-distance').value})});
+  const link=document.createElement('a');link.href=data.download_url;link.download=`${data.meta.script_id}.zip`;document.body.appendChild(link);link.click();link.remove();
+  $('#script-expert-source').value=data.meta.source;renderScriptValidation(data.meta.validation,data.meta.source);
+  toast(`规则包已生成：${data.meta.enabled_rules.join('、')}`);
+}catch(e){toast(e.message,true);}});
+function renderScriptValidation(v,source=''){
+  const events=Object.entries(v.events||{}).map(([name,count])=>`${escapeHtml(name)} × ${count}`).join(' · ');
+  const diagnostics=[...(v.errors||[]),...(v.warnings||[])].map(x=>`<p>${escapeHtml(x.line?`第 ${x.line} 行：${x.message}`:x.message)}</p>`).join('');
+  $('#script-validation').innerHTML=`<div class="veh-preview-head"><strong>${v.valid?'静态校验通过':'校验失败'}</strong><span class="verified-chip">${v.errors.length} 错误 · ${v.warnings.length} 提醒</span></div><p>${events||'未识别事件'}</p>${diagnostics||'<p>没有发现已知风险。</p>'}${source?`<details><summary>查看完整 NimbyScript 源码</summary><pre class="veh-modtext">${escapeHtml(source)}</pre></details>`:''}`;
+}
+$('#validate-script-source').addEventListener('click',async()=>{const source=$('#script-expert-source').value;if(!source.trim())return toast('请先粘贴 NimbyScript 源码',true);try{const data=await api('/api/script/validate',{method:'POST',body:JSON.stringify({source})});renderScriptValidation(data.validation,source);toast(data.validation.valid?'源码静态检查通过':'源码存在需要修复的问题',!data.validation.valid);}catch(e){toast(e.message,true);}});
 $('#cancel-task').addEventListener('click',async()=>{await api('/api/task/cancel',{method:'POST',body:'{}'});finishTask();toast('任务已取消');});
 
 /* ===== Timetable Designer (自定义时刻表设计器) ===== */

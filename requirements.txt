@@ -4,3 +4,8 @@
 # 若系统缺少 WebView2 运行时或 pywebview 未安装，工具会自动退回到
 # “本地服务 + 默认浏览器”模式，功能不受影响。
 pywebview>=6.0
+
+# Official Model Context Protocol Python SDK v2. The MCP server uses local
+# stdio only and remains compatible with both the 2026-07-28 and legacy MCP
+# protocol revisions supported by the SDK.
+mcp>=2.0,<3.0

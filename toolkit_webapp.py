@@ -56,7 +56,8 @@ EXPORT_DIR = (_DOWNLOADS if _DOWNLOADS.is_dir() else Path.home()) / "NIMBY 线�
 
 sys.path.insert(0, str(ROOT))
 from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
-from toolkit_scriptgen import build_mod_zip  # noqa: E402
+from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E402
+from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
 
 
@@ -818,6 +819,8 @@ class TaskManager:
                 str(output),
                 "--mode",
                 mode,
+                "--script-id",
+                str(payload.get("script_id") or "stm_timetable_garage_join_1"),
             ]
             for schedule in schedules:
                 args.extend(("--schedule", str(schedule)))
@@ -919,11 +922,11 @@ CAPABILITIES = [
     {"rank": 3, "name": "时刻表编排器", "status": "available", "detail": "计算高峰/平峰间隔、均匀相位、跨午夜班次和最低车数"},
     {"rank": 4, "name": "NimbyScript 规则生成器", "status": "available", "detail": "生成车库接班、到站等待和信号限速 private mod"},
     {"rank": 5, "name": "运营分析与运营报告", "status": "available", "detail": "服务时段、班距均匀度、覆盖天数、车队规模 KPI，导出 CSV/JSON"},
-    {"rank": 6, "name": "车辆与资产模组制作器", "status": "available", "detail": "按官方 schema=2 生成可加载车辆模组（mod.txt + 占位贴图），含编组与参数"},
+    {"rank": 6, "name": "车辆工坊与模组体检", "status": "available", "detail": "任意 TrainUnit / 多编组生成，完整 schema=2 字段、物理曲线，以及内置/private/Steam 工坊只读扫描导入"},
     {"rank": 7, "name": "一键线路图", "status": "available", "detail": "按经纬度绘制单/多线路网图，支持八向示意图风格与 SVG 导出"},
     {"rank": 8, "name": "现实路网参考图", "status": "available", "detail": "叠加 OpenRailwayMap 与游戏路网，规划针本地存储、导出 GeoJSON/CSV"},
     {"rank": 9, "name": "存档差分实验室", "status": "available", "detail": "逐项对比两份导出的线路、车站、站序与坐标变化"},
-    {"rank": 10, "name": "批量扩展绑定器", "status": "available", "detail": "批量为线路/信号/车队生成运营扩展 mod 与逐对象启用清单，并可把已校验的车库接班批量写入新存档"},
+    {"rank": 10, "name": "NimbyScript 规则与安全绑定", "status": "available", "detail": "规则包、源码静态检查、距离限定信号限速；固定脚本 ID 与存档定义双重核验后才允许车库接班写入"},
     {"rank": 11, "name": "现实路网导入向导", "status": "available", "detail": "从 OSM 拉取真实线路与站序，生成复刻对照清单并导出 JSON/CSV，一键把站点加入规划针"},
 ]
 
@@ -986,6 +989,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route == "/api/task/status":
                 self.send_json({"ok": True, **TASKS.status()})
+                return
+            if route == "/api/vehicle/catalog":
+                self.send_json({"ok": True, "catalog": scan_vehicle_mods()})
                 return
             if route.startswith("/downloads/") and route.endswith(".zip"):
                 token = Path(route).name
@@ -1066,6 +1072,18 @@ class Handler(BaseHTTPRequestHandler):
                         "meta": meta,
                     }
                 )
+                return
+            if route == "/api/script/validate":
+                source = str(payload.get("source") or "")
+                if len(source) > 500_000:
+                    raise RuntimeError("脚本源码过大")
+                self.send_json({"ok": True, "validation": validate_script_source(source)})
+                return
+            if route == "/api/vehicle/import":
+                token = str(payload.get("token") or "")
+                if not re.fullmatch(r"[0-9a-f]{16}", token):
+                    raise RuntimeError("车辆模组标识无效")
+                self.send_json({"ok": True, "mod": get_vehicle_mod(token)})
                 return
             if route == "/api/vehicle/generate":
                 data, meta = build_vehicle_mod_zip(payload)

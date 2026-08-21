@@ -580,11 +580,11 @@
           <div class="binder-rules">
             <label class="map-toggle"><input type="checkbox" id="binder-garage" checked> 车库接班（Timetable garage join）</label>
             <label class="map-toggle"><input type="checkbox" id="binder-hold"> 到站附加等待 <input type="number" id="binder-hold-s" value="30" min="0" max="3600" step="5"> 秒</label>
-            <label class="map-toggle"><input type="checkbox" id="binder-speed"> 信号前限速 <input type="number" id="binder-speed-kmh" value="40" min="1" max="500" step="5"> km/h</label>
+            <label class="map-toggle"><input type="checkbox" id="binder-speed"> 信号前限速 <input type="number" id="binder-speed-kmh" value="40" min="1" max="500" step="5"> km/h · 距信号 <input type="number" id="binder-speed-distance" value="800" min="1" max="15000" step="50"> m 内</label>
           </div>
           <div class="binder-meta">
             <label>模组名称<input type="text" id="binder-name" value="批量运营扩展包" spellcheck="false"></label>
-            <label>模组 ID<input type="text" id="binder-id" placeholder="batch_ops_ext" spellcheck="false"></label>
+            <label>模组 ID<input type="text" id="binder-id" value="stm_timetable_garage_join_1" readonly spellcheck="false"><small>二进制绑定只允许已验证的固定 ID</small></label>
             <button class="primary-button" id="binder-generate">生成绑定模组 + 清单</button>
           </div>
           <div id="binder-result" class="binder-result" hidden></div>
@@ -612,6 +612,12 @@
           <div><p class="eyebrow aqua">ROLLING STOCK WORKSHOP</p><h2>车辆与资产模组制作器</h2><p>按官方 schema=2 生成可直接加载的车辆模组（mod.txt + 占位贴图）。填好参数即得一个可上路的车型，之后随时替换贴图美化。绝不改动存档。</p></div>
           <span class="phase-badge">能力 06 · 已可用</span>
         </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">只读导入</p><h3>已安装车辆与 Steam 工坊</h3></div><button class="text-button" id="veh-scan-mods">扫描车辆模组</button></div>
+          <p class="repair-note">读取游戏内置、private mods 与 Steam 工坊的 mod.txt，检查重复 ID、编组引用和 1024×128 贴图；不会改动原文件。游戏导出的 Train 记录不含车型/编组，因此这里不会假装从时刻表导出还原现役车辆配置。</p>
+          <div class="binder-meta"><label>选择模组<select id="veh-catalog"><option value="">尚未扫描</option></select></label><label>选择车型<select id="veh-catalog-model"><option value="">先载入模组</option></select></label><button class="secondary-button" id="veh-import-model">导入到高级编辑器</button></div>
+          <div id="veh-catalog-summary" class="placeholder">扫描后会显示模组、车辆单元、车型、编组和问题总数。</div>
+        </article>
         <div class="script-layout">
           <article class="panel script-builder">
             <p class="step">模组信息</p><h3>车型定义</h3>
@@ -632,14 +638,13 @@
                 <label>动力
                   <select id="veh-power-type">
                     <option value="electric" selected>电力 electric</option><option value="diesel">内燃 diesel</option>
-                    <option value="battery">电池 battery</option><option value="hydrogen">氢能 hydrogen</option>
-                    <option value="steam">蒸汽 steam</option><option value="cable">缆车 cable</option>
+                    <option value="steam">蒸汽 steam</option><option value="turbine">涡轮 turbine</option>
                   </select>
                 </label>
               </div>
               <div class="planner-row">
                 <label>轨距
-                  <select id="veh-gauge"><option value="standard-gauge" selected>标准轨</option><option value="narrow-gauge">窄轨</option><option value="broad-gauge">宽轨</option><option value="meter-gauge">米轨</option></select>
+                  <select id="veh-gauge"><option value="standard" selected>标准轨</option><option value="narrow">窄轨</option><option value="broad">宽轨</option><option value="minimum-gauge">最小轨距</option><option value="monorail">单轨</option><option value="maglev">磁悬浮</option><option value="tyres">胶轮</option></select>
                 </label>
                 <label>投产年份<input id="veh-year" type="number" min="1800" max="2100" value="2015"></label>
                 <label>国家代码<input id="veh-country" maxlength="2" placeholder="CN" value="CN"><small>ISO 两位</small></label>
@@ -652,7 +657,10 @@
                 <label class="rule-option"><input type="checkbox" id="veh-two-cabs" checked><span><strong>两端各一节司机室</strong><small>关闭则单端驾驶</small></span></label>
                 <label class="rule-option"><input type="checkbox" id="veh-middle-enabled" checked><span><strong>包含中间车</strong><small>关闭则只有司机室车</small></span></label>
               </div>
-              <div class="planner-row"><label>中间车最少<input id="veh-middle-min" type="number" min="0" max="30" value="1"></label><label>默认<input id="veh-middle-def" type="number" min="0" max="30" value="2"></label><label>最多<input id="veh-middle-max" type="number" min="1" max="30" value="6"></label></div>
+            <div class="planner-row"><label>中间车最少<input id="veh-middle-min" type="number" min="0" max="30" value="1"></label><label>默认<input id="veh-middle-def" type="number" min="0" max="30" value="2"></label><label>最多<input id="veh-middle-max" type="number" min="1" max="30" value="6"></label></div>
+              <label class="map-toggle"><input type="checkbox" id="veh-advanced-enabled"> 使用高级车辆结构（任意 TrainUnit / 多套编组）</label>
+              <button class="text-button" id="veh-build-advanced" type="button">把当前表单转换成高级结构</button>
+              <label>高级结构 JSON<textarea id="veh-advanced-json" rows="14" spellcheck="false" placeholder='{"units": [...], "compositions": [...]}'></textarea><small>可添加任意数量单元与 composition；启用后以此处为准。</small></label>
             </div>
 
             <p class="step">司机室车参数</p>
@@ -691,7 +699,7 @@
             <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">schema=2 TrainUnit</span></div>
             <ol class="install-steps"><li><b>1</b><span>下载并解压车辆包</span></li><li><b>2</b><span>把文件夹放进 NIMBY Rails 的 mods 目录</span></li><li><b>3</b><span>在游戏主菜单启用模组</span></li><li><b>4</b><span>购车时即可选到这个车型与编组</span></li></ol>
             <div class="veh-preview" id="veh-preview"><div class="placeholder">点“生成车辆模组压缩包”后，这里会显示编组与 mod.txt 预览。</div></div>
-            <div class="script-safety"><strong>安全边界</strong><p>只生成模组文件，从不修改存档。贴图是程序化占位（1024×128、34.13 px/m），可随时用真实美术替换。物理牵引仍由游戏按功率/质量模拟。</p></div>
+            <div class="script-safety"><strong>安全边界</strong><p>只生成模组文件，从不修改存档。贴图是程序化占位（1024×128、34.13 px/m）。预估使用游戏公开公式：牵引力取 0.75×功率/速度 与最大牵引力的较小值。</p></div>
           </article>
         </div>
       </section>
@@ -709,14 +717,16 @@
             <div class="rule-options">
               <label class="rule-option"><input type="checkbox" id="rule-garage" checked><span><strong>车库接班</strong><small>放宽接班位置匹配，不创建线路或绕过占用</small></span></label>
               <label class="rule-option"><input type="checkbox" id="rule-hold"><span><strong>到站附加等待</strong><small>在选定停站到达后增加等待时间</small></span><input class="inline-number" id="rule-hold-seconds" type="number" min="0" max="3600" value="30"><em>秒</em></label>
-              <label class="rule-option"><input type="checkbox" id="rule-speed"><span><strong>信号前限速</strong><small>在选定信号前方通过 lookahead 施加限速</small></span><input class="inline-number" id="rule-speed-kmh" type="number" min="1" max="500" value="40"><em>km/h</em></label>
+              <label class="rule-option speed-rule"><input type="checkbox" id="rule-speed"><span><strong>信号前分段限速</strong><small>只在指定距离内施加，避免从 15 km 前瞻位置立即压速</small></span><input class="inline-number" id="rule-speed-kmh" type="number" min="1" max="500" value="40"><em>km/h</em><input class="inline-number" id="rule-speed-distance" type="number" min="1" max="15000" value="800"><em>m 内</em></label>
             </div>
             <button class="primary-button full" id="generate-script">生成 private mod 压缩包</button>
           </article>
           <article class="panel script-preview">
             <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">官方 API 签名</span></div>
             <ol class="install-steps"><li><b>1</b><span>下载并解压规则包</span></li><li><b>2</b><span>把整个文件夹复制到 NIMBY Rails 的 private mods</span></li><li><b>3</b><span>在游戏中启用模组</span></li><li><b>4</b><span>只在需要的列车、停站或信号上启用扩展</span></li></ol>
-            <div class="script-safety"><strong>规则边界</strong><p>生成器不会创建轨道、时刻表或列车，也不能绕过原生进路检查。到站等待只能增加时间，不能让晚点列车提前发车。</p></div>
+            <details class="script-expert"><summary>专家源码静态检查</summary><label>粘贴或修改 NimbyScript<textarea id="script-expert-source" rows="12" spellcheck="false" placeholder="script meta { ... }"></textarea></label><button class="secondary-button" id="validate-script-source" type="button">检查这段源码</button></details>
+            <div id="script-validation" class="veh-preview"><div class="placeholder">生成后显示静态校验结果、事件和完整源码预览。</div></div>
+            <div class="script-safety"><strong>规则边界</strong><p>生成器不会创建轨道、时刻表或列车，也不能绕过原生进路检查。高频信号事件会检查日志和无距离限速；最终仍以游戏编译器为准。</p></div>
           </article>
         </div>
       </section>

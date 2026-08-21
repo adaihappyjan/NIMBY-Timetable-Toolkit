@@ -304,6 +304,20 @@ class BinaryRecordTests(unittest.TestCase):
         self.assertEqual(result["changed_train_names"], ["TTC 0162"])
         self.assertEqual(patched.count(binary.GARAGE_JOIN_VECTOR), 1)
 
+    def test_extension_write_rejects_missing_or_mismatched_script_definition(self) -> None:
+        train_a = {"class": "Train", "id": "0x5000000000031", "name": "TTC 0162"}
+        train_b = {"class": "Train", "id": "0x5000000000032", "name": "TTC 0163"}
+
+        def record(train: dict) -> bytes:
+            name = train["name"].encode("utf-8")
+            return binary.encoded_id(train["id"]) + binary.uvarint(0) + binary.uvarint(len(name)) + name + b"\x00"
+
+        raw = record(train_a) + record(train_b)
+        with self.assertRaisesRegex(RuntimeError, "没有找到已启用"):
+            backend.ensure_extensions(raw, [train_a, train_b], {train_a["id"]}, backend.GARAGE_JOIN_SCRIPT_ID)
+        with self.assertRaisesRegex(RuntimeError, "扩展 ID 不匹配"):
+            backend.ensure_extensions(raw, [train_a, train_b], {train_a["id"]}, "wrong_script")
+
 
 class GameVersionDetectionTests(unittest.TestCase):
     def test_supported_version(self) -> None:

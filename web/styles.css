@@ -156,7 +156,8 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 /* Vehicle workshop */
 .veh-form { display:grid; gap:12px; margin:6px 0 14px; }
 .veh-form>label { display:grid; gap:6px; color:var(--muted); font-size:11px; font-weight:700; }
-.veh-form label>input, .veh-form label>select { border:1px solid var(--line); background:#fbfcfc; border-radius:9px; padding:9px 10px; color:var(--ink); width:100%; }
+.veh-form label>input, .veh-form label>select, .veh-form label>textarea { border:1px solid var(--line); background:#fbfcfc; border-radius:9px; padding:9px 10px; color:var(--ink); width:100%; }
+.veh-form label>textarea { min-height:210px; resize:vertical; font:11px/1.55 ui-monospace,Consolas,monospace; tab-size:2; }
 .veh-form label>small { color:#96a5ab; font-weight:500; }
 .veh-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:6px 0 14px; }
 .veh-grid label { display:grid; gap:6px; color:var(--muted); font-size:11px; font-weight:700; }
@@ -287,7 +288,7 @@ main { grid-column: 2; padding: 26px 38px 70px; max-width: 1500px; width: 100%; 
 .binder-rules input[type=number] { width:78px; padding:6px 9px; border:1px solid var(--line); border-radius:8px; font-size:13px; }
 .binder-meta { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; }
 .binder-meta label { display:flex; flex-direction:column; gap:5px; font-size:11px; color:var(--muted); font-weight:700; flex:1; min-width:180px; }
-.binder-meta input { padding:9px 11px; border:1px solid var(--line); border-radius:9px; font-size:13px; }
+.binder-meta input, .binder-meta select { padding:9px 11px; border:1px solid var(--line); border-radius:9px; font-size:13px; background:var(--surface); color:var(--ink); }
 .binder-result { margin-top:16px; border-top:1px solid #eef2f2; padding-top:14px; }
 .binder-dl { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
 .binder-dl a.primary-button { text-decoration:none; display:inline-block; }
@@ -385,11 +386,11 @@ body { background:
 .text-button:hover { background:#16413d; color: var(--aqua); }
 /* inputs / selects / numbers */
 .file-grid select, .output-label input, .number-grid input,
-.script-builder>label input, .veh-form label>input, .veh-form label>select,
+.script-builder>label input, .veh-form label>input, .veh-form label>select, .veh-form label>textarea,
 .veh-grid input, .analytics-tools input[type="search"], .analytics-tools select,
 .realnet-tools select, .realnet-searchbar input[type="search"],
 .planner-form label>input, .save-dir-row input, .map-adv-grid input,
-.binder-meta input, .binder-rules input[type=number], .headway-controls input[type=number],
+.binder-meta input, .binder-meta select, .binder-rules input[type=number], .headway-controls input[type=number],
 .inline-number, .veh-color-row input[type="color"] {
   background: var(--surface-2); color: var(--ink); border-color: var(--line); }
 .file-grid select option, select option { background: var(--surface); color: var(--ink); }
@@ -658,3 +659,9 @@ kbd { background:var(--surface-2); border:1px solid var(--line); border-bottom-w
 .ttd-check-body ol { margin:6px 0 10px; padding-left:22px; display:flex; flex-direction:column; gap:7px; }
 .ttd-check-body li { color:var(--ink); font-size:13px; line-height:1.5; }
 .ttd-check-body li b { color:var(--aqua); }
+.rule-option.speed-rule { grid-template-columns:22px minmax(180px,1fr) 70px auto 82px auto; }
+.script-expert { margin:12px 0; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:var(--surface-2); }
+.script-expert summary { cursor:pointer; color:var(--ink); font-weight:700; }
+.script-expert label { display:grid; gap:6px; margin:10px 0; color:var(--muted); font-size:10px; }
+.script-expert textarea { min-height:180px; resize:vertical; border:1px solid var(--line); border-radius:8px; padding:9px; background:var(--surface); color:var(--ink); font:11px/1.5 ui-monospace,Consolas,monospace; }
+@media (max-width:640px) { .rule-option.speed-rule { grid-template-columns:22px 1fr 70px auto; } .rule-option.speed-rule>input:nth-of-type(3) { grid-column:3; } }
