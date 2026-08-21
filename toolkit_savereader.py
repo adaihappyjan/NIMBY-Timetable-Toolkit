@@ -613,6 +613,29 @@ class TrackGeometry:
     # each segment is [lon1, lat1, lon2, lat2] — a real drawn track polyline edge
     segments: list[list[float]] = field(default_factory=list)
     nodes: list[list[float]] = field(default_factory=list)  # [lon, lat] per node
+    level_counts: dict[int, int] = field(default_factory=dict)
+    variant_counts: dict[int, int] = field(default_factory=dict)
+    long_segment_count: int = 0
+    max_segment_length_m: float = 0.0
+    unresolved_connection_count: int = 0
+    nonreciprocal_connection_count: int = 0
+    distance_filtered_segment_count: int = 0
+    duplicate_record_count: int = 0
+    scan_bytes: int = 0
+
+
+@dataclass(frozen=True)
+class _TrackNode:
+    ident: int
+    lon: float
+    lat: float
+    connections: tuple[int | None, int | None]
+    variant: int
+    level_code: int
+    direction: int
+    heading: float
+    tangent_scale: float
+    position: int
 
 
 def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -627,39 +650,43 @@ def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
 
 def read_track_geometry(
     raw: bytes,
-    max_segment_m: float = 2000.0,
-    region_end: int = 6_500_000,
-    region_start: int = 170_000,
+    max_segment_m: float | None = None,
+    region_end: int | None = None,
+    region_start: int = 0,
 ) -> TrackGeometry:
-    """JSON-free real track geometry: the node graph the network is drawn from.
+    """Read the complete, JSON-free track graph from a decompressed save.
 
-    Every Track object (id high nibble ``0x1``) is a graph *node* with one Web
-    Mercator coordinate (same projection as stations), a small header
-    ``[00 <neighbour_count> 00 …]``, the ids of its neighbouring track nodes
-    (adjacency), and links to the station (0x2) / signals (0x3) it touches. We
-    walk record starts, map ``major_index -> (lon, lat)`` and draw an edge for
-    each neighbour whose coordinate is known. Segments longer than
-    ``max_segment_m`` are dropped as parse noise (real adjacent nodes sit tens of
-    metres apart; validated median 90 m, p90 ~470 m on the reference save).
+    A persisted drawn-track node has the observed shape::
 
-    Read-only. Returns node points + drawable segments + total track length.
+        TrackId 00 <variant> <level_code> <direction>
+        <nullable TrackId A> <nullable TrackId B>
+        00 00 00 00 00 <x:f64> <y:f64> <heading:f32> <tangent:f32>
+
+    ``level_code`` is an elevation/structure layer discriminator (0..5 in the
+    reference save), not yet a proven height in metres.  It must *not* be
+    assumed to be zero: doing so hides bridges, tunnels and most of a developed
+    network.  Connections use the complete object id, including the low
+    sub-index, and an edge is emitted only when both records reference each
+    other.  This prevents neighbour-id occurrences from being mistaken for
+    record starts.
+
+    By default the entire decompressed payload is scanned and no distance cap
+    is applied.  ``region_*`` and ``max_segment_m`` remain optional diagnostic
+    controls for tests and reverse-engineering.  The operation is read-only.
     """
-    n = len(raw)
-    stations = read_stations_from_raw(raw)
-    if not stations:
-        return TrackGeometry(0, 0, 0.0, [], [])
-    mxs = [lonlat_to_mercator(s.lon, s.lat) for s in stations]
-    xlo = min(x for x, _ in mxs) - 40_000
-    xhi = max(x for x, _ in mxs) + 40_000
-    ylo = min(y for _, y in mxs) - 40_000
-    yhi = max(y for _, y in mxs) + 40_000
+    import math
 
-    coord_of: dict[int, tuple[float, float]] = {}
-    neighbors: dict[int, list[int]] = {}
-    end = min(n - 20, region_end)
-    i = max(0, region_start)
+    n = len(raw)
+    start = max(0, region_start)
+    requested_end = n if region_end is None else max(start, region_end)
+    end = min(n, requested_end)
+    nodes_by_id: dict[int, _TrackNode] = {}
+    duplicate_records = 0
+    i = start
     while i < end:
         # Fast pre-filter: a track id is an 8-byte varint whose 8th byte == 0x1.
+        if i + 7 >= end:
+            break
         if raw[i + 7] != TYPE_TRACK:
             i += 1
             continue
@@ -668,63 +695,129 @@ def read_track_geometry(
             i += 1
             continue
         e = r[1]
-        # record-start header: [id][00 <neighbour_count<=12> 00 …]
-        if not (raw[e] == 0 and raw[e + 1] <= 12 and raw[e + 2] == 0):
+        if e + 4 > end:
+            break
+        # The third byte is a real structural/elevation layer, not padding.
+        if not (
+            raw[e] == 0
+            and raw[e + 1] in (2, 6)
+            and raw[e + 2] <= 31
+            and raw[e + 3] in (1, 255)
+        ):
             i += 1
             continue
-        own = (r[0] >> 16) & 0xFFFFFFFF
-        j = e
-        nbrs: list[int] = []
-        coord = None
-        limit = min(n - 16, e + 160)
-        while j < limit:
-            if raw[j + 7] in _HI and raw[j + 15] in _HI:
-                x = struct.unpack_from("<d", raw, j)[0]
-                y = struct.unpack_from("<d", raw, j + 8)[0]
-                if xlo < x < xhi and ylo < y < yhi:
-                    coord = mercator_to_lonlat(x, y)
-                    break
-            rr = _is_id(raw, j, {TYPE_TRACK})
-            if rr and rr[1] - j >= 7:
-                m = (rr[0] >> 16) & 0xFFFFFFFF
-                if m != own:
-                    nbrs.append(m)
-                j = rr[1]
+
+        j = e + 4
+        connections: list[int | None] = []
+        valid = True
+        for _ in range(2):
+            if j >= end:
+                valid = False
+                break
+            if raw[j] == 0:
+                connections.append(None)
+                j += 1
                 continue
-            j += 1
-        if coord is not None and own not in coord_of:
-            coord_of[own] = (round(coord[0], 6), round(coord[1], 6))
-            neighbors[own] = nbrs
+            rr = _is_id(raw, j, {TYPE_TRACK})
+            if not rr or rr[1] > end:
+                valid = False
+                break
+            connections.append(rr[0])
+            j = rr[1]
+        if not valid or j + 29 > end or raw[j:j + 5] != b"\x00" * 5:
+            i += 1
+            continue
+
+        j += 5
+        x, y = struct.unpack_from("<dd", raw, j)
+        heading, tangent_scale = struct.unpack_from("<ff", raw, j + 16)
+        # Global Web-Mercator limits avoid clipping remote track that has no
+        # nearby station, while the exact fixed record shape rejects noise.
+        if not (
+            math.isfinite(x) and math.isfinite(y)
+            and -20_100_000.0 <= x <= 20_100_000.0
+            and -20_100_000.0 <= y <= 20_100_000.0
+            and math.isfinite(heading) and -8.0 <= heading <= 8.0
+            and math.isfinite(tangent_scale) and 0.0 <= tangent_scale <= 4.0
+        ):
+            i += 1
+            continue
+
+        lon, lat = mercator_to_lonlat(x, y)
+        ident = r[0]
+        node = _TrackNode(
+            ident=ident,
+            lon=round(lon, 7),
+            lat=round(lat, 7),
+            connections=(connections[0], connections[1]),
+            variant=raw[e + 1],
+            level_code=raw[e + 2],
+            direction=raw[e + 3],
+            heading=heading,
+            tangent_scale=tangent_scale,
+            position=i,
+        )
+        if ident in nodes_by_id:
+            duplicate_records += 1
+        else:
+            nodes_by_id[ident] = node
         i = e
+
+    level_counts: dict[int, int] = {}
+    variant_counts: dict[int, int] = {}
+    for node in nodes_by_id.values():
+        level_counts[node.level_code] = level_counts.get(node.level_code, 0) + 1
+        variant_counts[node.variant] = variant_counts.get(node.variant, 0) + 1
 
     seen_edges: set[tuple[int, int]] = set()
     segments: list[list[float]] = []
     total = 0.0
-    for a, ns in neighbors.items():
-        pa = coord_of.get(a)
-        if not pa:
-            continue
-        for b in ns:
-            pb = coord_of.get(b)
-            if not pb:
+    unresolved_connections = 0
+    nonreciprocal_connections = 0
+    filtered_segments = 0
+    long_segments = 0
+    max_length = 0.0
+    for a, node in nodes_by_id.items():
+        for b in node.connections:
+            if b is None:
+                continue
+            other = nodes_by_id.get(b)
+            if other is None:
+                unresolved_connections += 1
+                continue
+            if a not in other.connections:
+                nonreciprocal_connections += 1
                 continue
             key = (a, b) if a < b else (b, a)
             if key in seen_edges:
                 continue
-            d = _haversine_m(pa[0], pa[1], pb[0], pb[1])
-            if d > max_segment_m or d < 1.0:  # drop degenerate/zero-length edges
-                continue
             seen_edges.add(key)
-            segments.append([pa[0], pa[1], pb[0], pb[1]])
+            d = _haversine_m(node.lon, node.lat, other.lon, other.lat)
+            if max_segment_m is not None and d > max_segment_m:
+                filtered_segments += 1
+                continue
+            if d > 2000.0:
+                long_segments += 1
+            max_length = max(max_length, d)
+            segments.append([node.lon, node.lat, other.lon, other.lat])
             total += d
 
-    nodes = [[lon, lat] for lon, lat in coord_of.values()]
+    nodes = [[node.lon, node.lat] for node in nodes_by_id.values()]
     return TrackGeometry(
-        node_count=len(coord_of),
+        node_count=len(nodes_by_id),
         segment_count=len(segments),
         total_length_m=round(total, 1),
         segments=segments,
         nodes=nodes,
+        level_counts=dict(sorted(level_counts.items())),
+        variant_counts=dict(sorted(variant_counts.items())),
+        long_segment_count=long_segments,
+        max_segment_length_m=round(max_length, 1),
+        unresolved_connection_count=unresolved_connections,
+        nonreciprocal_connection_count=nonreciprocal_connections,
+        distance_filtered_segment_count=filtered_segments,
+        duplicate_record_count=duplicate_records,
+        scan_bytes=max(0, end - start),
     )
 
 

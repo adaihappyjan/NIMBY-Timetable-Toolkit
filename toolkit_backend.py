@@ -1801,6 +1801,16 @@ def command_track_geometry(args: argparse.Namespace) -> dict:
         "node_count": geo.node_count,
         "segment_count": geo.segment_count,
         "total_length_km": round(geo.total_length_m / 1000.0, 1),
+        "level_counts": {str(k): v for k, v in geo.level_counts.items()},
+        "variant_counts": {str(k): v for k, v in geo.variant_counts.items()},
+        "long_segment_count": geo.long_segment_count,
+        "max_segment_length_km": round(geo.max_segment_length_m / 1000.0, 3),
+        "unresolved_connection_count": geo.unresolved_connection_count,
+        "nonreciprocal_connection_count": geo.nonreciprocal_connection_count,
+        "distance_filtered_segment_count": geo.distance_filtered_segment_count,
+        "duplicate_record_count": geo.duplicate_record_count,
+        "scan_bytes": geo.scan_bytes,
+        "full_payload_scan": geo.scan_bytes == len(raw),
         "segments": geo.segments,
     }
 

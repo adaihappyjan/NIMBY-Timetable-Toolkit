@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-21e';
+const APP_BUILD = '2026-08-21f';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null };
 const $ = (selector) => document.querySelector(selector);
@@ -882,7 +882,7 @@ function realnetDrawSignals() {
 }
 function realnetDrawTracks() {
   if (!REALNET.ready || !REALNET.map) return;
-  // Canvas renderer keeps ~15k polyline edges smooth (SVG would choke).
+  // Canvas renderer keeps a complete, developed save's ~20k edges smooth.
   if (!REALNET.trackRenderer) REALNET.trackRenderer = L.canvas({ padding: 0.5 });
   if (!REALNET.trackLayer) REALNET.trackLayer = L.layerGroup().addTo(REALNET.map);
   REALNET.trackLayer.clearLayers();
@@ -897,11 +897,25 @@ function realnetDrawTracks() {
 }
 function onTrackGeometry(result) {
   state.trackSegments = result.segments || [];
+  state.trackDiagnostics = result;
+  const levels = Object.entries(result.level_counts || {})
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([level, count]) => `L${level}:${count}`)
+    .join(' / ');
   const el = $('#realnet-read-count');
-  if (el) el.textContent = `真实轨道：${result.node_count} 节点 · ${result.segment_count} 段 · ${result.total_length_km} km`;
+  if (el) {
+    el.textContent = `真实轨道：${result.node_count} 节点 · ${result.segment_count} 段 · ${result.total_length_km} km`
+      + (levels ? ` · 层级 ${levels}` : '')
+      + (result.long_segment_count ? ` · 长连接 ${result.long_segment_count}` : '');
+  }
   const box = $('#realnet-show-tracks'); if (box && !box.checked) box.checked = true;
   if (REALNET.ready) realnetDrawTracks();
-  toast(`真实轨道直读完成：${result.node_count} 节点 / ${result.total_length_km} km`);
+  const issues = (result.unresolved_connection_count || 0)
+    + (result.nonreciprocal_connection_count || 0)
+    + (result.distance_filtered_segment_count || 0)
+    + (result.duplicate_record_count || 0);
+  toast(`真实轨道完整直读：${result.node_count} 节点 / ${result.segment_count} 段 / ${result.total_length_km} km`
+    + (issues ? `（诊断项 ${issues}）` : '（拓扑校验通过）'), !!issues);
 }
 function calcHeadwayPlan() {
   const targetMin = +$('#headway-target').value;

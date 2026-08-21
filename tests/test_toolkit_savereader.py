@@ -223,34 +223,78 @@ def test_read_tags(tmp_path):
     assert tags["0x192"].name == "linear" and tags["0x192"].parent == "0x191"
 
 
-def _track_node_bytes(major: int, lon: float, lat: float, neighbours: list[int]) -> bytes:
-    """One drawn-track graph node: id + [00 ncount 00] + neighbour ids + Mercator coord."""
-    b = _id_varint(sr.TYPE_TRACK, (major << 16) | 1)
-    b += b"\x00" + bytes([len(neighbours)]) + b"\x00"
-    for m in neighbours:
-        b += _id_varint(sr.TYPE_TRACK, (m << 16) | 1)
+def _track_seq(major: int, subindex: int = 1) -> int:
+    return (major << 16) | subindex
+
+
+def _track_node_bytes(
+    seq: int,
+    lon: float,
+    lat: float,
+    neighbours: list[int | None],
+    *,
+    variant: int = 2,
+    level: int = 0,
+    direction: int = 1,
+    heading: float = 0.0,
+    tangent_scale: float = 0.5,
+) -> bytes:
+    """One exact persisted Track record, including two nullable connections."""
+    assert len(neighbours) <= 2
+    b = _id_varint(sr.TYPE_TRACK, seq)
+    b += bytes([0, variant, level, direction])
+    for neighbour in neighbours + [None] * (2 - len(neighbours)):
+        b += b"\x00" if neighbour is None else _id_varint(sr.TYPE_TRACK, neighbour)
+    b += b"\x00" * 5
     x, y = ce.lonlat_to_mercator(lon, lat)
-    b += struct.pack("<dd", x, y)
+    b += struct.pack("<ddff", x, y, heading, tangent_scale)
     return b
 
 
 def test_read_track_geometry():
-    # Three track nodes A-B-C plus stations to seed the bounding box.
+    # A-B-C spans multiple structural/elevation layers. Neighbour ids embedded
+    # in records must not be misclassified as additional record starts.
+    a, b, c = _track_seq(1), _track_seq(2), _track_seq(3)
     raw = b"\x00" * 40
-    raw += _station_bytes(0x1, -79.3803, 43.6446, "A") + b"\x55" * 3
-    raw += _station_bytes(0x20001, -79.3790, 43.6455, "B") + b"\x55" * 3
-    raw += _station_bytes(0x30001, -79.3777, 43.6464, "C") + b"\x66" * 5
-    raw += _track_node_bytes(1, -79.3803, 43.6446, [2]) + b"\x11" * 3
-    raw += _track_node_bytes(2, -79.3790, 43.6455, [1, 3]) + b"\x11" * 3
-    raw += _track_node_bytes(3, -79.3777, 43.6464, [2]) + b"\x00" * 20
-    geo = sr.read_track_geometry(raw, region_start=0, region_end=len(raw))
+    raw += _track_node_bytes(a, -79.3803, 43.6446, [b], level=0) + b"\x11" * 3
+    raw += _track_node_bytes(b, -79.3790, 43.6455, [a, c], level=2) + b"\x11" * 3
+    raw += _track_node_bytes(c, -79.3777, 43.6464, [b], level=5) + b"\x00" * 20
+    geo = sr.read_track_geometry(raw)
     assert geo.node_count == 3
     assert geo.segment_count == 2          # A-B and B-C, deduped both directions
     assert geo.total_length_m > 0
+    assert geo.level_counts == {0: 1, 2: 1, 5: 1}
+    assert geo.unresolved_connection_count == 0
+    assert geo.nonreciprocal_connection_count == 0
+    assert geo.duplicate_record_count == 0
+    assert geo.scan_bytes == len(raw)
     # every segment is a real drawn edge between two known node coords
     for lon1, lat1, lon2, lat2 in geo.segments:
         assert -80 < lon1 < -79 and 43 < lat1 < 44
         assert -80 < lon2 < -79 and 43 < lat2 < 44
+
+
+def test_read_track_geometry_preserves_full_id_subindex():
+    # Low-16-bit subindices distinguish records that share one major id.
+    a, b = _track_seq(7, 1), _track_seq(7, 2)
+    raw = (_track_node_bytes(a, 10.0, 20.0, [b])
+           + _track_node_bytes(b, 10.001, 20.001, [a], direction=255))
+    geo = sr.read_track_geometry(raw)
+    assert geo.node_count == 2
+    assert geo.segment_count == 1
+
+
+def test_read_track_geometry_keeps_reciprocal_long_edges_by_default():
+    a, b = _track_seq(11), _track_seq(12)
+    raw = (_track_node_bytes(a, -79.38, 43.64, [b])
+           + _track_node_bytes(b, -79.30, 43.64, [a]))
+    complete = sr.read_track_geometry(raw)
+    capped = sr.read_track_geometry(raw, max_segment_m=2_000.0)
+    assert complete.segment_count == 1
+    assert complete.long_segment_count == 1
+    assert complete.max_segment_length_m > 2_000
+    assert capped.segment_count == 0
+    assert capped.distance_filtered_segment_count == 1
 
 
 def test_read_network(tmp_path):
