@@ -8,15 +8,44 @@
 
 ---
 
-双击 `启动工具箱.vbs`（或 `启动工具箱.cmd`）即可打开单窗口桌面 WebApp。界面由内置的本地服务提供，通过 pywebview 显示为一个原生窗口：关闭窗口即完整退出，不会残留后台进程，也不会保留黑色终端窗口。
+## 关于作者
+
+<p align="center">
+  <img src="web/assets/author-adaihappyjan.png" width="200" alt="adaihappyjan 的头像">
+</p>
+
+各位玩 NIMBY Rails 的大家好呀～这里是 adaihappyjan，叫我阿达就好啦！(≧▽≦)/
+
+最开始做这个小工具箱，其实只是因为我太懒了，不想每次都一个一个地把列车塞进时间段里……于是就借助 Cursor 搓了个小脚本出来 (´▽｀)
+
+结果后来在好多人的鼓励和建议下，它就这样一点一点长大，最后变成了现在这个综合工具箱！ヽ(✿ﾟ▽ﾟ)ノ
+
+目前工具箱里已经实装了几乎所有我能想到、并且自己很想要的功能～至于以后嘛，除了继续做我能想到的新东西，也会努力把大家提出的那些“我原本完全没想到还能这么玩”的功能加进去！(๑•̀ㅂ•́)و✧
+
+总之，真的非常感谢一路以来给我鼓励、建议和反馈的大家啦！能让这个原本只是为了偷懒而诞生的小工具，慢慢变成一个大家都能用上的工具箱，我真的超级开心～
+谢谢大家！(づ｡◕‿‿◕｡)づ ♡
+
+---
+
+## 下载与启动
+
+建议从 [Releases](https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit/releases) 下载名称含 `portable` 的便携包，完整解压后双击 `启动工具箱.cmd`。默认入口不再经过 Windows Script Host，不包含 VBS、PowerShell 或不便携的快捷方式；它只负责找到本机已安装的官方 Python 3，再启动工具箱。
+
+界面由内置的本地服务提供，通过 pywebview 显示为一个原生窗口：关闭窗口即完整退出，不会残留后台进程，也不会保留黑色终端窗口。
 
 界面与本地服务只监听 `127.0.0.1` 的随机端口，并校验请求来源，其他网页无法驱动本工具。若本机缺少 pywebview 或 Edge WebView2 运行时，工具会自动退回“本地服务 + 默认浏览器”模式，功能一致。
 
-首次使用请先安装依赖：
+运行必须有 Python 3.10 或更高版本；`pywebview` 仅用于原生单窗口体验，不安装时仍可使用默认浏览器。需要原生窗口时再安装：
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
+
+### Windows 11“智能应用控制”说明
+
+从 `v1.3.1` 起，便携包不再分发会被应用控制直接检查的 VBS/PowerShell 启动路径，改由 CMD 调用官方 Python；Release 同时提供 `SHA256SUMS.txt` 供下载完整性校验。若下载的 ZIP 在属性页显示“解除锁定”，请先确认文件来自本仓库的 Release、核对 SHA-256，再解除锁定并完整解压。
+
+这能避开旧版最容易触发拦截的 Windows Script Host 路径，但项目目前没有受信任的代码签名，因此无法承诺在所有开启 Smart App Control 的电脑上都必定放行。微软给出的彻底方案是通过 Microsoft Store 分发，或使用 Microsoft Trusted Root Program 中证书机构签发的 RSA 代码签名证书（参见 [Smart App Control 签名要求](https://learn.microsoft.com/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control) 与 [Windows 代码签名方案](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options)）。**不建议为了本工具关闭智能应用控制**；微软说明关闭后需要重置或重装 Windows 才能重新开启。
 
 旧的 PowerShell 界面（`NIMBY_Timetable_Toolkit.ps1`）仅作为应急入口保留，启动器已不再默认使用它。
 
@@ -39,6 +68,7 @@ python -m pip install -r requirements.txt
 - **历史与性能**：并行盘点历史导出、版本对比、以及**存档差分实验室**（逐项对比线路/车站/站序/坐标变化）。
 - **清理与历史**：清楚显示现有副本、受保护副本、候选数量和可释放空间。
 - **开发路线**：按可靠性列出已可用、下一阶段和研究阶段功能。
+- **关于作者**：认识工具箱作者 adaihappyjan（阿达），以及这个项目从“偷懒小脚本”一路长成综合工具箱的故事。
 
 ## 游戏版本自动适配
 

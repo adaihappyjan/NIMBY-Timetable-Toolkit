@@ -15,6 +15,7 @@ _bat.log
 
 # Generated mod/download outputs
 downloads/
+dist/
 *.zip
 
 # Player save files & game exports (never commit private saves)

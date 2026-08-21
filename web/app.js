@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-21c';
+const APP_BUILD = '2026-08-21d';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null };
 const $ = (selector) => document.querySelector(selector);
@@ -6,7 +6,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const viewMeta = {
   dashboard: ['CONTROL CENTER', '铁路运营总览'], analytics: ['OPERATIONS ANALYTICS', '运营分析'], map: ['TRANSIT MAP', '线路图'], realnet: ['REAL-WORLD REFERENCE', '现实路网参考图'], timetable: ['TIMETABLE STUDIO', '时刻表配置'],
-  extensions: ['DEPOT CONTROL', '车库接班管理'], binder: ['BATCH BINDER', '批量扩展绑定器'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线']
+  extensions: ['DEPOT CONTROL', '车库接班管理'], binder: ['BATCH BINDER', '批量扩展绑定器'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线'], author: ['MEET THE MAKER', '关于作者']
 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 function lineColor(raw) {

@@ -1,0 +1,54 @@
+name: Build portable release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, for example v1.3.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}" } else { "${{ inputs.version }}" }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run regression tests
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q tests
+
+      - name: Build Smart App Control friendly portable ZIP
+        run: python scripts/build_portable.py --version "$env:RELEASE_VERSION" --output dist
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$env:RELEASE_VERSION" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:RELEASE_VERSION" --target main --title "$env:RELEASE_VERSION" --generate-notes
+          }
+          $archive = Get-ChildItem -LiteralPath dist -Filter *.zip | Select-Object -First 1
+          if (-not $archive) { throw "Portable archive was not created" }
+          gh release upload "$env:RELEASE_VERSION" "$($archive.FullName)" "$(Resolve-Path 'dist/SHA256SUMS.txt')" --clobber
