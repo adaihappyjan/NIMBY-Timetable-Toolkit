@@ -140,7 +140,7 @@ python toolkit_coordedit.py set   "输入.nimbyrails5" "输出.nimbyrails5" "Tor
 - 历史盘点和自动查找历史车队支持多核并行；可以在“历史与性能”页选择进程数。
 - 真实文件基准：盘点 6 份导出时，1 个进程约 5.93 秒，4 个进程约 2.64 秒，提速约 2.25 倍。速度会随磁盘、文件大小和内存变化。
 - 单份存档的修改与写入仍保持串行，避免多个核心同时改同一文件。
-- 二进制解析与压缩支持已经收进工具箱目录，不再依赖开发时的 `work` 文件夹。整个文件夹可复制到别处使用；换机时只需保证目标机有 Python 与 `libzstd.dll`：把 64 位 `libzstd.dll` 放到工具箱目录、或设置环境变量 `NIMBY_LIBZSTD` 指向它、或安装 64 位 Git for Windows 均可被自动识别。
+- 二进制解析与压缩支持已经收进工具箱目录，不再依赖开发时的 `work` 文件夹。Windows 便携包已内置并校验官方 64 位 `libzstd.dll`，整个解压后的文件夹可直接复制到别处使用，不再要求用户额外安装 Git for Windows 或自行寻找 DLL。
 
 ## 五个功能页
 
@@ -256,9 +256,9 @@ python -m unittest discover -s tests -v
 
 ## 依赖与环境
 
-- Windows 10/11 + Python 3.10 及以上（macOS / Linux 亦可运行，见下方“存档目录”说明）。
+- Windows 10/11 + **64 位** Python 3.10 及以上（macOS / Linux 亦可运行，见下方“存档目录”说明）。
 - 桌面单窗口依赖 `pywebview`（见 `requirements.txt`）；缺少时自动退回“本地服务 + 默认浏览器”模式。
-- 二进制存档解压需要 64 位 `libzstd.dll`（放到工具箱目录、设 `NIMBY_LIBZSTD` 环境变量，或安装 64 位 Git for Windows 均可）。
+- Windows Release 已内置官方 zstd v1.5.7 64 位运行库，并在启动前实际加载检查；请完整解压，不要只复制启动文件。源码运行或其他系统仍可用 `NIMBY_LIBZSTD` 指定系统 zstd 库。
 - **现实路网**页需要联网（加载地图组件、瓦片与 Overpass 数据）；其余功能全部本地运行。
 
 ```powershell

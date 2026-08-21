@@ -13,5 +13,7 @@ and attribution requirements, including:
 - Base maps — © OpenStreetMap contributors (ODbL) / © CARTO
 - Railway overlays — © OpenRailwayMap (CC-BY-SA 2.0)
 - Geocoding & station data — © OpenStreetMap (Nominatim / Overpass)
+- Zstandard v1.5.7 runtime — Copyright (c) Meta Platforms, Inc. and affiliates
+  (BSD license; see third_party/zstd/LICENSE)
 
 Please comply with each service's usage terms and attribution requirements.

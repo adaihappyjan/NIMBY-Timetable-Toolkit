@@ -25,37 +25,54 @@ def find_zstd_library() -> str:
     if override and Path(override).is_file():
         return override
 
-    here = Path(__file__).resolve().parent
-    user_profile = Path(os.environ.get("USERPROFILE", str(Path.home())))
-    program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-    program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-    candidates = [
-        # Portable: drop libzstd.dll next to the toolkit and it just works.
-        here / "libzstd.dll",
-        Path(sys.executable).resolve().parent / "libzstd.dll",
-        user_profile
-        / ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/mingw64/bin/libzstd.dll",
-        Path(sys.executable).resolve().parents[1] / "native/git/mingw64/bin/libzstd.dll",
-        program_files / "Git/mingw64/bin/libzstd.dll",
-        program_files / "Git/usr/bin/libzstd.dll",
-        program_files_x86 / "Git/mingw64/bin/libzstd.dll",
-        program_files_x86 / "Git/usr/bin/libzstd.dll",
-    ]
+    candidates: list[Path] = []
+    if os.name == "nt":
+        here = Path(__file__).resolve().parent
+        user_profile = Path(os.environ.get("USERPROFILE", str(Path.home())))
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        candidates = [
+            # Every official Windows portable release ships this verified AMD64 DLL.
+            here / "libzstd.dll",
+            Path(sys.executable).resolve().parent / "libzstd.dll",
+            user_profile
+            / ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/mingw64/bin/libzstd.dll",
+            Path(sys.executable).resolve().parents[1] / "native/git/mingw64/bin/libzstd.dll",
+            program_files / "Git/mingw64/bin/libzstd.dll",
+            program_files / "Git/usr/bin/libzstd.dll",
+            program_files_x86 / "Git/mingw64/bin/libzstd.dll",
+            program_files_x86 / "Git/usr/bin/libzstd.dll",
+        ]
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
     discovered = ctypes.util.find_library("zstd") or ctypes.util.find_library("libzstd")
     if discovered:
         return discovered
+    if os.name == "nt":
+        raise RuntimeError(
+            "未找到 libzstd.dll。官方便携包应当自带此文件；请重新下载完整 ZIP、完整解压，"
+            "并保持 libzstd.dll 与 toolkit_binary.py 在同一目录。高级用户也可设置 "
+            "NIMBY_LIBZSTD 指向兼容的 64 位运行库。"
+        )
     raise RuntimeError(
-        "未找到 libzstd.dll。请把 64 位 libzstd.dll 放到工具箱目录（与 toolkit_binary.py 同级），"
-        "或设置环境变量 NIMBY_LIBZSTD 指向它，或安装 64 位 Git for Windows。"
+        "未找到系统 zstd 共享库。请通过系统包管理器安装 libzstd，或设置环境变量 "
+        "NIMBY_LIBZSTD 指向兼容的共享库。"
     )
 
 
 class Zstd:
     def __init__(self, dll_path: str | Path | None = None) -> None:
-        self.lib = ctypes.CDLL(str(dll_path or find_zstd_library()))
+        selected = str(dll_path or find_zstd_library())
+        try:
+            self.lib = ctypes.CDLL(selected)
+        except OSError as exc:
+            hint = (
+                "请确认正在使用 64 位 Python，并重新下载、完整解压官方便携包。"
+                if os.name == "nt"
+                else "请安装与当前系统架构匹配的 libzstd。"
+            )
+            raise RuntimeError(f"无法加载 zstd 运行库 {selected}。{hint}") from exc
         self.lib.ZSTD_getFrameContentSize.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
         self.lib.ZSTD_getFrameContentSize.restype = ctypes.c_ulonglong
         self.lib.ZSTD_decompress.argtypes = [
