@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +59,16 @@ from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
 from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E402
 from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
+from toolkit_updater import (  # noqa: E402
+    check_for_updates,
+    launch_update_helper,
+    prepare_update,
+    read_current_version,
+    read_update_result,
+)
+
+
+APP_VERSION = read_current_version(ROOT)
 
 
 def read_settings() -> dict:
@@ -68,6 +78,7 @@ def read_settings() -> dict:
         "keep": 5,
         "workers": max(1, min(4, (os.cpu_count() or 2) - 1)),
         "save_dir": "",
+        "auto_check_updates": True,
     }
     try:
         stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
@@ -79,6 +90,9 @@ def read_settings() -> dict:
         "keep": stored.get("keep", stored.get("Keep")),
         "workers": stored.get("workers", stored.get("Workers")),
         "save_dir": stored.get("save_dir", stored.get("SaveDir")),
+        "auto_check_updates": stored.get(
+            "auto_check_updates", stored.get("AutoCheckUpdates")
+        ),
     }
     for key, value in aliases.items():
         if value is not None:
@@ -88,12 +102,13 @@ def read_settings() -> dict:
     defaults["keep"] = max(1, min(50, int(defaults["keep"])))
     defaults["workers"] = max(1, min(32, int(defaults["workers"])))
     defaults["save_dir"] = str(defaults.get("save_dir") or "")
+    defaults["auto_check_updates"] = bool(defaults["auto_check_updates"])
     return defaults
 
 
 def write_settings(settings: dict) -> dict:
     current = read_settings()
-    for key in ("enabled", "days", "keep", "workers", "save_dir"):
+    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates"):
         if key in settings:
             current[key] = settings[key]
     current["enabled"] = bool(current["enabled"])
@@ -101,6 +116,7 @@ def write_settings(settings: dict) -> dict:
     current["keep"] = max(1, min(50, int(current["keep"])))
     current["workers"] = max(1, min(32, int(current["workers"])))
     current["save_dir"] = str(current.get("save_dir") or "")
+    current["auto_check_updates"] = bool(current["auto_check_updates"])
     SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
     partial = SETTINGS_FILE.with_suffix(".json.partial")
     partial.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -914,6 +930,8 @@ TASKS = TaskManager()
 LAST_PING = time.monotonic()
 HAD_CLIENT = False
 STARTUP_CLEANUP: dict | None = None
+STARTUP_UPDATE_RESULT: dict | None = None
+UPDATE_LOCK = threading.Lock()
 
 
 CAPABILITIES = [
@@ -928,7 +946,14 @@ CAPABILITIES = [
     {"rank": 9, "name": "存档差分实验室", "status": "available", "detail": "逐项对比两份导出的线路、车站、站序与坐标变化"},
     {"rank": 10, "name": "NimbyScript 规则与安全绑定", "status": "available", "detail": "规则包、源码静态检查、距离限定信号限速；固定脚本 ID 与存档定义双重核验后才允许车库接班写入"},
     {"rank": 11, "name": "现实路网导入向导", "status": "available", "detail": "从 OSM 拉取真实线路与站序，生成复刻对照清单并导出 JSON/CSV，一键把站点加入规划针"},
+    {"rank": 12, "name": "安全自动更新", "status": "available", "detail": "启动自动检查 GitHub Release，软件内下载、SHA-256/逐文件校验、失败回滚并自动重启"},
 ]
+
+
+def _terminate_for_update() -> None:
+    """Let the HTTP response reach the UI, then release loaded DLLs for helper."""
+    time.sleep(1.5)
+    os._exit(0)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -964,7 +989,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         global HAD_CLIENT, LAST_PING
-        route = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        route = parsed.path
         try:
             if route == "/api/bootstrap":
                 files = recent_files()
@@ -983,9 +1009,21 @@ class Handler(BaseHTTPRequestHandler):
                         "settings": settings,
                         "cleanup": preview,
                         "startup_cleanup": STARTUP_CLEANUP,
+                        "app_version": APP_VERSION,
+                        "update_supported": not (ROOT / ".git").exists(),
+                        "update_result": STARTUP_UPDATE_RESULT,
                         "capabilities": CAPABILITIES,
                     }
                 )
+                return
+            if route == "/api/update/check":
+                query = parse_qs(parsed.query)
+                force = query.get("force", ["0"])[0] in ("1", "true", "yes")
+                update = check_for_updates(
+                    APP_VERSION, SETTINGS_DIR, force=force
+                )
+                update["install_supported"] = not (ROOT / ".git").exists()
+                self.send_json({"ok": True, "update": update})
                 return
             if route == "/api/task/status":
                 self.send_json({"ok": True, **TASKS.status()})
@@ -1032,6 +1070,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if route == "/api/settings":
                 self.send_json({"ok": True, "settings": write_settings(payload)})
+                return
+            if route == "/api/update/install":
+                if TASKS.is_running():
+                    raise RuntimeError("有存档任务正在运行，请等待任务完成后再更新")
+                if not UPDATE_LOCK.acquire(blocking=False):
+                    raise RuntimeError("更新已经在下载或安装中")
+                try:
+                    prepared = prepare_update(
+                        ROOT,
+                        SETTINGS_DIR,
+                        APP_VERSION,
+                        expected_version=str(payload.get("version") or ""),
+                    )
+                    result = launch_update_helper(
+                        prepared,
+                        ROOT,
+                        SETTINGS_DIR,
+                        parent_pid=os.getpid(),
+                        python_executable=sys.executable,
+                    )
+                finally:
+                    UPDATE_LOCK.release()
+                threading.Thread(target=_terminate_for_update, daemon=True).start()
+                self.send_json({"ok": True, "update": result})
                 return
             if route == "/api/config/save-dir":
                 if payload.get("detect"):
@@ -1121,7 +1183,7 @@ class Handler(BaseHTTPRequestHandler):
             html = data.decode("utf-8")
             html = html.replace('href="/styles.css"', f'href="/styles.css?v={ASSET_VERSION}"')
             html = html.replace('src="/app.js"', f'src="/app.js?v={ASSET_VERSION}"')
-            html = html.replace("仅在本机运行", f"仅在本机运行 · v{ASSET_VERSION}")
+            html = html.replace("仅在本机运行", f"仅在本机运行 · v{APP_VERSION}")
             data = html.encode("utf-8")
         if content_type.startswith("text/") or content_type in ("application/javascript", "application/json"):
             content_type += "; charset=utf-8"
@@ -1257,7 +1319,7 @@ def run_desktop_window(app_url: str, server: ThreadingHTTPServer) -> bool:
 
 
 def main() -> None:
-    global STARTUP_CLEANUP
+    global STARTUP_CLEANUP, STARTUP_UPDATE_RESULT
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--headless", action="store_true", help="仅运行本地服务，不打开任何窗口")
@@ -1266,6 +1328,7 @@ def main() -> None:
     SAVE_DIR = resolve_save_dir()
     purge_stale_task_files()
     STARTUP_CLEANUP = safe_startup_cleanup()
+    STARTUP_UPDATE_RESULT = read_update_result(SETTINGS_DIR, consume=True)
 
     server = make_server()
     actual_port = int(server.server_address[1])

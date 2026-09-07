@@ -1,6 +1,6 @@
-const APP_BUILD = '2026-08-21f';
+const APP_BUILD = '2026-08-21g';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
-const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null };
+const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null, update: null };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -78,8 +78,69 @@ async function loadBootstrap() {
   $('#cleanup-enabled').checked = data.settings.enabled; $('#cleanup-days').value = data.settings.days; $('#cleanup-keep').value = data.settings.keep;
   state.cleanup = data.cleanup; renderCleanup(); renderRoadmap(data.capabilities);
   renderSaveDir(data.save_status);
+  const updateAuto = $('#update-auto-check'); if (updateAuto) updateAuto.checked = data.settings.auto_check_updates !== false;
+  const updateLabel = $('#update-label'); if (updateLabel) updateLabel.textContent = `v${data.app_version || '—'} · 检查更新`;
+  if (data.update_result?.ok) toast(`工具箱已从 v${data.update_result.from_version} 更新到 v${data.update_result.to_version}`);
+  else if (data.update_result && !data.update_result.ok) toast(`自动更新失败，已回滚旧版本：${data.update_result.error || '未知错误'}`, true);
   if (data.startup_cleanup?.error) toast(`启动清理未完成：${data.startup_cleanup.error}`, true);
   else if (data.startup_cleanup?.result?.moved_file_count) toast(`启动清理已将 ${data.startup_cleanup.result.moved_group_count} 组过期副本移入回收站`);
+  if (data.settings.auto_check_updates !== false) setTimeout(() => checkToolkitUpdate(false), 900);
+}
+
+function renderToolkitUpdate(update) {
+  state.update = update;
+  const button = $('#update-check'), label = $('#update-label'), banner = $('#update-banner');
+  button?.classList.toggle('available', !!update.available);
+  if (label) label.textContent = update.available ? `v${update.latest_version} 可更新` : `v${update.current_version} · 已是最新`;
+  if (!update.available) { if (banner) banner.hidden = true; return; }
+  $('#update-title').textContent = `发现工具箱 v${update.latest_version}`;
+  $('#update-detail').textContent = `当前 v${update.current_version} · ${formatBytes(update.asset_size)} · 下载后校验、替换并自动重启`;
+  const notes = String(update.notes || '').trim();
+  const notesBox = $('#update-notes-box'); notesBox.hidden = !notes;
+  if (notes) $('#update-notes').textContent = notes;
+  const install = $('#update-install');
+  install.disabled = !update.install_supported;
+  install.textContent = update.install_supported ? '下载并重启更新' : '源码目录请用 Git 更新';
+  banner.hidden = false;
+}
+
+async function checkToolkitUpdate(force = false) {
+  const button = $('#update-check');
+  if (button?.classList.contains('checking')) return;
+  button?.classList.add('checking'); if (button) button.disabled = true;
+  try {
+    const result = await api(`/api/update/check${force ? '?force=1' : ''}`, { timeoutMs: 25000 });
+    renderToolkitUpdate(result.update);
+    if (force && !result.update.available) toast(`当前 v${result.update.current_version} 已是最新版本`);
+  } catch (error) {
+    if (force) toast(`检查更新失败：${error.message}`, true);
+  } finally {
+    button?.classList.remove('checking'); if (button) button.disabled = false;
+  }
+}
+
+async function installToolkitUpdate() {
+  const update = state.update;
+  if (!update?.available || !update.install_supported) return;
+  if (!confirm(`将从 v${update.current_version} 更新到 v${update.latest_version}。\n\n软件会下载官方便携包，校验 SHA-256 与逐文件清单，然后关闭、替换并自动重新打开。存档和个人设置不会被修改。是否继续？`)) return;
+  const install = $('#update-install'), dismiss = $('#update-dismiss'), check = $('#update-check');
+  install.disabled = true; dismiss.disabled = true; check.disabled = true;
+  install.textContent = '正在下载并校验…';
+  $('#update-detail').textContent = '正在从官方 Release 下载；校验完成后软件会自动重启，请勿重复打开。';
+  try {
+    const result = await api('/api/update/install', {
+      method: 'POST',
+      body: JSON.stringify({ version: update.latest_version }),
+      timeoutMs: 120000,
+    });
+    install.textContent = '校验通过，正在重启…';
+    $('#update-detail').textContent = `已验证 ${result.update.file_count} 个文件与 SHA-256，正在安全替换并重启。`;
+  } catch (error) {
+    install.disabled = false; dismiss.disabled = false; check.disabled = false;
+    install.textContent = '重试下载并更新';
+    $('#update-detail').textContent = `更新没有开始：${error.message}`;
+    toast(`更新失败：${error.message}`, true);
+  }
 }
 function renderSaveDir(info) {
   if (!info) return;
@@ -2532,6 +2593,19 @@ $('#oprule-import')?.addEventListener('change',event=>opruleImportPlan(event.tar
 $('#oprule-write')?.addEventListener('click',opruleWrite);
 $('#save-select')?.addEventListener('change',()=>{OPR.groups=[];OPR.original=null;OPR.draft=null;OPR.dirty=false;OPR.baseSave=null;const sel=$('#oprule-schedule');if(sel){sel.disabled=true;sel.innerHTML='<option value="">请重新读取</option>';}const ed=$('#oprule-editor');if(ed)ed.hidden=true;opruleRefreshOutput();});
 window.addEventListener('resize',()=>requestAnimationFrame(opruleLayoutTimeline));
+
+$('#update-check')?.addEventListener('click', () => checkToolkitUpdate(true));
+$('#update-install')?.addEventListener('click', installToolkitUpdate);
+$('#update-dismiss')?.addEventListener('click', () => { $('#update-banner').hidden = true; });
+$('#update-auto-check')?.addEventListener('change', async event => {
+  try {
+    await api('/api/settings', { method: 'POST', body: JSON.stringify({ auto_check_updates: event.target.checked }) });
+    toast(event.target.checked ? '已开启启动时自动检查更新' : '已关闭自动检查；仍可随时手动检查');
+  } catch (error) {
+    event.target.checked = !event.target.checked;
+    toast(error.message, true);
+  }
+});
 
 setInterval(()=>fetch(`/api/ping?_=${Date.now()}`,{cache:'no-store'}).catch(()=>{}),5000);
 loadBootstrap().catch(e=>toast(e.message,true));

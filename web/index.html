@@ -43,9 +43,22 @@
         </div>
         <div class="top-actions">
           <span class="local-chip">● 仅在本机运行</span>
+          <button class="update-chip" id="update-check" type="button" title="检查工具箱更新"><span class="update-dot">↻</span><span id="update-label">检查更新</span></button>
           <button class="icon-button" id="refresh-files" title="刷新文件">↻</button>
         </div>
       </header>
+
+      <aside class="update-banner" id="update-banner" role="status" hidden>
+        <div class="update-banner-icon">↑</div>
+        <div class="update-banner-copy">
+          <strong id="update-title">发现新版本</strong>
+          <small id="update-detail">可直接在软件内安全下载并安装。</small>
+          <details id="update-notes-box" hidden><summary>查看版本说明</summary><pre id="update-notes"></pre></details>
+        </div>
+        <label class="update-auto"><input id="update-auto-check" type="checkbox" checked> 启动时自动检查</label>
+        <button class="text-button" id="update-dismiss" type="button">稍后</button>
+        <button class="primary-button" id="update-install" type="button">下载并重启更新</button>
+      </aside>
 
       <section class="view active" id="view-dashboard">
         <div class="hero-grid">

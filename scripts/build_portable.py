@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -16,10 +18,12 @@ FIXED_FILES = (
     "LICENSE",
     "NOTICE",
     "requirements.txt",
+    "VERSION",
     "libzstd.dll",
 )
 DIRECTORIES = ("web", "docs", "third_party")
 FORBIDDEN_SUFFIXES = {".vbs", ".ps1", ".lnk", ".exe", ".msi"}
+MANIFEST_NAME = ".toolkit-manifest.json"
 
 
 def validate_zstd_runtime(path: Path) -> None:
@@ -58,13 +62,36 @@ def portable_files(root: Path = ROOT) -> list[Path]:
 
 def build_portable(version: str, output_dir: Path, root: Path = ROOT) -> tuple[Path, Path]:
     clean_version = version.strip() or "dev"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", clean_version):
+        raise ValueError("version contains unsafe path characters")
+    package_version = clean_version[1:] if re.fullmatch(r"v\d+\.\d+\.\d+", clean_version) else clean_version
     folder_name = f"NIMBY-Timetable-Toolkit-{clean_version}"
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / f"NIMBY-Timetable-Toolkit-portable-{clean_version}.zip"
+    entries: dict[str, bytes] = {}
+    for path in portable_files(root):
+        relative = path.relative_to(root).as_posix()
+        entries[relative] = (
+            f"{package_version}\n".encode("utf-8")
+            if relative == "VERSION"
+            else path.read_bytes()
+        )
+    manifest = {
+        "schema": 1,
+        "version": package_version,
+        "files": {
+            relative: {
+                "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+            for relative, data in sorted(entries.items())
+        },
+    }
+    manifest_data = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for path in portable_files(root):
-            relative = path.relative_to(root)
-            archive.write(path, Path(folder_name) / relative)
+        for relative, data in sorted(entries.items()):
+            archive.writestr(f"{folder_name}/{relative}", data)
+        archive.writestr(f"{folder_name}/{MANIFEST_NAME}", manifest_data)
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     checksum_path = output_dir / "SHA256SUMS.txt"
     checksum_path.write_text(f"{digest} *{archive_path.name}\n", encoding="utf-8", newline="\n")

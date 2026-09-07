@@ -31,6 +31,8 @@
 
 建议从 [Releases](https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit/releases) 下载名称含 `portable` 的便携包，完整解压后双击 `启动工具箱.cmd`。默认入口不再经过 Windows Script Host，不包含 VBS、PowerShell 或不便携的快捷方式；它只负责找到本机已安装的官方 Python 3，再启动工具箱。
 
+**从 v1.5.0 起内置安全自动更新。** 旧版本用户只需最后手动下载并完整解压一次 v1.5.0；以后启动时会自动检查新 Release，发现新版后直接在软件顶部点击“下载并重启更新”，无需再打开 GitHub。工具会校验官方仓库来源、Release 版本、ZIP SHA-256 和逐文件清单，等待当前进程退出后替换；失败会回滚旧文件并重新打开。存档和个人设置不在软件目录中，不参与更新。源码/Git 工作区不会被自动覆盖。
+
 界面由内置的本地服务提供，通过 pywebview 显示为一个原生窗口：关闭窗口即完整退出，不会残留后台进程，也不会保留黑色终端窗口。
 
 界面与本地服务只监听 `127.0.0.1` 的随机端口，并校验请求来源，其他网页无法驱动本工具。若本机缺少 pywebview 或 Edge WebView2 运行时，工具会自动退回“本地服务 + 默认浏览器”模式，功能一致。
@@ -52,6 +54,7 @@ python -m pip install -r requirements.txt
 ## 功能页一览
 
 - **总览与体检**：选择存档和即时导出、查看健康分、严重问题与完整匹配状态，并显示自动识别的**游戏版本**（见下）。另含 **JSON-free 结构总览**：无需导出，直接从存档二进制直读并显示站/线/信号/车/时刻表/**标签分类**数、每张时刻表的分配列车数、色块与**单程运行时间**；以及 **JSON-free 逐站时刻表直读**：还原每条线路逐站到/发时刻与停站时长（时间以 0.5 秒精度存档，已用导出逐条校验，32/37 条线路含大部分地铁线精确到秒）。读取器已优化到秒级。
+- **安全自动更新**：默认每 6 小时至多联网检查一次最新 GitHub Release；软件内一键下载、校验、关闭、替换并重启。校验覆盖固定官方仓库、精确资产名、版本号、SHA-256、ZIP 路径和每个文件的大小/摘要；安装前逐文件备份，异常则完整回滚。可在更新提示中关闭“启动时自动检查”，也可随时手动检查。详见 [自动更新安全设计](docs/AUTO_UPDATE.md)。
 - **运营分析**：从导出 JSON 计算服务时段、班距均匀度、覆盖天数、车队规模等 KPI，可导出 CSV/JSON 报告（只读）。
 - **JSON-free 运营估算（仅用存档体检）**：无需导出即可估算各线**班距**——基于实测规律 `h ≈ 单程循环时长 T ÷ 车数 N`（T、N 均从二进制直读）。因未计折返/层停，估算略偏小，实测**中位误差约 3.5%–5%、多数线路在 10% 以内**；若提供导出则作**只读真值护栏**逐条对账并显示误差与命中率；填目标班距还能规划各线**所需车数**。所有结果明确标注为“估算”。注：发车时刻/精确班距/覆盖天数由游戏运行时按规则展开、**不入档**，无法仅凭存档精确复现（详见 `docs/BINARY_FORMAT.md` §8.14）。
 - **线路图**：按车站经纬度绘制单/多线路网图，自动识别换乘站；支持**地理示意 / 八向示意图（地铁图）/ 单线条形图（地铁贴纸）**三种风格，站名自动避让不重叠，可导出 SVG。线路颜色按游戏内配色（ABGR）还原。高级选项可自定义**标签字号、画布宽高、线路粗细、站点大小、站间距**并可一键重置。
@@ -141,6 +144,7 @@ python toolkit_coordedit.py set   "输入.nimbyrails5" "输出.nimbyrails5" "Tor
 - 真实文件基准：盘点 6 份导出时，1 个进程约 5.93 秒，4 个进程约 2.64 秒，提速约 2.25 倍。速度会随磁盘、文件大小和内存变化。
 - 单份存档的修改与写入仍保持串行，避免多个核心同时改同一文件。
 - 二进制解析与压缩支持已经收进工具箱目录，不再依赖开发时的 `work` 文件夹。Windows 便携包已内置并校验官方 64 位 `libzstd.dll`，整个解压后的文件夹可直接复制到别处使用，不再要求用户额外安装 Git for Windows 或自行寻找 DLL。
+- 便携版加入应用内自动更新：自动检查官方 Release，一键下载并重启；每个发行包都生成 `.toolkit-manifest.json`，安装前同时验证 Release 校验和与全部文件摘要，替换失败会逐文件回滚。
 
 ## 五个功能页
 
@@ -242,7 +246,7 @@ NIMBY Rails 仍在更新行车时间模型。游戏升级、改轨、改停车�
 
 ## 开发与回归测试
 
-核心功能在 `toolkit_backend.py`，二进制存档解析在 `toolkit_binary.py`，运营规则读写在 `toolkit_scheduleconfig.py`，车辆生成与物理预估在 `toolkit_vehiclegen.py`，已安装车辆只读扫描在 `toolkit_modcatalog.py`，NimbyScript 生成/静态检查在 `toolkit_scriptgen.py`，MCP 入口在 `toolkit_mcp_server.py`。桌面界面入口为 `toolkit_webapp.py`（前端在 `web/`），`NIMBY_Timetable_Toolkit.ps1` 为应急界面。自动测试位于 `tests`：
+核心功能在 `toolkit_backend.py`，二进制存档解析在 `toolkit_binary.py`，运营规则读写在 `toolkit_scheduleconfig.py`，车辆生成与物理预估在 `toolkit_vehiclegen.py`，已安装车辆只读扫描在 `toolkit_modcatalog.py`，NimbyScript 生成/静态检查在 `toolkit_scriptgen.py`，安全自动更新在 `toolkit_updater.py`，MCP 入口在 `toolkit_mcp_server.py`。桌面界面入口为 `toolkit_webapp.py`（前端在 `web/`），`NIMBY_Timetable_Toolkit.ps1` 为应急界面。自动测试位于 `tests`：
 
 ```powershell
 python -m unittest discover -s tests -v

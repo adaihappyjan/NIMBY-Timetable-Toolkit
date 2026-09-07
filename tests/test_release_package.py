@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import zipfile
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -26,9 +27,31 @@ class PortableReleaseTests(unittest.TestCase):
             self.assertIn(prefix + "launcher.bat", names)
             self.assertIn(prefix + "web/assets/author-adaihappyjan.png", names)
             self.assertIn(prefix + "libzstd.dll", names)
+            self.assertIn(prefix + "VERSION", names)
+            self.assertIn(prefix + "toolkit_updater.py", names)
+            self.assertIn(prefix + ".toolkit-manifest.json", names)
             self.assertIn(prefix + "third_party/zstd/LICENSE", names)
             self.assertIn(prefix + "third_party/zstd/SOURCE.md", names)
             self.assertTrue(checksum.read_text(encoding="utf-8").endswith(f" *{archive.name}\n"))
+
+    def test_archive_manifest_covers_and_hashes_every_packaged_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive, _ = build_portable("v1.5.0", Path(temp_dir))
+            with zipfile.ZipFile(archive) as bundle:
+                prefix = "NIMBY-Timetable-Toolkit-v1.5.0/"
+                manifest = json.loads(bundle.read(prefix + ".toolkit-manifest.json"))
+                actual = {
+                    name[len(prefix):]
+                    for name in bundle.namelist()
+                    if not name.endswith("/") and name != prefix + ".toolkit-manifest.json"
+                }
+                self.assertEqual(manifest["version"], "1.5.0")
+                self.assertEqual(set(manifest["files"]), actual)
+                for relative, expected in manifest["files"].items():
+                    data = bundle.read(prefix + relative)
+                    self.assertEqual(expected["size"], len(data))
+                    self.assertEqual(expected["sha256"], hashlib.sha256(data).hexdigest())
+                self.assertEqual(bundle.read(prefix + "VERSION"), b"1.5.0\n")
 
     def test_archive_contains_verified_amd64_zstd_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

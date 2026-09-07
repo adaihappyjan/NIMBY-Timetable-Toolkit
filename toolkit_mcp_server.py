@@ -21,7 +21,7 @@ from toolkit_vehiclegen import build_vehicle_mod_zip
 
 
 SERVER_NAME = "nimby-rails-toolkit"
-SERVER_VERSION = "1.4.3"
+SERVER_VERSION = "1.5.0"
 
 
 def order_structure_schema() -> dict:
