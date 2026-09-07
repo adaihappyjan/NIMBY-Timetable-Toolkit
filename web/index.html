@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#071827">
   <title>NIMBY Rails 运营工作台</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/studio.css">
 </head>
 <body>
   <div class="app-shell">
@@ -16,6 +17,8 @@
       </div>
       <nav id="main-nav" aria-label="主要功能">
         <button class="nav-item active" data-view="dashboard"><span>⌂</span>总览与体检</button>
+        <button class="nav-item" data-view="workspace"><span>▦</span>线路工作台</button>
+        <button class="nav-item" data-view="learn"><span>?</span>教程中心</button>
         <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
         <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
@@ -42,6 +45,7 @@
           <h1 id="view-title">铁路运营总览</h1>
         </div>
         <div class="top-actions">
+          <button class="secondary-button" id="open-tutorial" type="button">操作教程</button>
           <span class="local-chip">● 仅在本机运行</span>
           <button class="update-chip" id="update-check" type="button" title="检查工具箱更新"><span class="update-dot">↻</span><span id="update-label">检查更新</span></button>
           <button class="icon-button" id="refresh-files" title="刷新文件">↻</button>
@@ -845,5 +849,7 @@
     </div>
   </div>
   <script src="/app.js"></script>
+  <script src="/workspace.js"></script>
+  <script src="/tutorial.js"></script>
 </body>
 </html>

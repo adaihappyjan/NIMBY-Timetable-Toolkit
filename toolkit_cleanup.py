@@ -8,11 +8,11 @@ from typing import Iterable
 
 
 TOOL_COPY_RE = re.compile(
-    r"_(Toolkit|Extension|Recovery|Repair)_(\d{8}_\d{6})\.nimbyrails5$",
+    r"_(Toolkit|Extension|Recovery|Repair|Workspace)_(\d{8}_\d{6})\.nimbyrails5$",
     re.IGNORECASE,
 )
 TOOL_PARTIAL_RE = re.compile(
-    r"_(Toolkit|Extension|Recovery|Repair)_(\d{8}_\d{6})\.nimbyrails5\.partial$",
+    r"_(Toolkit|Extension|Recovery|Repair|Workspace)_(\d{8}_\d{6})\.nimbyrails5\.partial$",
     re.IGNORECASE,
 )
 

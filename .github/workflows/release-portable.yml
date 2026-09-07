@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,8 +31,12 @@ jobs:
       - name: Resolve version
         shell: pwsh
         run: |
-          $version = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}" } else { "${{ inputs.version }}" }
+          $version = $env:REQUESTED_VERSION
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') { throw "Invalid release tag" }
+          if ((Get-Content VERSION -Raw).Trim() -ne $version.Substring(1)) { throw "VERSION differs from release tag" }
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+        env:
+          REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
 
       - name: Run regression tests
         run: |
@@ -47,8 +53,12 @@ jobs:
         run: |
           gh release view "$env:RELEASE_VERSION" *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create "$env:RELEASE_VERSION" --target main --title "$env:RELEASE_VERSION" --generate-notes
+            gh release create "$env:RELEASE_VERSION" --verify-tag --draft --title "$env:RELEASE_VERSION" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "Release creation failed" }
           }
           $archive = Get-ChildItem -LiteralPath dist -Filter *.zip | Select-Object -First 1
           if (-not $archive) { throw "Portable archive was not created" }
           gh release upload "$env:RELEASE_VERSION" "$($archive.FullName)" "$(Resolve-Path 'dist/SHA256SUMS.txt')" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Release upload failed" }
+          gh release edit "$env:RELEASE_VERSION" --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "Release publication failed" }

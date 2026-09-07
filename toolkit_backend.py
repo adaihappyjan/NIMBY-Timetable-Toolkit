@@ -2011,6 +2011,8 @@ def command_timetable_write(args: argparse.Namespace) -> dict:
 def command_operating_rules(args: argparse.Namespace) -> dict:
     """Read persisted timetable orders and all ten offset distributions."""
     import toolkit_scheduleconfig as scheduleconfig
+    from toolkit_workspace import fingerprint
+    source_mark = fingerprint(Path(args.save))
 
     emit_progress("oprules", 10, 100, "正在直读时刻表运营规则…")
     _header, frame, _frame_offset = split_save(args.save)
@@ -2037,8 +2039,11 @@ def command_operating_rules(args: argparse.Namespace) -> dict:
         for line in operating_lines
     ]
     emit_progress("oprules", 100, 100, f"已读取 {len(rows)} 组运营规则")
+    if fingerprint(Path(args.save)) != source_mark:
+        raise RuntimeError('读取期间存档已更新，请重试')
     return {
         "action": "operating-rules",
+        "fingerprint": source_mark,
         "save": str(args.save),
         "group_count": len(rows),
         "groups": rows,
@@ -2053,6 +2058,11 @@ def command_operating_rules(args: argparse.Namespace) -> dict:
 def command_operating_rule_write(args: argparse.Namespace) -> dict:
     """Write one verified operating-rule group into a NEW save."""
     import toolkit_scheduleconfig as scheduleconfig
+    from toolkit_workspace import fingerprint
+    source_mark = fingerprint(Path(args.save))
+    expected = getattr(args, 'expected_fingerprint', None)
+    if expected and expected != source_mark:
+        raise RuntimeError('存档已变化，请重新读取此表后再写入；旧草稿仍保留。')
 
     entry_updates: dict[int, dict[str, float | int | bool | None]] = {}
     for item in args.entry or []:
@@ -2137,6 +2147,8 @@ def command_operating_rule_write(args: argparse.Namespace) -> dict:
             "stacked instructions", "10 offset distributions",
         ],
     }
+    if fingerprint(Path(args.save)) != source_mark:
+        raise RuntimeError('处理期间存档发生变化，已停止写入')
     return write_output(
         args.save, args.output, header, raw, new_raw, manifest, frame_offset, args.level,
     )
@@ -3528,6 +3540,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress-file", type=Path)
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     sub = parser.add_subparsers(dest="command", required=True)
+    workspace = sub.add_parser('workspace')
+    workspace.add_argument('--request-file', type=Path, required=True)
     scan = sub.add_parser("scan")
     scan.add_argument("--export", type=Path, required=True)
     analyze = sub.add_parser("analyze")
@@ -3638,6 +3652,7 @@ def build_parser() -> argparse.ArgumentParser:
     operating_write.add_argument("--save", type=Path, required=True)
     operating_write.add_argument("--output", type=Path, required=True)
     operating_write.add_argument("--schedule", required=True, help="时刻表 id 或名称")
+    operating_write.add_argument('--expected-fingerprint')
     operating_write.add_argument(
         "--entry", action="append", default=[],
         help="运营项 index=seconds,days_mask（days_mask 可写 0x1f）",
@@ -3677,7 +3692,13 @@ def main() -> None:
     args.workers = max(1, min(32, args.workers))
     configure_progress(args.progress_file)
     try:
-        if args.command == "scan":
+        if args.command == 'workspace':
+            from toolkit_workspace import dispatch
+            # Dispatch imports this module by name, while CLI entry is __main__.
+            import toolkit_backend as workspace_backend
+            workspace_backend.configure_progress(args.progress_file)
+            result = dispatch(json.loads(args.request_file.read_text('utf-8')), args.workers)
+        elif args.command == "scan":
             result = scan_export(args.export)
         elif args.command == "analyze":
             result = analyze_save(args.save, args.export)

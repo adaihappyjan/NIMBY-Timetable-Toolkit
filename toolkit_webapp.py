@@ -59,6 +59,7 @@ from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
 from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E402
 from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
+from toolkit_workspace import project_state, atomic_store, parse_log
 from toolkit_updater import (  # noqa: E402
     check_for_updates,
     launch_update_helper,
@@ -292,7 +293,7 @@ def file_info(path: Path) -> dict:
         "size": stat.st_size,
         "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         "tool_generated": any(
-            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_")
+            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_", "_Workspace_")
         ),
     }
 
@@ -398,6 +399,27 @@ class TaskManager:
         self.task: dict | None = None
 
     def _build_args(self, action: str, payload: dict) -> list[str]:
+        if action == 'workspace':
+            operation = payload.get('operation')
+            if operation not in {'catalog', 'pair', 'batch', 'audit', 'corridor', 'accounting'}:
+                raise RuntimeError('工作台操作无效')
+            request = dict(payload)
+            request['_cache_dir'] = str(TASK_DIR)
+            if operation in {'catalog', 'pair', 'batch', 'audit'}:
+                request['save'] = str(validate_input_path(payload.get('save', ''), '.nimbyrails5'))
+            if operation == 'audit':
+                request['export'] = str(validate_input_path(payload.get('export', ''), '.json'))
+            if operation == 'pair':
+                request['exports'] = [str(p) for p in sorted(SAVE_DIR.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+                                      if 'manifest' not in p.name.lower()][:12]
+            if operation == 'accounting':
+                request['accounting'] = str(validate_input_path(payload.get('accounting', ''), '.tsv'))
+            if operation == 'batch' and payload.get('apply'):
+                request['output'] = str(validate_output_path(payload.get('output', '')))
+            TASK_DIR.mkdir(parents=True, exist_ok=True)
+            request_path = TASK_DIR / (uuid.uuid4().hex + '.request.json')
+            atomic_store(request_path, request)
+            return ['workspace', '--request-file', str(request_path)]
         if action == "inventory":
             limit = max(1, min(60, int(payload.get("limit", 12))))
             return [
@@ -482,6 +504,11 @@ class TaskManager:
                 "operating-rule-write", "--save", str(save), "--output", str(output),
                 "--schedule", schedule,
             ]
+            expected = payload.get('fingerprint')
+            if expected:
+                if not re.fullmatch(r'[0-9a-f]{64}', str(expected)):
+                    raise RuntimeError('存档指纹无效')
+                args += ['--expected-fingerprint', str(expected)]
             if entry_plan is not None:
                 if not isinstance(entry_plan, list) or not 1 <= len(entry_plan) <= 32:
                     raise RuntimeError("完整指令计划需包含 1–32 条顶层指令")
@@ -847,6 +874,8 @@ class TaskManager:
         with self.lock:
             if self.task and self.task["process"].poll() is None:
                 raise RuntimeError("已有任务正在处理，请等待完成或先取消")
+            if self.task:
+                self._record_completed()
             args = self._build_args(action, payload)
             TASK_DIR.mkdir(parents=True, exist_ok=True)
             token = uuid.uuid4().hex
@@ -879,6 +908,10 @@ class TaskManager:
                 "result_path": result_path,
                 "progress_path": progress_path,
                 "started": time.time(),
+                "progress_cursor": 0,
+                "progress_tail": b'',
+                "last_progress": None,
+                "protected_write": action in {'batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write'} or (action == 'workspace' and bool(payload.get('apply'))),
             }
             return {"task_id": token, "action": action}
 
@@ -888,11 +921,18 @@ class TaskManager:
                 return {"state": "idle"}
             task = self.task
             process = task["process"]
-            progress = None
+            progress = task.get('last_progress')
             try:
-                lines = task["progress_path"].read_text(encoding="utf-8").splitlines()
-                if lines:
-                    progress = json.loads(lines[-1])
+                with task['progress_path'].open('rb') as stream:
+                    stream.seek(task.get('progress_cursor', 0))
+                    chunk = stream.read(262144)
+                    task['progress_cursor'] = stream.tell()
+                parts = (task.get('progress_tail', b'') + chunk).split(b'\n')
+                task['progress_tail'] = parts.pop()
+                for line in parts:
+                    if line.strip():
+                        progress = json.loads(line)
+                task['last_progress'] = progress
             except Exception:
                 pass
             if process.poll() is None:
@@ -906,6 +946,7 @@ class TaskManager:
                 result = json.loads(task["result_path"].read_text(encoding="utf-8"))
             except Exception:
                 result = {"ok": False, "error": f"后台任务没有返回结果（代码 {process.returncode}）"}
+            self._record_completed(result)
             return {
                 "state": "complete" if result.get("ok") else "failed",
                 "task_id": task["id"],
@@ -918,8 +959,27 @@ class TaskManager:
         with self.lock:
             if not self.task or self.task["process"].poll() is not None:
                 return {"cancelled": False}
+            if self.task.get('protected_write'):
+                raise RuntimeError('存档写入任务不可强制中断；请等待原子写入和反读校验结束。原存档不会被覆盖。')
             self.task["process"].kill()
             return {"cancelled": True}
+
+    def _record_completed(self, result=None):
+        task = self.task
+        if not task or task.get('recorded') or task['process'].poll() is None:
+            return
+        if result is None:
+            try:
+                result = json.loads(task['result_path'].read_text('utf-8'))
+            except Exception:
+                result = {'ok': False, 'error': '任务取消或未返回结果'}
+        history = project_state(SETTINGS_DIR, 'task-history').get('tasks', [])
+        history.append({'id': task['id'], 'action': task['action'], 'started': task['started'],
+                        'finished': time.time(), 'ok': bool(result.get('ok')), 'error': result.get('error'),
+                        'output': result.get('output_save'), 'manifest': result.get('manifest_path'),
+                        'operation': result.get('operation')})
+        project_state(SETTINGS_DIR, 'task-history', {'tasks': history[-100:]})
+        task['recorded'] = True
 
     def is_running(self) -> bool:
         with self.lock:
@@ -1028,6 +1088,11 @@ class Handler(BaseHTTPRequestHandler):
             if route == "/api/task/status":
                 self.send_json({"ok": True, **TASKS.status()})
                 return
+            if route == '/api/workspace/files':
+                self.send_json({'ok': True, 'accounting': [file_info(p) for p in sorted(SAVE_DIR.glob('*.tsv'), key=lambda p: p.stat().st_mtime, reverse=True)],
+                                'mod_packages': [p.name for p in TASK_DIR.glob('*.zip') if p.with_suffix('.generated.json').is_file()],
+                                'history': project_state(SETTINGS_DIR, 'task-history').get('tasks', [])})
+                return
             if route == "/api/vehicle/catalog":
                 self.send_json({"ok": True, "catalog": scan_vehicle_mods()})
                 return
@@ -1060,6 +1125,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "跨站请求已被拒绝"}, HTTPStatus.FORBIDDEN)
                 return
             payload = self.read_json()
+            if route == '/api/workspace/state':
+                key = str(payload.get('key') or '')
+                if not key or len(key) > 1000:
+                    raise RuntimeError('项目键无效')
+                self.send_json({'ok': True, 'value': project_state(SETTINGS_DIR, key, payload.get('patch'))})
+                return
+            if route == '/api/workspace/log':
+                self.send_json({'ok': True, **parse_log(str(payload.get('text', '')))})
+                return
+            if route == '/api/workspace/diagnostic':
+                from toolkit_diagnostics import SOURCE, install_diagnostic
+                if payload.get('install'):
+                    result = install_diagnostic(SAVE_DIR)
+                else:
+                    result = {'source': SOURCE, 'installed': (SAVE_DIR / 'mods' / 'toolkit_readonly_diagnostic' / 'mod.txt').is_file(), 'enabled': 'unknown'}
+                self.send_json({'ok': True, **result})
+                return
+            if route == '/api/workspace/install-mod':
+                from toolkit_diagnostics import install_generated_archive
+                package=(TASK_DIR/str(payload.get('package',''))).resolve()
+                if package.parent!=TASK_DIR.resolve() or package.suffix!='.zip' or not package.is_file():
+                    raise RuntimeError('模组包无效，请先在工具箱生成模组')
+                self.send_json({'ok':True,**install_generated_archive(package,SAVE_DIR)})
+                return
             if route == "/api/task/start":
                 settings = read_settings()
                 result = TASKS.start(str(payload.get("action")), payload, settings["workers"])
@@ -1127,6 +1216,8 @@ class Handler(BaseHTTPRequestHandler):
                 filename = f"{meta['script_id']}_{uuid.uuid4().hex[:8]}.zip"
                 path = TASK_DIR / filename
                 path.write_bytes(data)
+                from toolkit_diagnostics import record_generated_archive
+                record_generated_archive(path)
                 self.send_json(
                     {
                         "ok": True,
@@ -1153,6 +1244,8 @@ class Handler(BaseHTTPRequestHandler):
                 filename = f"{meta['mod_id']}_{uuid.uuid4().hex[:8]}.zip"
                 path = TASK_DIR / filename
                 path.write_bytes(data)
+                from toolkit_diagnostics import record_generated_archive
+                record_generated_archive(path)
                 self.send_json(
                     {
                         "ok": True,

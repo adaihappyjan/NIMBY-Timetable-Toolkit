@@ -1,0 +1,43 @@
+/* v1.6: code-native railway identity; no remote fonts, images or telemetry. */
+:root { --muted:#a0b0bd; --line:#2b3d4b; --shadow:0 18px 42px #0005; color-scheme:dark; }
+body { background:radial-gradient(ellipse at 85% 0,#14324766,transparent 50%),var(--cream); }
+.sidebar { background:linear-gradient(175deg,#122a39,#0a121a 55%); border-right:1px solid var(--line); padding-top:24px; }
+.brand-mark { background:#102b35; box-shadow:0 0 24px #2dd4c415; }
+.brand { padding-bottom:22px; }.brand small { color:#b2c5cf; font-size:12px; }
+.nav-item { min-height:43px; padding:10px 13px; font-size:13px; }
+.nav-item.active { background:linear-gradient(90deg,#17453e,#12303e); }
+.topbar { padding-bottom:19px; border-bottom:1px solid var(--line); gap:16px; }
+.topbar h1 { font-size:27px; letter-spacing:.01em; }.eyebrow { font-size:10px; letter-spacing:.16em; }
+.hero-card { border:1px solid #345668; background:linear-gradient(125deg,#123142,#142531 68%,#103f3c); box-shadow:var(--shadow); }
+.hero-copy h2 { font-size:30px; line-height:1.4; }.hero-copy p:not(.eyebrow) { color:#b5c9d2; line-height:1.85; font-size:14px; }
+.panel,.ws-panel { box-shadow:0 6px 24px #0002; border-color:var(--line); }
+button { transition:background .15s,border-color .15s,box-shadow .15s; }
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible { outline:3px solid var(--aqua); outline-offset:3px; }
+button:disabled { cursor:not-allowed; }
+.primary-button:not(:disabled):hover { box-shadow:0 0 0 3px #2dd4c425; }
+.ws-card:hover { border-color:#638394; }.ws-card:has(input:checked) { box-shadow:inset 3px 0 var(--aqua); }
+.ws-tabs { position:sticky; top:0; z-index:3; background:var(--cream); padding:12px 0; }
+.ws-tools input,.ws-fields input,.ws-fields select { font-size:14px; }
+.ws-panel p,.ws-panel li { font-size:14px; }
+.ws-scroll th,.ws-scroll td { line-height:1.6; }
+.local-chip { background:#143a31; color:#9ee4c9; }
+.learn-hero { display:grid; grid-template-columns:1fr 260px; gap:28px; padding:32px; border:1px solid #355969; border-radius:20px; background:linear-gradient(115deg,#163849,#11212e); margin-bottom:24px; overflow:hidden; }
+.learn-hero h2 { font-size:30px; margin:14px 0; }.learn-hero p { color:#b6ccd6; line-height:1.9; max-width:650px; }
+.learn-network { width:100%; height:170px; align-self:center; }
+.learn-toolbar { display:flex; gap:12px; align-items:center; margin:20px 0; flex-wrap:wrap; }
+.learn-toolbar input[type=search] { flex:1; min-width:220px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); padding:13px; }
+.learn-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.learn-card { border:1px solid var(--line); border-radius:16px; padding:22px; background:var(--surface); }
+.learn-card[hidden] { display:none; }.learn-card h3 { font-size:19px; margin:9px 0 12px; }
+.learn-card .learn-number { font:700 11px/1.5 Consolas,monospace; letter-spacing:.14em; color:var(--aqua); }
+.learn-card ol { padding-left:22px; margin:12px 0 20px; }.learn-card li,.learn-card p { color:#b5c4cf; font-size:14px; line-height:1.9; }
+.learn-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }.learn-actions label { color:var(--muted); font-size:12px; margin-left:auto; }
+.learn-progress { color:var(--aqua); font-size:13px; }.learn-card.done { border-color:#286559; }.learn-card.done .learn-number:after { content:' · 已读'; }
+.learn-faq { margin-top:24px; }.learn-faq details { border-top:1px solid var(--line); padding:16px 0; }.learn-faq summary { cursor:pointer; font-weight:600; line-height:1.6; }.learn-faq p { font-size:14px; line-height:1.9; color:var(--muted); }
+.learn-warning { padding:14px 18px; border-left:3px solid var(--orange); background:#3e2d1833; border-radius:8px; line-height:1.8; color:#e5c89c; font-size:13px; }
+.learn-density { font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+body.readable .oprule-field,body.readable .oprule-day-presets button,body.readable .oprule-days label,body.readable .oprule-smartbar label,body.readable .oprule-group-note,body.readable .oprule-group-editor .oprule-field small,body.readable .oprule-group-tab small { font-size:12px; }
+body.readable .oprule-entry { padding:16px; row-gap:14px; }
+@media(max-width:1100px) { .learn-hero { grid-template-columns:1fr; }.learn-network { display:none; }.top-actions { flex-wrap:wrap; justify-content:flex-end; } }
+@media(max-width:760px) { .learn-grid { grid-template-columns:1fr; }.learn-hero { padding:22px; }.learn-hero h2 { font-size:25px; }.learn-card { padding:18px; }.topbar h1 { font-size:22px; } }
+@media(prefers-reduced-motion:reduce) { *,*:before,*:after { animation:none!important; transition:none!important; scroll-behavior:auto!important; } }

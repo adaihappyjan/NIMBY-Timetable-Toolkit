@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-08-21g';
+const APP_BUILD = '2026-09-07-v1.6';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null, update: null };
 const $ = (selector) => document.querySelector(selector);
@@ -6,7 +6,8 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const viewMeta = {
   dashboard: ['CONTROL CENTER', '铁路运营总览'], analytics: ['OPERATIONS ANALYTICS', '运营分析'], map: ['TRANSIT MAP', '线路图'], realnet: ['REAL-WORLD REFERENCE', '现实路网参考图'], timetable: ['TIMETABLE STUDIO', '时刻表配置'],
-  extensions: ['DEPOT CONTROL', '车库接班管理'], binder: ['BATCH BINDER', '批量扩展绑定器'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线'], author: ['MEET THE MAKER', '关于作者']
+  extensions: ['DEPOT CONTROL', '车库接班管理'], binder: ['BATCH BINDER', '批量扩展绑定器'], vehicle: ['ROLLING STOCK WORKSHOP', '车辆工坊'], scripts: ['SCRIPT WORKSHOP', 'NimbyScript 规则生成器'], history: ['FLEET HISTORY', '历史与性能'], cleanup: ['STORAGE CARE', '副本清理中心'], roadmap: ['CAPABILITY LADDER', '开发路线'], author: ['MEET THE MAKER', '关于作者'],
+  workspace: ['LINE WORKSPACE', '线路工作台'], learn: ['GETTING STARTED', '教程中心']
 };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 function lineColor(raw) {
@@ -85,6 +86,7 @@ async function loadBootstrap() {
   if (data.startup_cleanup?.error) toast(`启动清理未完成：${data.startup_cleanup.error}`, true);
   else if (data.startup_cleanup?.result?.moved_file_count) toast(`启动清理已将 ${data.startup_cleanup.result.moved_group_count} 组过期副本移入回收站`);
   if (data.settings.auto_check_updates !== false) setTimeout(() => checkToolkitUpdate(false), 900);
+  window.restoreWorkspaceSelection?.();
 }
 
 function renderToolkitUpdate(update) {
@@ -1419,6 +1421,7 @@ function exportRealLines(kind) {
   toast(`已导出 ${filename}`);
 }
 async function initRealnet() {
+  if(window.workspaceMapReady) await window.workspaceMapReady;
   if (REALNET.ready) { setTimeout(() => REALNET.map.invalidateSize(), 60); if (state.network) realnetDrawGame(); return; }
   try { await loadLeaflet(); } catch (e) { $('#realnet-map').innerHTML = `<div class="placeholder">${escapeHtml(e.message)}</div>`; return; }
   const el = $('#realnet-map'); el.innerHTML = '';
@@ -1493,7 +1496,7 @@ async function startTask(action, payload) {
     const worker = ensureTicker();
     if (worker) worker.postMessage('start'); else fallbackLoop();
     pollOnce();
-  } catch (e) { state.taskActive = false; toast(e.message, true); }
+  } catch (e) { state.taskActive = false; window.workspaceFailure?.(e.message); toast(e.message, true); }
 }
 async function pollOnce() {
   if (state.pollBusy || !state.taskActive) return;
@@ -1506,7 +1509,8 @@ async function pollOnce() {
     }
     if (s.state === 'complete') {
       finishTask();
-      if (s.action === 'analyze') renderAnalysis(s.result);
+      if (s.action === 'workspace') { await window.workspaceResult?.(s.result); }
+      else if (s.action === 'analyze') renderAnalysis(s.result);
       else if (s.action === 'inventory') renderInventory(s.result);
       else if (s.action === 'compare') renderCompare(s.result);
       else if (s.action === 'find-reference') renderReference(s.result);
@@ -1526,7 +1530,7 @@ async function pollOnce() {
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
     }
-    if (s.state === 'failed') { finishTask(); toast(s.result?.error || '后台操作失败', true); return; }
+    if (s.state === 'failed') { finishTask(); window.workspaceFailure?.(s.result?.error || '后台操作失败'); toast(s.result?.error || '后台操作失败', true); return; }
   } catch (e) {
     state.pollFailures = (state.pollFailures || 0) + 1;
     if (state.pollFailures <= 10) { $('#task-message').textContent = `连接中断，正在重试…(${state.pollFailures})`; return; }
@@ -2202,6 +2206,7 @@ function opruleSetDirty(value=true){
   const label=$('#oprule-dirty');
   if(label){ label.textContent=OPR.dirty?'有未保存修改':'未修改'; label.classList.toggle('dirty',OPR.dirty); }
   const reset=$('#oprule-reset'); if(reset) reset.disabled=!OPR.dirty;
+  if (value) window.workspaceDraftChanged?.();
 }
 function opruleEntryEditable(entry,index){
   const p=entry.order_parameters||{};
@@ -2275,10 +2280,10 @@ function opruleRenderRecord(entry,path,{stacked=false}={}){
     +`<div class="oprule-field oprule-repeat">重复<div class="oprule-repeat-controls"><label><input type="checkbox" data-repeat-max ${entry.repeat_is_max?'checked':''}>∞</label><input type="number" min="1" max="100" step="1" data-repeat-count value="${entry.repeat_count||1}" ${entry.repeat_is_max?'disabled':''}></div></div>`
     +`<label class="oprule-continue"><input type="checkbox" data-continue ${entry.continue_into_next?'checked':''}>继续下一指令</label>`
     +`<div class="oprule-routing">`
-    +`<label class="oprule-field">Timing<select data-timing-event><option value="0" ${timing===0?'selected':''}>准确到达</option><option value="2" ${timing===2?'selected':''}>准确发车</option><option value="4" ${timing===4?'selected':''}>不迟于此时到达</option></select></label>`
-    +`<label class="oprule-field">Enter<select data-enter-selector>${opruleSelectorOptions(entry,'enter')}</select></label>`
-    +`<label class="oprule-field">Exit<select data-exit-selector>${opruleSelectorOptions(entry,'exit')}</select></label>`
-    +`<label class="oprule-field">Timing 站<select data-timing-selector>${opruleSelectorOptions(entry,'timing')}</select></label>`
+    +`<label class="oprule-field">校时方式<select data-timing-event><option value="0" ${timing===0?'selected':''}>准确到达</option><option value="2" ${timing===2?'selected':''}>准确发车</option><option value="4" ${timing===4?'selected':''}>不迟于此时到达</option></select></label>`
+    +`<label class="oprule-field">从哪站进入<select data-enter-selector>${opruleSelectorOptions(entry,'enter')}</select></label>`
+    +`<label class="oprule-field">在哪站结束<select data-exit-selector>${opruleSelectorOptions(entry,'exit')}</select></label>`
+    +`<label class="oprule-field">以哪站校时<select data-timing-selector>${opruleSelectorOptions(entry,'timing')}</select></label>`
     +`</div><div class="oprule-entry-actions">`
     +(!stacked?`<button type="button" class="text-button" data-entry-insert="${path}">在后插入</button><button type="button" class="text-button" data-entry-stack="${path}">添加堆积</button>`:'')
     +(isNew?`<button type="button" class="text-button danger" data-entry-remove="${path}">移除新增</button>`:'')
@@ -2300,7 +2305,7 @@ function opruleRenderSummary(){
   const auditBox=$('#oprule-audit'); if(auditBox){
     const messages=[...audit.errors.map(text=>`<span class="error">${escapeHtml(text)}</span>`),...audit.warnings.map(text=>`<span>${escapeHtml(text)}</span>`)];
     auditBox.classList.toggle('has-error',!!audit.errors.length);
-    auditBox.innerHTML=messages.length?messages.join(''):'<span class="ok">结构、Order ID 保留规则、线路站点选择与时间冲突检查通过。</span>';
+    auditBox.innerHTML=messages.length?messages.join(''):'<span class="ok">未发现字段缺失或同刻指令重叠；尚未验证空驶接续、轨道占用和实际调度。</span>';
   }
 }
 function opruleAudit(entries){
@@ -2358,7 +2363,9 @@ function opruleModeSummary(group){
 function opruleRenderGroupTabs(){
   const box=$('#oprule-group-tabs'); if(!box||!OPR.draft) return;
   const used=Array(10).fill(0); OPR.draft.entries.flatMap(e=>[e,...(e.stacked_entries||[])]).forEach(e=>{if(e.offset_group_index>=0&&e.offset_group_index<10)used[e.offset_group_index]++;});
-  box.innerHTML=OPR.draft.offset_distributions.map((group,index)=>`<button type="button" class="oprule-group-tab ${used[index]?'used':''} ${OPR.activeGroup===index?'active':''}" data-offset-tab="${index}"><b>组 ${index+1}</b><small>${used[index]}项 · ${escapeHtml(opruleModeSummary(group))}</small></button>`).join('');
+  const button=(group,index)=>`<button type="button" class="oprule-group-tab ${used[index]?'used':''} ${OPR.activeGroup===index?'active':''}" data-offset-tab="${index}"><b>组 ${index+1}</b><small>${used[index]}项 · ${escapeHtml(opruleModeSummary(group))}</small></button>`;
+  const shown=[],unused=[];OPR.draft.offset_distributions.forEach((group,index)=>{(used[index]||OPR.activeGroup===index?shown:unused).push(button(group,index));});
+  box.innerHTML=shown.join('')+(unused.length?`<details><summary>未使用的 ${unused.length} 个偏移组</summary>${unused.join('')}</details>`:'');
 }
 function opruleLineOptions(selected){
   const lines=[...OPR.lines];
@@ -2388,8 +2395,10 @@ function opruleRenderAll(){
 function opruleLoadGroup(group){
   OPR.selected=group?.schedule_id||null; OPR.original=group?opruleClone(group):null; OPR.draft=group?opruleClone(group):null; OPR.activeGroup=0; OPR.copiedGroup=null;
   opruleSetDirty(false); const paste=$('#oprule-paste-group'); if(paste) paste.disabled=true; opruleRenderAll();
+  window.workspaceDraftLoad?.();
 }
 function renderOperatingRules(res){
+  OPR.fingerprint=res.fingerprint||null;
   OPR.groups=(res.groups||[]).filter(g=>g.editable);
   OPR.lines=res.lines||[];
   OPR.baseSave=res.save||$('#save-select')?.value||null;
@@ -2404,7 +2413,7 @@ function renderOperatingRules(res){
   const airport=OPR.groups.findIndex(g=>g.schedule_name==='OT Line 4 Daily'); if(airport>=0) sel.selectedIndex=airport;
   ['#oprule-export','#oprule-import'].forEach(id=>{const el=$(id);if(el)el.disabled=!OPR.groups.length;});
   opruleLoadGroup(opruleCurrent());
-  toast(`已读取 ${OPR.groups.length} 张时刻表和 ${OPR.lines.length} 条线路`);
+  toast(`已读取 ${OPR.groups.length} 个运营规则对象（含线路模板）和 ${OPR.lines.length} 条线路`);
 }
 function opruleSelectedRows(){ return $$('#oprule-entry-list [data-record-path]:not(.stacked)').filter(row=>row.querySelector('[data-row-select]')?.checked); }
 function opruleApplyDays(rows,mask){
@@ -2514,7 +2523,7 @@ async function opruleWrite(){
   const newCount=(changes.entry_plan||[]).flatMap(entry=>[entry,...entry.stacked_entries]).filter(entry=>entry.order_id==null).length;
   if(!confirm(`将写入完整指令计划${newCount?`（新增 ${newCount} 个 Order ID）`:''}、修改 ${changes.distributions.length} 个偏移组，并创建新存档。\n原存档不会被覆盖。继续吗？`)) return;
   const box=$('#oprule-result'); if(box){box.hidden=false;box.className='ttd-write-result';box.textContent='正在创建并验证自定义时刻表存档…';}
-  await startTask('operating-rule-write',{save,output,schedule:OPR.draft.schedule_id,entry_plan:changes.entry_plan,distributions:changes.distributions});
+  await startTask('operating-rule-write',{save,output,fingerprint:OPR.fingerprint,schedule:OPR.draft.schedule_id,entry_plan:changes.entry_plan,distributions:changes.distributions});
 }
 function oprulePlan(){
   const diff=opruleDiff();
@@ -2551,15 +2560,17 @@ async function opruleImportPlan(file){
   finally{const input=$('#oprule-import');if(input)input.value='';}
 }
 function onOperatingRuleWriteDone(res){
+  OPR.fingerprint=res.output_file_sha256||null;
   const box=$('#oprule-result'), after=res.after||{}, file=(res.output_save||'').split(/[\\/]/).pop()||'新存档';
   const index=OPR.groups.findIndex(g=>g.schedule_id===after.schedule_id); if(index>=0) OPR.groups[index]=after;
   OPR.baseSave=res.output_save||OPR.baseSave; OPR.original=opruleClone(after); OPR.draft=opruleClone(after); opruleSetDirty(false); opruleRenderEntries(); opruleRenderDerived(); opruleRenderGroupEditor(); opruleRefreshOutput();
+  window.workspaceDraftLoad?.();
   toast(`自定义时刻表存档已创建：${file}`); if(!box)return;
   const rows=(after.entries||[]).map(e=>`${escapeHtml(e.line_name||e.line_id)} ${opruleFormatTime(e.time_seconds)} · ${opruleDayText(e.days_mask)} · 组 ${e.offset_group_number} · ${e.repeat_is_max?'∞':`x${e.repeat_count}`}`).join('<br>');
   box.hidden=false; box.className='ttd-write-result ok'; box.innerHTML=`<b>✓ 自定义时刻表写入成功</b><br>${rows}<br>指令参数回读✓ · 十个偏移组回读✓ · 其它时刻表零波及✓ · 压缩回读✓<br>新存档：<code>${escapeHtml(file)}</code><br><small>原存档未改动；继续编辑会以上述新存档为基础。请在游戏暂停状态加载并核对“指令 / 偏移 / 时刻表”页。</small>`;
 }
 $('#oprule-read')?.addEventListener('click',()=>{const save=$('#save-select')?.value;if(!save)return toast('请先选择存档',true);startTask('operating-rules',{save});});
-$('#oprule-schedule')?.addEventListener('change',event=>{if(OPR.dirty&&!confirm('切换时刻表会放弃当前未保存修改，继续吗？')){event.target.value=OPR.selected;return;}opruleLoadGroup(opruleCurrent());});
+$('#oprule-schedule')?.addEventListener('change',event=>{if(OPR.dirty&&!confirm('切换到另一张表？自动保存成功的草稿可在同一存档中恢复；失败时请先导出方案。')){event.target.value=OPR.selected;return;}opruleLoadGroup(opruleCurrent());});
 $('#oprule-entry-list')?.addEventListener('input',event=>{
   if(event.target.matches('[data-row-select]'))return; const row=event.target.closest('[data-record-path]'); if(!row)return;
   if(event.target.matches('[data-repeat-max]'))row.querySelector('[data-repeat-count]').disabled=event.target.checked;
@@ -2587,7 +2598,7 @@ $('#oprule-group-editor')?.addEventListener('input',opruleSyncGroupFromEditor);
 $('#oprule-group-editor')?.addEventListener('click',event=>{const button=event.target.closest('[data-fixed-min]');if(!button)return;const input=$('[data-group-fixed]');input.value=button.dataset.fixedMin;opruleSyncGroupFromEditor();opruleRenderGroupEditor();});
 $('#oprule-copy-group')?.addEventListener('click',()=>{if(!OPR.draft)return;OPR.copiedGroup=opruleClone(OPR.draft.offset_distributions[OPR.activeGroup]);$('#oprule-paste-group').disabled=false;toast(`已复制偏移组 ${OPR.activeGroup+1}`);});
 $('#oprule-paste-group')?.addEventListener('click',()=>{if(!OPR.copiedGroup||!OPR.draft)return;const index=OPR.activeGroup,current=OPR.draft.offset_distributions[index],pasted=opruleClone(OPR.copiedGroup);if(index===0&&!pasted.duration_line_id)pasted.duration_line_id=current.duration_line_id;OPR.draft.offset_distributions[index]={...pasted,group_index:index,group_number:index+1};opruleSetDirty();opruleRenderGroupTabs();opruleRenderGroupEditor();});
-$('#oprule-reset')?.addEventListener('click',()=>{if(!OPR.original||!confirm('撤销这张时刻表的全部未保存修改？'))return;OPR.draft=opruleClone(OPR.original);OPR.activeGroup=0;opruleSetDirty(false);opruleRenderAll();});
+$('#oprule-reset')?.addEventListener('click',()=>{if(!OPR.original||!confirm('撤销这张时刻表的全部未保存修改？'))return;OPR.draft=opruleClone(OPR.original);OPR.activeGroup=0;opruleSetDirty(false);opruleRenderAll();window.workspaceDraftChanged?.();});
 $('#oprule-export')?.addEventListener('click',opruleExportPlan);
 $('#oprule-import')?.addEventListener('change',event=>opruleImportPlan(event.target.files?.[0]));
 $('#oprule-write')?.addEventListener('click',opruleWrite);

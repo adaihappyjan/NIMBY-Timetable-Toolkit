@@ -612,6 +612,7 @@ def apply_prepared_update(
     package_root = Path(package_root).resolve()
     result_file = Path(result_file).resolve()
     success = False
+    rollback_errors: list[str] = []
     backup_root = package_root.parent / "backup"
     changed_paths: set[str] = set()
     new_paths: set[str] = set()
@@ -672,21 +673,23 @@ def apply_prepared_update(
                     _replace_from(backup, target)
                 elif target.is_file() and relative in new_paths:
                     target.unlink()
-            except Exception:
-                pass
+            except Exception as rollback_exc:
+                rollback_errors.append(f"{relative}: {rollback_exc}")
         _write_update_result(
             result_file,
             {
                 "ok": False,
                 "from_version": normalize_version(from_version),
                 "to_version": normalize_version(to_version),
-                "error": str(exc),
+                "error": str(exc) + ("；部分文件回滚失败，请从备份恢复，不要继续启动：" + "; ".join(rollback_errors) if rollback_errors else ""),
+                "rollback_complete": not rollback_errors,
+                "rollback_errors": rollback_errors,
                 "backup_dir": str(backup_root) if backup_root.exists() else "",
             },
         )
     finally:
         release_update_lock(lock_file)
-        if restart and python_executable:
+        if restart and python_executable and not rollback_errors:
             try:
                 _restart_app(python_executable, target_root)
             except Exception:
