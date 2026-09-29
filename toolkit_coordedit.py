@@ -207,6 +207,8 @@ def set_station_coordinates(
         )
 
     raw_after = bytes(raw)
+    from toolkit_binary import require_verified_save
+    require_verified_save(header)
     output = header + Zstd().compress(raw_after, level)
     readback = Zstd().decompress(output[frame_offset:])
     if readback != raw_after:
@@ -376,6 +378,8 @@ def set_station_names(
                 f"写入后复读校验失败: {ch['id']} 期望 {ch['new_name']!r} 实得 "
                 f"{None if got is None else got.name!r}")
 
+    from toolkit_binary import require_verified_save
+    require_verified_save(header)
     output = header + Zstd().compress(raw_after, level)
     if Zstd().decompress(output[frame_offset:]) != raw_after:
         raise RuntimeError("压缩输出未通过反向解压校验")

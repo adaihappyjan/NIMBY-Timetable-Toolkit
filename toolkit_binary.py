@@ -18,6 +18,32 @@ GARAGE_JOIN_VECTOR = bytes.fromhex(
 )
 EMPTY_SCHEDULE_ZERO_TAIL = b"\x00" * 43
 
+# Observed and round-trip tested against the 1.19.10 Windows save fixtures.
+# Export model 230 alone is NOT a save-format signature.
+VERIFIED_SAVE_PREFIXES = {bytes.fromhex("4e4d42590200010013000a00"): "1.19.10"}
+
+
+def save_version_info(header: bytes) -> dict:
+    release = VERIFIED_SAVE_PREFIXES.get(header[:12])
+    valid = len(header) >= 12 and header[:4] == b"NMBY"
+    hint = (".".join(str(int.from_bytes(header[i:i + 2], "little"))
+                     for i in (6, 8, 10)) if valid else None)
+    return {
+        "save_release": release or hint,
+        "save_header_signature": header[:12].hex(),
+        "status": "supported" if release else "unknown",
+        "safe_to_write": bool(release),
+        "note": (f"已验证 {release} 存档格式；仍需逐项结构校验，游戏运行需单独验收。"
+                 if release else "此存档格式尚未验证，仅允许只读检查，已阻止写入。"),
+    }
+
+
+def require_verified_save(header: bytes) -> dict:
+    info = save_version_info(header)
+    if not info["safe_to_write"]:
+        raise RuntimeError(info["note"] + f"（存档标记：{info['save_release'] or '未知'}）")
+    return info
+
 
 def find_zstd_library() -> str:
     # An explicit override always wins, so users can point at any copy of the DLL.

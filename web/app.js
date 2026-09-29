@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-09-07-v1.6';
+const APP_BUILD = '2026-09-29-1.19.10';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null, update: null };
 const $ = (selector) => document.querySelector(selector);
@@ -190,7 +190,7 @@ function renderAnalysis(a) {
   const matched = a.compatible_schedule_count === a.expected_schedule_count && a.located_train_count === a.train_count;
   const gv = a.game_version || {};
   const gvClass = { supported: 'ok', compatible: 'ok', newer: 'warn', unknown: 'warn', outdated: 'bad' }[gv.status] || 'ok';
-  const gvChip = gv.model_version != null ? `<span class="ver-chip ${gvClass}" title="${escapeHtml(gv.note || '')}">游戏版本 model ${gv.model_version} · ${({supported:'已适配',compatible:'兼容',newer:'更新版',unknown:'未知',outdated:'过旧'}[gv.status] || gv.status)}</span>` : '';
+  const gvChip = `<span class="ver-chip ${gvClass}" title="${escapeHtml(gv.note || '')}">${escapeHtml(gv.save_release ? `存档 ${gv.save_release} · ` : '')}model ${gv.model_version ?? '未知'} · ${gv.safe_to_write ? '格式已验证' : '仅只读检查'}</span>`;
   $('#health-summary').innerHTML = `<div class="health-wrap"><div class="health-ring" style="--score:${a.health_score}"><div><b>${a.health_score}</b><small>/ 100</small></div></div><div class="health-copy"><strong>${matched ? '文件完全匹配' : '文件不匹配'}</strong><p>${a.compatible_schedule_count}/${a.expected_schedule_count} 张时刻表<br>${a.located_train_count}/${a.train_count} 列车已核对</p>${gvChip}</div></div>`;
   state.gameVersion = gv;
   if (gv.status === 'newer' || gv.status === 'unknown' || gv.status === 'outdated') toast(gv.note, gv.status !== 'newer');
@@ -1092,6 +1092,8 @@ function renderOverviewHealth(h, c) {
 }
 function renderSaveHealth(r) {
   state.saveHealth = r;
+  state.gameVersion = r.game_version || null;
+  const gv = r.game_version || {};
   const c = r.counts || {};
   const h = r.health || {};
   const sc = h.health_score ?? 100;
@@ -1102,7 +1104,7 @@ function renderSaveHealth(r) {
     + `<div class="health-ring ${cls}" style="--score:${sc}"><div><b>${sc}</b><small>/ 100</small></div></div>`
     + `<div class="health-copy"><strong>存档直读体检 · 免 JSON</strong>`
     + `<p>${c.routes ?? 0} 线 / ${c.schedules ?? 0} 时刻表 / ${c.trains ?? 0} 车（${c.assigned_trains ?? 0} 已分配）<br>严重 ${sev.critical || 0} · 警告 ${sev.warning || 0} · 提示 ${sev.info || 0}</p>`
-    + `<span class="ver-chip ok" title="全程只读存档，无需导出 JSON">仅用存档 · 不需要导出</span></div></div>`;
+    + `<span class="ver-chip ${gv.safe_to_write ? 'ok' : 'warn'}" title="${escapeHtml(gv.note || '版本尚未核对')}">${escapeHtml(gv.save_release || '未知版本')} · ${gv.safe_to_write ? '存档格式已验证' : '仅只读检查'}</span></div></div>`;
   const metrics = [
     ['车站', c.stations, `${c.named_stations ?? 0} 有名`],
     ['线路', c.routes, '带几何'],
@@ -1485,22 +1487,27 @@ function finishTask() {
   clearTimeout(state.fallbackTimer);
 }
 const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write']);
-async function startTask(action, payload) {
+async function startTask(action, payload, context = null) {
+  // Reserve the single task slot before any await; a second click must not
+  // reset the first task's polling state or its preview context.
+  if (state.taskActive) { toast('已有后台任务，请等待完成或先取消。', true); return false; }
   if (WRITE_ACTIONS.has(action) && state.gameVersion && state.gameVersion.safe_to_write === false) {
     if (!confirm(`${state.gameVersion.note || '当前游戏版本尚未完全验证写入。'}\n\n工具仍只写入新存档、绝不覆盖原档。是否继续？`)) return;
   }
   try {
-    state.taskAction = action; state.pollFailures = 0; state.pollBusy = false; state.taskActive = true;
+    state.taskAction = action; state.taskContext = context; state.pollFailures = 0; state.pollBusy = false; state.taskActive = true;
     await api('/api/task/start', { method:'POST', body:JSON.stringify({ action, ...payload }) });
     $('#task-dock').hidden = false; $('#task-progress').style.width = '2%'; $('#task-message').textContent = '正在准备任务…';
     const worker = ensureTicker();
     if (worker) worker.postMessage('start'); else fallbackLoop();
     pollOnce();
-  } catch (e) { state.taskActive = false; window.workspaceFailure?.(e.message); toast(e.message, true); }
+    return true;
+  } catch (e) { finishTask(); window.workspaceFailure?.(e.message); toast(e.message, true); return false; }
 }
 async function pollOnce() {
   if (state.pollBusy || !state.taskActive) return;
   state.pollBusy = true;
+  const taskContext = state.taskContext;
   try {
     const s = await api(`/api/task/status?_=${Date.now()}`, { timeoutMs: 12000 });
     state.pollFailures = 0;
@@ -1509,7 +1516,7 @@ async function pollOnce() {
     }
     if (s.state === 'complete') {
       finishTask();
-      if (s.action === 'workspace') { await window.workspaceResult?.(s.result); }
+      if (s.action === 'workspace') { await window.workspaceResult?.(s.result, taskContext); }
       else if (s.action === 'analyze') renderAnalysis(s.result);
       else if (s.action === 'inventory') renderInventory(s.result);
       else if (s.action === 'compare') renderCompare(s.result);
@@ -1570,12 +1577,25 @@ function binderLoadLines() {
   if (!$('#export-select').value) { toast('请先在“总览与体检”选择时刻表导出', true); return; }
   startTask('map-data', { export: $('#export-select').value });
 }
+function binderAnalysisCurrent() {
+  return !!state.analysis && state.analysis.save === $('#save-select').value && state.analysis.export === $('#export-select').value;
+}
+function loadBinderFleets() {
+  if (!binderAnalysisCurrent()) {
+    switchView('dashboard');
+    $('#adv-json-box').open = true;
+    $('#deep-scan-button').focus();
+    toast('车队绑定需要“深度核对（需导出）”；普通免 JSON 体检不包含车库扩展绑定信息。', true);
+    return;
+  }
+  renderBinderFleets(); toast('已载入深度核对车队');
+}
 function renderBinderFleets() {
   const box = $('#binder-fleet-list'); if (!box) return;
-  const schedules = (state.analysis?.health_schedules || []).filter(s => s.train_count > 0);
+  const schedules = (binderAnalysisCurrent() ? state.analysis.health_schedules || [] : []).filter(s => s.train_count > 0);
   box.innerHTML = schedules.length
     ? schedules.map(s => `<label class="schedule-option"><input class="binder-fleet-check" type="checkbox" value="${escapeHtml(s.name)}"><span><strong>${escapeHtml(s.name)}</strong><small>${s.train_count} 列车 · 已启用 ${s.garage_enabled}</small></span></label>`).join('')
-    : '<div class="placeholder">请先在“总览与体检”完成体检。</div>';
+    : '<div class="placeholder">请对当前存档与导出完成“深度核对（需导出）”，再载入车队。</div>';
 }
 function selectedBinderLines() { return $$('.binder-line-check:checked').map(x => ({ id: x.value, name: x.dataset.name, code: x.dataset.code })); }
 async function generateBinderMod() {
@@ -1624,6 +1644,7 @@ function exportBinderChecklist(kind) {
   toast(`已导出 ${filename}`);
 }
 function binderWriteGarage() {
+  if (!binderAnalysisCurrent()) { loadBinderFleets(); return; }
   const schedules = $$('.binder-fleet-check:checked').map(x => x.value);
   if (!schedules.length) { toast('请至少选择一张车队', true); return; }
   if (!$('#save-select').value || !$('#export-select').value) { toast('请先在“总览与体检”选择存档与导出并完成体检', true); return; }
@@ -1783,7 +1804,7 @@ $('#binder-load-lines')?.addEventListener('click',binderLoadLines);
 $('#binder-lines-all')?.addEventListener('click',()=>$$('.binder-line-check').forEach(x=>x.checked=true));
 $('#binder-lines-none')?.addEventListener('click',()=>$$('.binder-line-check').forEach(x=>x.checked=false));
 $('#binder-generate')?.addEventListener('click',generateBinderMod);
-$('#binder-load-fleets')?.addEventListener('click',()=>{ if(!state.analysis){toast('请先在“总览与体检”完成体检',true);return;} renderBinderFleets(); toast('已载入车队'); });
+$('#binder-load-fleets')?.addEventListener('click',loadBinderFleets);
 $('#binder-fleets-all')?.addEventListener('click',()=>$$('.binder-fleet-check').forEach(x=>x.checked=true));
 $('#binder-fleets-none')?.addEventListener('click',()=>$$('.binder-fleet-check').forEach(x=>x.checked=false));
 $('#binder-write-garage')?.addEventListener('click',binderWriteGarage);
@@ -1911,7 +1932,7 @@ function renderScriptValidation(v,source=''){
   $('#script-validation').innerHTML=`<div class="veh-preview-head"><strong>${v.valid?'静态校验通过':'校验失败'}</strong><span class="verified-chip">${v.errors.length} 错误 · ${v.warnings.length} 提醒</span></div><p>${events||'未识别事件'}</p>${diagnostics||'<p>没有发现已知风险。</p>'}${source?`<details><summary>查看完整 NimbyScript 源码</summary><pre class="veh-modtext">${escapeHtml(source)}</pre></details>`:''}`;
 }
 $('#validate-script-source').addEventListener('click',async()=>{const source=$('#script-expert-source').value;if(!source.trim())return toast('请先粘贴 NimbyScript 源码',true);try{const data=await api('/api/script/validate',{method:'POST',body:JSON.stringify({source})});renderScriptValidation(data.validation,source);toast(data.validation.valid?'源码静态检查通过':'源码存在需要修复的问题',!data.validation.valid);}catch(e){toast(e.message,true);}});
-$('#cancel-task').addEventListener('click',async()=>{await api('/api/task/cancel',{method:'POST',body:'{}'});finishTask();toast('任务已取消');});
+$('#cancel-task').addEventListener('click',async()=>{try{await api('/api/task/cancel',{method:'POST',body:'{}'});finishTask();toast('任务已取消');}catch(e){toast(e.message,true);}});
 
 /* ===== Timetable Designer (自定义时刻表设计器) ===== */
 const TTD = { routes: [], plan: null };

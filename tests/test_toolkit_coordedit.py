@@ -49,7 +49,7 @@ def _make_raw() -> bytes:
 
 def _make_save(tmp_path: Path, raw: bytes) -> Path:
     # header must not itself contain the zstd magic before the frame
-    header = b"NMBY\x02\x00\x01\x00" + b"\x00" * 24
+    header = b"NMBY\x02\x00\x01\x00\x13\x00\x0a\x00" + b"\x00" * 20
     assert ZSTD_MAGIC not in header
     save = tmp_path / "synthetic.nimbyrails5"
     save.write_bytes(header + Zstd().compress(raw, 3))

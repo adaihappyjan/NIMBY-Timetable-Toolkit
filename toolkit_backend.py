@@ -471,18 +471,17 @@ def validate_save_export(raw: bytes, objects: list[dict]) -> dict:
     }
 
 
-# Game format auto-adaptation. Instead of hard-coding a single version, the
-# toolkit reads ExportMeta.model_version and classifies it. Known versions are
-# fully supported; newer versions run in a compatible mode (read-only features
-# are safe, writes are surfaced with a warning); older versions are flagged.
-# To adapt to a future release, usually only KNOWN_MODEL_VERSIONS needs a value.
+# Export schema recognition is separate from the save-format write gate.
+# Add a save signature only after fixture and round-trip verification.
 KNOWN_MODEL_VERSIONS = {224, 225, 226, 227, 228, 229, 230}
 MIN_COMPATIBLE_MODEL_VERSION = 210
 
 
-def detect_game_version(objects: list[dict]) -> dict:
+def detect_game_version(objects: list[dict], header: bytes | None = None) -> dict:
     meta = next((o for o in objects if o.get("class") == "ExportMeta"), {})
     version = meta.get("model_version")
+    if type(version) is not int:
+        version = None
     latest_known = max(KNOWN_MODEL_VERSIONS)
     if version is None:
         status = "unknown"
@@ -502,7 +501,7 @@ def detect_game_version(objects: list[dict]) -> dict:
     else:
         status = "outdated"
         note = f"检测到过旧的游戏版本（model {version}），建议在游戏内重新导出后再处理。"
-    return {
+    result = {
         "model_version": version,
         "company_name": meta.get("company_name"),
         "clock_epoch_s": meta.get("clock_epoch_s"),
@@ -512,6 +511,15 @@ def detect_game_version(objects: list[dict]) -> dict:
         "known_versions": sorted(KNOWN_MODEL_VERSIONS),
         "latest_known_version": latest_known,
     }
+    if header is not None:
+        save_info = core.save_version_info(header)
+        result.update(save_release=save_info['save_release'], save_format=save_info)
+        result['safe_to_write'] = result['safe_to_write'] and save_info['safe_to_write']
+        if not save_info['safe_to_write']:
+            result.update(status='unknown', note=save_info['note'])
+        else:
+            result['note'] = save_info['note'] + ' ' + note
+    return result
 
 
 def scan_export(path: Path) -> dict:
@@ -1065,6 +1073,7 @@ def analyze_save(save_path: Path, export_path: Path) -> dict:
     emit_progress("analyze", 100, 100, "体检完成")
     return {
         **scan,
+        "game_version": detect_game_version(objects, header),
         "save": str(save_path),
         "save_file_size": save_path.stat().st_size,
         "raw_size": len(raw),
@@ -1587,6 +1596,7 @@ def command_save_health(args: argparse.Namespace) -> dict:
     stat = path.stat()
     return {
         "action": "save-health",
+        "game_version": core.save_version_info(header),
         "save": str(path),
         "save_name": path.name,
         "file_size": stat.st_size,
@@ -2953,6 +2963,7 @@ def write_output(
         raise RuntimeError("refusing to overwrite the input save")
     if output_save.exists():
         raise RuntimeError(f"output already exists: {output_save}")
+    compatibility = core.require_verified_save(header)
     emit_progress("write", 82, 100, "正在压缩新存档…")
     output = header + Zstd().compress(raw_after, level)
     emit_progress("write", 90, 100, "正在反向解压校验…")
@@ -2982,6 +2993,7 @@ def write_output(
             pass
     result = {
         **manifest,
+        "save_compatibility": compatibility,
         "input_save": str(input_save),
         "output_save": str(output_save),
         "zstd_frame_offset": frame_offset,

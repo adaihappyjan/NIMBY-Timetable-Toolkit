@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const esc = escapeHtml;
-  const W = {catalog:null, selected:new Set(), preview:null, results:{}, draft:null, undo:[], redo:[], restoring:false};
+  const W = {catalog:null, selected:new Set(), preview:null, revision:0, results:{}, draft:null, undo:[], redo:[], restoring:false};
   const send = (path, value) => api(path, {method:'POST', body:JSON.stringify(value)});
   const clone = value => JSON.parse(JSON.stringify(value));
   const clock = value => {
@@ -44,7 +44,7 @@
     <article class="ws-panel" data-ws-panel="accounting" hidden><h3>实际运营问题排行</h3><p>从存档目录读取 Accounting TSV；这是历史统计，不是实时监控。</p>
       <div class="ws-fields"><label>会计导出<select id="ws-account-file"></select></label><label>对象<select id="ws-kind"><option value="line">线路</option><option value="station">车站</option><option value="train">列车</option></select></label><label>周期<select id="ws-period"><option>daily</option><option>weekly</option><option>monthly</option></select></label><label>日期 / 时间戳<select id="ws-account-stamp"><option value="">最新周期</option></select></label><label>指标<select id="ws-metric"><option value="trains_signal_stop_time">信号等待累计</option><option value="trains_late_arrival_time">到达晚点累计</option><option value="pax_waited_too_long">候车超时人数</option><option value="pax_lost">流失乘客</option><option value="train_departed_full">满载发车次数</option><option value="full_departure_ratio">满载发车比例</option></select></label></div>
       <button id="ws-accounting" class="primary-button">读取并排行</button><div id="ws-accounting-result"></div></article>
-    <article class="ws-panel" data-ws-panel="diagnostic" hidden><h3>只读诊断模组 · 预览版</h3><p>不改变调度、占用检查或列车位置。仅对游戏内勾选扩展的列车采集状态，最多每 60 模拟秒输出一次，稳定状态每 5 分钟一次。尚需游戏编译与运行验收。</p>
+    <article class="ws-panel" data-ws-panel="diagnostic" hidden><h3>只读诊断模组 · 预览版</h3><p>不改变调度、占用检查或列车位置。仅对游戏内勾选扩展的列车采集状态，最多每 60 模拟秒输出一次，稳定状态每 5 分钟一次。1.19.10 已有零编译错误及部分状态运行记录；你的具体路网仍需单独验收。</p>
       <ol><li>点击安装，将模组放入当前存档目录的 mods 子目录。</li><li>游戏内启用 private mod，并在需检查的列车上启用 Toolkit read-only diagnostic。</li><li>本次会话手动开启脚本日志。短时运行后关闭日志，将文本粘贴到下方。</li></ol>
       <div class="ws-tools"><button id="ws-diag-status">检查文件安装状态</button><button id="ws-diag-install">安装只读诊断模组</button></div><p id="ws-diag-state">安装状态未读取；游戏内启用状态无法从文件存在与否推断。</p>
       <details><summary>安装工具箱生成的规则 / 车辆包</summary><p>先在“脚本规则”或“车辆工坊”生成包，再刷新列表。仅允许安装带本工具生成凭证且未被改动的包，不覆盖同名模组。</p><select id="ws-mod-package" aria-label="生成的模组包"></select><button id="ws-mod-refresh">刷新生成包</button><button id="ws-mod-install">安装选中包</button></details>
@@ -55,7 +55,8 @@
   function run(operation,payload={}) {
     if(state.taskActive) {toast('已有后台任务，请等它完成。',true);return;}
     status('正在后台处理，界面可以继续查看…');
-    startTask('workspace',{operation,save:$('#save-select').value,...payload});
+    const save = $('#save-select').value;
+    return startTask('workspace',{operation,save,...payload},{revision:W.revision,save,payload:clone(payload)});
   }
   function requireCatalog(){if(!W.catalog||W.catalog.save!==$('#save-select').value)throw new Error('存档已切换或尚未读取，请先读取所选存档。');}
   const guard = fn => async () => {try{await fn();}catch(e){status(e.message,true);toast(e.message,true);}};
@@ -78,7 +79,10 @@
   }
   function depotValues(){const result={};$$('[data-ws-depot]:checked').forEach(e=>{const field=$$('[data-ws-capacity]').find(f=>f.dataset.wsCapacity===e.dataset.wsDepot);result[e.dataset.wsDepot]=Number(field?.value||0);});return result;}
   function batchRequest(){requireCatalog();const day=$('#ws-days').value;return {fingerprint:W.catalog.fingerprint,selected:[...W.selected],preset:{days_mask:day==='custom'?$$('[data-ws-day]:checked').reduce((n,e)=>n+Number(e.dataset.wsDay),0):day?+day:null,service_start:parseTime('#ws-start'),depot_time:parseTime('#ws-depot-time'),interval:$('#ws-interval').value?+$('#ws-interval').value:null,depot_ids:Object.keys(depotValues()),periods:$('#ws-periods-enabled').checked?[0,1,2,3,4].filter(i=>$(`#ws-period-time-${i}`).value.trim()).map(i=>({start:parseTime(`#ws-period-time-${i}`),interval:+$(`#ws-period-offset-${i}`).value})):null}};}
-  function invalidate(){W.preview=null;$('#ws-apply').disabled=true;}
+  function invalidate(){W.revision++;W.preview=null;W.batchPayload=null;$('#ws-apply').disabled=true;}
+  function previewIsCurrent(context) {
+    return !!context && context.revision===W.revision && context.save===$('#save-select').value;
+  }
   section.addEventListener('change',e=>{if(e.target.matches('[data-ws-group]')){e.target.checked?W.selected.add(e.target.dataset.wsGroup):W.selected.delete(e.target.dataset.wsGroup);renderCatalog();}invalidate();saveProject();});
   section.addEventListener('input',e=>{if(e.target.id==='ws-search')renderCatalog(); if(e.target.id!=='ws-log'){invalidate();saveProject();}});
   $('#ws-load').onclick=()=>run('catalog');$('#ws-templates').onchange=renderCatalog;
@@ -86,8 +90,8 @@
   $('#ws-select-none').onclick=()=>{W.selected.clear();invalidate();renderCatalog();saveProject();};
   $('#ws-days').onchange=()=>{$('#ws-weekdays').hidden=$('#ws-days').value!=='custom';};
   $$('[data-ws-tab]').forEach(b=>b.onclick=()=>{$$('[data-ws-panel]').forEach(p=>p.hidden=p.dataset.wsPanel!==b.dataset.wsTab);$$('[data-ws-tab]').forEach(t=>t.setAttribute('aria-selected',t===b));if(b.dataset.wsTab==='tasks'||b.dataset.wsTab==='accounting')files();});
-  $('#ws-preview').onclick=guard(()=>{W.batchPayload=batchRequest();run('batch',W.batchPayload);});
-  $('#ws-apply').onclick=guard(()=>{if(!W.preview)throw new Error('请先预览。');if(confirm(`将修改 ${W.preview.changes.length} 张运营表，并生成一个新存档。继续？`))run('batch',{...W.batchPayload,apply:true,preview_hash:W.preview.preview_hash,output:outputPath('Workspace')});});
+  $('#ws-preview').onclick=guard(()=>{if(state.taskActive){toast('已有后台任务，请等它完成。',true);return;}const payload=batchRequest();invalidate();run('batch',payload);});
+  $('#ws-apply').onclick=guard(()=>{if(!W.preview||!previewIsCurrent(W.previewContext)||JSON.stringify(batchRequest())!==JSON.stringify(W.batchPayload)){invalidate();throw new Error('参数或存档已改变，请重新预览。');}if(confirm(`将修改 ${W.preview.changes.length} 张运营表，并生成一个新存档。继续？`))run('batch',{...W.batchPayload,apply:true,preview_hash:W.preview.preview_hash,output:outputPath('Workspace')});});
   $('#ws-open-editor').onclick=guard(()=>{requireCatalog();if(W.selected.size!==1)throw new Error('请只勾选一张表打开编排器。');renderOperatingRules({save:W.catalog.save,groups:W.catalog.groups,lines:W.catalog.lines,fingerprint:W.catalog.fingerprint});const id=[...W.selected][0];$('#oprule-schedule').value=id;opruleLoadGroup(W.catalog.groups.find(g=>g.schedule_id===id));switchView('timetable');$('#oprule-editor').scrollIntoView({behavior:'smooth'});});
   $('#ws-pair').onclick=()=>run('pair');
   $('#ws-audit').onclick=guard(()=>{requireCatalog();run('audit',{export:$('#export-select').value,depots:depotValues()});});
@@ -120,10 +124,10 @@
   $('#ws-diag-status').onclick=guard(()=>diag(false));$('#ws-diag-install').onclick=guard(()=>{if(confirm('安装只读诊断预览模组？不会自动启用或覆盖已有不同文件。'))return diag(true);});
   $('#ws-log-parse').onclick=guard(async()=>{if($('#ws-log').value.length>500000)throw new Error('日志过长，请粘贴最近 500 KB 以内内容。');const r=await send('/api/workspace/log',{text:$('#ws-log').value});const labels={UNASSIGNED:'未分配班次',ASSIGNED:'已分配班次',TIMED_STOP:'计时停站',SIGNAL_WAIT:'等待信号'};$('#ws-log-result').innerHTML=`<p>${esc(r.scope)} 共 ${r.total} 条。</p>`+table(['状态','列车 / 信号'],r.records.map(e=>[labels[e.event]||e.event,e.detail]));});
   window.workspaceFailure=message=>status(message,true);
-  window.workspaceResult=async r=>{
+  window.workspaceResult=async (r,context)=>{
     W.results[r.operation]=r;status('已完成。'+(r.scope||''));
     if(r.operation==='catalog'){
-      W.catalog=r;invalidate();const c=r.counts;$('#ws-source').textContent=`${r.save} · ${c.timetables} 张独立运营表 / ${c.templates} 个线路模板 / ${c.trains} 列车（内部对象 ${c.objects}）`;
+      W.catalog=r;invalidate();const c=r.counts;$('#ws-source').textContent=`${r.save} · ${r.game_version?.save_release||'未知版本'} · ${c.timetables} 张独立运营表 / ${c.templates} 个线路模板 / ${c.trains} 列车（内部对象 ${c.objects}）`;
       const depots=r.lines.filter(l=>l.stop_count===1);$('#ws-depots').innerHTML=depots.map(l=>`<label><input type="checkbox" data-ws-depot="${esc(l.id)}">${esc(l.name)} <small>单站候选，请确认</small></label>`).join('')||'没有单站车库候选。';
       $('#ws-capacities').innerHTML=depots.map(l=>`<label>${esc(l.name)} 容量<input type="number" min="1" max="10000" data-ws-capacity="${esc(l.id)}" placeholder="请填写；需在批量页勾选此车库"></label>`).join('');
       const opts=r.lines.filter(l=>l.stop_count>1).map(l=>`<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('');$('#ws-line-a').innerHTML=opts;$('#ws-line-b').innerHTML=opts;$('#ws-line-b').selectedIndex=Math.min(1,$('#ws-line-b').options.length-1);await restoreProject();await files();
@@ -131,6 +135,11 @@
       $('#ws-pairs').innerHTML=`<p>${esc(r.note)} · ${r.workers_used} 个工作进程</p>`+r.pairs.map((p,i)=>`<div class="ws-notice">${esc(p.path.split(/[\\/]/).pop())} · ${p.matched?'结构兼容':esc(p.reason)} ${p.matched?`<button data-ws-use-export="${i}">选用</button>`:''}</div>`).join('');
       $$('[data-ws-use-export]').forEach(b=>b.onclick=()=>{const p=r.pairs[+b.dataset.wsUseExport].path;const el=$('#export-select');if(![...el.options].some(o=>o.value===p))el.add(new Option(p.split(/[\\/]/).pop(),p));el.value=p;status('已选择兼容导出；执行前仍将再次核对。');});
     }else if(r.operation==='batch'){
+      if(r.preview&&!previewIsCurrent(context)){
+        invalidate();status('预览期间参数或存档已改变，旧结果已作废；请重新预览。',true);
+        $('#ws-batch-result').textContent='旧预览已作废，未写入存档。';return;
+      }
+      W.previewContext=context;W.batchPayload=r.preview?context.payload:null;
       W.preview=r.preview?r:null;$('#ws-apply').disabled=!r.preview;
       $('#ws-batch-result').innerHTML=`<h4>${r.preview?'修改预览 · 尚未写入':'新存档已写入并反读校验'}</h4>${r.output_save?`<p>${esc(r.output_save)}</p>`:''}`+r.changes.map(c=>`<details open><summary>${esc(c.name)}</summary>${table(['指令','原时间 / 星期','新时间 / 星期','新重复'],c.after.entries.map(e=>{const old=c.before.entries.find(o=>o.order_id===e.order_id);return [e.line_name,old?`${clock(old.time_seconds)} / ${opruleDayText(old.days_mask)}`:'新增',`${clock(e.time_seconds)} / ${opruleDayText(e.days_mask)}`,e.repeat_is_max?'Max':`x${e.repeat_count}`];}))}${table(['偏移组','原模式 / 秒','新模式 / 秒'],c.after.offset_distributions.flatMap((g,i)=>JSON.stringify(g)!==JSON.stringify(c.before.offset_distributions[i])?[[i+1,`${c.before.offset_distributions[i].mode} / ${c.before.offset_distributions[i].fixed_interval_seconds}`,`${g.mode} / ${g.fixed_interval_seconds}`]]:[]))}</details>`).join('');
       if(!r.preview){acceptance(r);await send('/api/workspace/state',{key:`workspace:${r.input_save}`,patch:{last_output:{output_save:r.output_save,output_file_sha256:r.output_file_sha256}}});await refreshFileLists();await files();}

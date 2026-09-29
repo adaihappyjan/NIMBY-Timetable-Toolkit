@@ -68,7 +68,7 @@ def read_save(path: Path):
 def catalog(path: Path) -> dict:
     import toolkit_scheduleconfig as sc
     from toolkit_savereader import read_schedule_assignments, read_trains_from_raw
-    mark, _, raw, _ = read_save(path)
+    mark, header, raw, _ = read_save(path)
     groups = sc.read_operating_groups(raw)
     assignments = {a.schedule_id: a for a in read_schedule_assignments(raw)}
     trains = {t.id: t.name for t in read_trains_from_raw(raw)}
@@ -80,7 +80,9 @@ def catalog(path: Path) -> dict:
         a = assignments.get(g.schedule_id)
         row['trains'] = [{'id': t, 'name': trains.get(t, t)} for t in sorted(set(a.train_ids if a else []))]
         rows.append(row)
+    from toolkit_binary import save_version_info
     return {'save': str(path), 'fingerprint': mark, 'groups': rows,
+            'game_version': save_version_info(header),
             'counts': {'objects': len(rows), 'templates': sum(r['kind'] == 'template' for r in rows),
                        'timetables': sum(r['kind'] == 'timetable' for r in rows), 'trains': len(trains)},
             'lines': [{'id': l.line_id, 'name': l.name, 'stop_count': l.stop_count,
@@ -430,7 +432,7 @@ def dispatch(request: dict, workers=1) -> dict:
     if action == 'catalog':
         cache_root = request.get('_cache_dir')
         mark = fingerprint(path)
-        cache = Path(cache_root) / ('catalog-v1-' + mark + '.json') if cache_root else None
+        cache = Path(cache_root) / ('catalog-v2-' + mark + '.json') if cache_root else None
         if cache and cache.is_file():
             result = json.loads(cache.read_text('utf-8'))
             result.update(save=str(path), cache_hit=True)

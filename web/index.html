@@ -610,13 +610,13 @@
           <div class="panel-heading">
             <div><p class="step">第三步（可选）</p><h3>批量车库接班 · 写入新存档</h3></div>
             <div class="analytics-tools">
-              <button class="text-button" id="binder-load-fleets">从体检载入车队</button>
+              <button class="text-button" id="binder-load-fleets">从深度核对载入车队</button>
               <button class="text-button" id="binder-fleets-all">全选</button>
               <button class="text-button" id="binder-fleets-none">清空</button>
             </div>
           </div>
-          <p class="repair-note">沿用已通过前后校验的“列车尾部扩展向量”机制，把车库接班一次性写入所选车队；只创建新存档，绝不覆盖原档。请先在“总览与体检”完成体检。</p>
-          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">完成体检后点“从体检载入车队”。</div></div>
+          <p class="repair-note">只创建新存档，绝不覆盖原档。请先在“总览与体检 → 高级”选择匹配的导出，完成“深度核对（需导出）”。普通免 JSON 体检不提供车库扩展绑定信息。</p>
+          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">完成深度核对后点“从深度核对载入车队”。</div></div>
           <div class="binder-meta">
             <label class="output-label">新存档名称<input id="binder-output" type="text" spellcheck="false"></label>
             <button class="primary-button" id="binder-write-garage">批量写入车库接班</button>
