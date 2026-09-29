@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-09-29-1.19.10';
+const APP_BUILD = '2026-09-29-orm-cache';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null, update: null };
 const $ = (selector) => document.querySelector(selector);
@@ -51,6 +51,7 @@ function switchView(name) {
   $$('.view').forEach(el => el.classList.toggle('active', el.id === `view-${name}`));
   $('#view-eyebrow').textContent = viewMeta[name][0]; $('#view-title').textContent = viewMeta[name][1];
   if (name === 'realnet') initRealnet();
+  if (name === 'tilecache') window.refreshTileCache?.();
 }
 function setOptions(select, files) {
   select.innerHTML = files.map((file, index) => `<option value="${escapeHtml(file.path)}" ${index === 0 ? 'selected' : ''}>${escapeHtml(file.name)} · ${formatBytes(file.size)}</option>`).join('');

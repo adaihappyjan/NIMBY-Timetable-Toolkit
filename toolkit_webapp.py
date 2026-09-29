@@ -60,6 +60,8 @@ from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E40
 from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
 from toolkit_workspace import project_state, atomic_store, parse_log
+from toolkit_tilecache import control as tilecache_control, read_config as tilecache_config
+from toolkit_tilewatch import configure as tilewatch_configure, status as tilewatch_status
 from toolkit_updater import (  # noqa: E402
     check_for_updates,
     launch_update_helper,
@@ -1052,6 +1054,11 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path
         try:
+            if route == '/api/tilecache/status':
+                result = tilecache_control(SETTINGS_DIR)
+                result['game_start'] = tilewatch_status(SETTINGS_DIR)
+                self.send_json({'ok': True, 'cache': result})
+                return
             if route == "/api/bootstrap":
                 files = recent_files()
                 settings = read_settings()
@@ -1125,6 +1132,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "跨站请求已被拒绝"}, HTTPStatus.FORBIDDEN)
                 return
             payload = self.read_json()
+            if route == '/api/tilecache/action':
+                action = str(payload.get('action') or '')
+                if action == 'game-start':
+                    tilewatch_configure(SETTINGS_DIR, payload.get('enabled'))
+                    result = tilecache_control(SETTINGS_DIR)
+                else:
+                    result = tilecache_control(SETTINGS_DIR, action, payload.get('config'))
+                result['game_start'] = tilewatch_status(SETTINGS_DIR)
+                self.send_json({'ok': True, 'cache': result})
+                return
             if route == '/api/workspace/state':
                 key = str(payload.get('key') or '')
                 if not key or len(key) > 1000:
@@ -1424,6 +1441,14 @@ def main() -> None:
     STARTUP_UPDATE_RESULT = read_update_result(SETTINGS_DIR, consume=True)
 
     server = make_server()
+    def start_map_cache():
+        # Independent daemon: desktop closing must not break an active game map.
+        try:
+            if tilecache_config(SETTINGS_DIR)['autostart']:
+                tilecache_control(SETTINGS_DIR, 'start')
+        except Exception:
+            pass  # Cache panel reports state; a map helper must not block the app.
+    threading.Thread(target=start_map_cache, daemon=True).start()
     actual_port = int(server.server_address[1])
     app_url = f"http://127.0.0.1:{actual_port}/"
     serve_thread = threading.Thread(

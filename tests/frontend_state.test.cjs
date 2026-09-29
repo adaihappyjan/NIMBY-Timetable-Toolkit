@@ -63,6 +63,46 @@ function workspaceHarness() {
   return c;
 }
 const result = {operation:'batch',preview:true,preview_hash:'hash',changes:[]};
+function tileCacheHarness() {
+  const c = harness();
+  for (const node of c.nodes.values()) node.addEventListener = () => {};
+  const original = c.$;
+  c.$ = id => {
+    const node = original(id);
+    node.listeners ||= {};
+    node.addEventListener = (event, fn) => node.listeners[event] = fn;
+    node.setAttribute = () => {};
+    node.querySelectorAll = () => ['start','stop','prune','clear','save','game-start','refresh'].map(k=>c.$('#tc-'+k));
+    return node;
+  };
+  c.viewMeta = {}; c.formatBytes = String;
+  c.navigator = {clipboard:{writeText:async()=>{}}};
+  c.api = async()=>({cache:c.cache});
+  c.cache = {running:true,config:{directory:'cache',port:58743,max_mb:2048,max_age_days:90,offline:false,autostart:false},urls:{standard:'http://127.0.0.1:58743/tiles/standard/{z}/{x}/{y}.png'},pending:2,active_downloads:1,coalesced:3,queue_full:4,wait_timeouts:5,average_fetch_ms:100,average_wait_ms:200,game_start:{enabled:true,watcher_running:true}};
+  c.$('#tc-style').value = 'standard';
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/tilecache.js'),'utf8'),c);
+  return c;
+}
+test('cache panel shows independent queue metrics and game startup state', async()=>{
+  const c=tileCacheHarness(); await c.window.refreshTileCache();
+  assert.match(c.$('#tc-performance').textContent,/队列满 4/);
+  assert.match(c.$('#tc-performance').textContent,/等待超时 5/);
+  assert.equal(c.$('#tc-game-start').textContent,'关闭随游戏启动');
+  assert.equal(c.$('#tc-start').disabled,true);
+});
+test('cache refresh preserves unsaved settings', async()=>{
+  const c=tileCacheHarness(); await c.window.refreshTileCache();
+  c.$('#tc-max').value=4096; c.$('#tc-max').listeners.input();
+  await c.window.refreshTileCache();
+  assert.equal(c.$('#tc-max').value,4096);
+});
+test('cache duplicate clicks cannot enqueue two actions', async()=>{
+  const c=tileCacheHarness(); let finish, calls=0;
+  c.api=()=>{calls++;return new Promise(r=>finish=r);};
+  const pending=c.$('#tc-start').onclick();
+  await c.$('#tc-start').onclick();
+  assert.equal(calls,1); finish({cache:c.cache}); await pending;
+});
 test('editing during preview discards old response and keeps write disabled', async()=>{
   const c=workspaceHarness(); c.$('#ws-start').value='06:00';
   await c.$('#ws-preview').onclick(); const context=c.started[0].context;

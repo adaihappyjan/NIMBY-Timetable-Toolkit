@@ -22,6 +22,7 @@
         <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
         <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
+        <button class="nav-item" data-view="tilecache"><span>▧</span>ORM 地图缓存</button>
         <button class="nav-item" data-view="timetable"><span>◫</span>时刻表配置</button>
         <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
         <button class="nav-item" data-view="binder"><span>⧉</span>批量绑定</button>
@@ -64,6 +65,49 @@
         <button class="primary-button" id="update-install" type="button">下载并重启更新</button>
       </aside>
 
+      <section class="view" id="view-tilecache">
+        <div class="section-header"><div><p class="eyebrow aqua">LOCAL TILE CACHE</p><h2>看过的铁路地图，留在本机。</h2><p>只缓存游戏实际查看的 ORM 瓦片，不预下载区域、不修改存档。关闭工具箱后，缓存服务仍在后台运行；可启用下方“随游戏启动”，无需先打开工具箱。</p></div></div>
+        <article class="panel">
+          <div class="panel-heading"><h3>缓存服务</h3><strong id="tc-state" role="status" aria-live="polite">尚未读取</strong></div>
+          <p id="tc-stats">点击刷新查看状态。</p>
+          <p id="tc-performance"></p>
+          <p id="tc-error" role="status" aria-live="polite"></p>
+          <p id="tc-game-status">游戏联动启动：尚未读取</p>
+          <button class="secondary-button" id="tc-game-start">开启随游戏启动</button>
+          <p class="repair-note">Windows 登录后静默检测游戏，每 5 秒检查一次；检测到 NIMBY Rails 启动就开启缓存，无终端窗口。关闭联动会移除本功能的用户启动项。游戏退出不强制停止缓存；手动停止缓存后，本次游戏运行期间不再自动拉起。</p>
+          <div class="analytics-tools">
+            <button class="primary-button" id="tc-start">启动缓存</button>
+            <button class="secondary-button" id="tc-stop" disabled>停止后台服务</button>
+            <button class="text-button" id="tc-refresh">刷新状态</button>
+            <button class="text-button" id="tc-prune" disabled>按规则清理</button>
+            <button class="text-button danger-text" id="tc-clear" disabled>清空瓦片缓存…</button>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>连接游戏 · 只需设置一次</h3></div>
+          <ol><li>先启动缓存服务。</li><li>游戏右侧「地图选项 → Sources / 来源 → New Source / 新建来源」。</li><li>复制下方完整地址，粘贴到 URL；使用栅格图层（Generic raster），创建并启用。关闭原先同类型的在线 ORM 图层，避免重复下载。</li><li>在你正在建设的区域查看地图，再回来刷新：下载和命中计数应增加。首次加载仍受网络速度影响。</li></ol>
+          <div class="file-grid">
+            <label>铁路图层<select id="tc-style"><option value="standard">标准 · 铁路与车站</option><option value="maxspeed">限速</option><option value="signals">信号</option><option value="electrification">电气化</option><option value="gauge">轨距</option></select></label>
+            <label>游戏地图源地址<input id="tc-url" readonly aria-label="游戏地图源地址"></label>
+          </div>
+          <button class="secondary-button" id="tc-copy">复制地图源地址</button>
+          <p class="repair-note">如果游戏拒绝本机 HTTP 地址，请保留原来源并反馈提示；不要关闭系统安全功能。停止服务后，本机来源将无法联网或读取缓存。</p>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>空间与联网设置</h3><span>更改后点击保存</span></div>
+          <div class="file-grid">
+            <label>缓存上级目录<input id="tc-directory" placeholder="本地绝对路径"></label>
+            <label>固定端口<input id="tc-port" type="number" min="1024" max="65535"></label>
+            <label>瓦片内容上限（MB）<input id="tc-max" type="number" min="64" max="51200"></label>
+            <label>清理多久未使用的瓦片（天）<input id="tc-age" type="number" min="1" max="3650"></label>
+          </div>
+          <p><label><input type="checkbox" id="tc-offline"> 只读缓存（缺失的区域与缩放级别不会下载）</label></p>
+          <p><label><input type="checkbox" id="tc-auto"> 启动工具箱时自动启动缓存（不是 Windows 开机自启）</label></p>
+          <button class="primary-button" id="tc-save">保存设置</button>
+          <p class="repair-note">目录和端口需停止服务后修改。更换目录不会移动或删除旧缓存。容量上限指瓦片内容，数据库会有少量额外开销；自动清理最久未使用的瓦片。命中和下载计数仅统计本次服务运行。</p>
+          <details><summary>使用规则与故障说明</summary><p>普通联网缓存遵守服务器有效期，过期时按需检查更新。只读缓存可显示旧地图，不保证最新。限流（429）时全局暂停联网，并在重启后保留等待时间；网络错误不会保存成图片。没有区域批量下载或全球预缓存功能。</p><p>数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>；样式 © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noopener">OpenRailwayMap</a>，<a href="https://creativecommons.org/licenses/by-sa/2.0/" target="_blank" rel="noopener">CC-BY-SA 2.0</a>。<a href="https://wiki.openstreetmap.org/wiki/OpenRailwayMap/API" target="_blank" rel="noopener">服务使用规则</a>。</p></details>
+        </article>
+      </section>
       <section class="view active" id="view-dashboard">
         <div class="hero-grid">
           <article class="hero-card">
@@ -849,6 +893,7 @@
     </div>
   </div>
   <script src="/app.js"></script>
+  <script src="/tilecache.js"></script>
   <script src="/workspace.js"></script>
   <script src="/tutorial.js"></script>
 </body>
