@@ -349,11 +349,11 @@ class OpsEstimateTests(unittest.TestCase):
         self.assertIsNone(backend.estimate_headway(0, 12))
         self.assertIsNone(backend.estimate_headway(10477, 0))
 
-    def test_plan_train_count_is_inverse(self) -> None:
-        # Target 600 s headway on a 10477 s cycle -> 17 trains (round(17.46)).
-        self.assertEqual(backend.plan_train_count(10477, 600), 17)
-        # Round-trip: planning to the current headway returns the current fleet.
-        self.assertEqual(backend.plan_train_count(10477, backend.estimate_headway(10477, 12)), 12)
+    def test_plan_train_count_rounds_up_to_meet_target(self) -> None:
+        # Round up: 17 trains cannot meet a target of at most 600 seconds.
+        self.assertEqual(backend.plan_train_count(10477, 600), 18)
+        # A rounded-down displayed headway can require one extra train.
+        self.assertEqual(backend.plan_train_count(10477, backend.estimate_headway(10477, 12)), 13)
 
     def test_plan_train_count_never_below_one(self) -> None:
         self.assertEqual(backend.plan_train_count(500, 100000), 1)

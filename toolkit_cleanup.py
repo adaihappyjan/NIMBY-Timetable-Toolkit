@@ -10,7 +10,7 @@ from typing import Iterable
 
 
 TOOL_COPY_RE = re.compile(
-    r"_(Toolkit|Extension|Recovery|Repair|Workspace|Autotrack)_(\d{8}_\d{6})\.nimbyrails5$",
+    r"_(Toolkit|Extension|Recovery|Repair|Workspace|Autotrack|Names|StopTime|StopTimes|GarageJoin|Align)_(\d{8}_\d{6})\.nimbyrails5$",
     re.IGNORECASE,
 )
 TOOL_PARTIAL_RE = re.compile(
@@ -31,19 +31,19 @@ def _recognized_copy(path: Path) -> bool:
     match = TOOL_COPY_RE.search(path.name)
     if not match:
         return False
-    if match.group(1).lower() != 'autotrack':
-        return True  # Preserve established handling of older toolkit copies.
+    if path.is_symlink() or path.with_suffix('.keep').exists():
+        return False
     # A player may load and subsequently save over an experimental copy. Never
     # auto-retire that newer work, nor a manually named lookalike without proof.
     try:
         manifest = json.loads(_manifest_for(path).read_text('utf-8'))
-        if manifest.get('operation') != 'autotrack' or Path(manifest['output_save']).resolve() != path.resolve():
+        if Path(manifest['output_save']).resolve() != path.resolve():
             return False
         hasher = hashlib.sha256()
         with path.open('rb') as stream:
             for block in iter(lambda: stream.read(1024*1024), b''):
                 hasher.update(block)
-        return hasher.hexdigest() == manifest.get('output_sha256')
+        return hasher.hexdigest() == (manifest.get('output_sha256') or manifest.get('output_file_sha256'))
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -138,7 +138,19 @@ def cleanup_preview(
             }
         )
 
+    copies = [
+        {'name': p.name, 'path': str(p), 'pinned': p.with_suffix('.keep').exists(),
+         'eligible': p in completed}
+        for p in directory.iterdir() if p.is_file() and TOOL_COPY_RE.search(p.name)
+    ]
+    token = hashlib.sha256(json.dumps([
+        (str(p), p.stat().st_size, p.stat().st_mtime_ns)
+        for item in targets for p in map(Path, item['paths'])
+    ], sort_keys=True).encode()).hexdigest()
     return {
+        "token": token,
+        "copies": sorted(copies, key=lambda x: x['name']),
+        "unverified_or_pinned_count": len(copies) - len(completed),
         "directory": str(directory),
         "days": days,
         "keep": keep,
@@ -200,6 +212,11 @@ def _recycle_windows(paths: list[Path]) -> None:
 
 
 def execute_cleanup(directory: Path, preview: dict) -> dict:
+    # Do not act on an old preview if a player saved, pinned, or renamed a file.
+    current = cleanup_preview(directory, days=preview['days'], keep=preview['keep'],
+                              compact=preview.get('mode') == 'compact')
+    if current['token'] != preview.get('token'):
+        raise RuntimeError('清理列表已变化，未执行清理。请重新预览并确认。')
     requested = [path for item in preview.get("targets", []) for path in item["paths"]]
     paths = _validate_targets(directory, requested)
     bytes_before = sum(path.stat().st_size for path in paths)
@@ -213,3 +230,15 @@ def execute_cleanup(directory: Path, preview: dict) -> dict:
         "reclaimed_bytes": bytes_before,
         "recoverable": True,
     }
+
+
+def set_copy_protection(directory: Path, name: str, protected: bool) -> None:
+    directory = directory.resolve()
+    path = (directory / name).resolve()
+    if path.parent != directory or not TOOL_COPY_RE.search(path.name) or not path.is_file():
+        raise RuntimeError('请选择当前存档目录中列出的工具副本。')
+    marker = path.with_suffix('.keep')
+    if protected:
+        marker.write_text('NIMBY Toolkit: exclude this save from cleanup.\n', encoding='utf-8')
+    elif marker.is_file():
+        marker.unlink()

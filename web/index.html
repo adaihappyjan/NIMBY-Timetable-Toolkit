@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/studio.css">
   <link rel="stylesheet" href="/autotrack.css">
+  <link rel="stylesheet" href="/usability.css">
 </head>
 <body>
   <div class="app-shell">
@@ -18,21 +19,21 @@
       </div>
       <nav id="main-nav" aria-label="主要功能">
         <button class="nav-item active" data-view="dashboard"><span>⌂</span>总览与体检</button>
-        <button class="nav-item" data-view="workspace"><span>▦</span>线路工作台</button>
+        <button class="nav-item" data-view="workspace" title="读取存档，按线路批量配置、诊断和验收"><span>▦</span>线路工作台</button>
         <button class="nav-item" data-view="learn"><span>?</span>教程中心</button>
         <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
         <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
         <button class="nav-item" data-view="autotrack"><span>⇢</span>自动铺轨 · 实验</button>
         <button class="nav-item" data-view="tilecache"><span>▧</span>ORM 地图缓存</button>
-        <button class="nav-item" data-view="timetable"><span>◫</span>时刻表配置</button>
+        <button class="nav-item" data-view="timetable" title="计算理论方案，或精细编辑停站与运营指令"><span>◫</span>时刻表配置</button>
         <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
-        <button class="nav-item" data-view="binder"><span>⧉</span>批量绑定</button>
+        <button class="nav-item" data-view="binder" title="生成规则包及对象绑定清单；部分规则仍需游戏内勾选"><span>⧉</span>批量绑定</button>
         <button class="nav-item" data-view="vehicle"><span>▤</span>车辆工坊</button>
-        <button class="nav-item" data-view="scripts"><span>{ }</span>脚本规则</button>
-        <button class="nav-item" data-view="history"><span>◔</span>历史与性能</button>
-        <button class="nav-item" data-view="cleanup"><span>♲</span>清理与历史</button>
-        <button class="nav-item" data-view="roadmap"><span>⌁</span>开发路线</button>
+        <button class="nav-item" data-view="scripts" title="生成游戏扩展脚本，不会自动在游戏内启用"><span>{ }</span>脚本规则</button>
+        <button class="nav-item" data-view="history"><span>◔</span>历史数据对比</button>
+        <button class="nav-item" data-view="cleanup"><span>♲</span>副本清理</button>
+        <button class="nav-item" data-view="roadmap"><span>⌁</span>功能一览</button>
         <button class="nav-item" data-view="author"><span>♡</span>关于作者</button>
       </nav>
       <div class="sidebar-foot">
@@ -90,7 +91,7 @@
             <label>游戏矢量底图（自动发现；可修正路径）<input id="at-map-path" placeholder="游戏目录/resources/maps/osm400.pmtiles"></label>
             <label>自定义路线文件<input id="at-file" type="file" accept=".json,.geojson,application/json" disabled></label>
             <label>结构模式<select id="at-structure"><option value="auto">自动 · 默认地面，保留底图桥隧</option><option value="ground">全部地面（忽略底图桥隧）</option><option value="bridge">全部高架 +1 层</option><option value="tunnel">全部隧道 -1 层</option></select></label>
-            <label>地面速度类型<select id="at-variant"><option value="6">自动 / 中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
+            <label>地面速度类型<select id="at-variant"><option value="6">中速 · 160 km/h（默认）</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
             <label>桥梁速度类型<select id="at-bridge-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
             <label>隧道速度类型<select id="at-tunnel-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
             <label>接轨预留（米）<input id="at-gap" type="number" value="50" min="20" max="200"></label>
@@ -98,7 +99,7 @@
             <label>终点里程（米；留空至路线末端）<input id="at-end" type="number" min="0" step="1" placeholder="整段"></label>
           </div>
           <button class="primary-button" id="at-preview">② 检查冲突并预览</button>
-          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。两站直线距离 0.1–100 公里，底图读取最多 1024 瓦片，长线请加中间点分段。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
+          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。每段两站直线距离 0.1–100 公里，底图读取最多 1024 瓦片；最多 20 个站点，整条生成路线最多 150 公里、8000 个节点。中间点只能分段，不能突破总量限制。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
         </article>
         <article class="panel">
           <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>
@@ -111,7 +112,7 @@
           <div class="button-row"><button class="primary-button" id="at-apply" disabled>生成新的测试存档</button><button class="secondary-button" id="at-download" disabled>导出预览方案</button></div>
           <p id="at-output" role="status"></p>
         </article>
-        <article class="panel"><h3>资料在哪里读取？</h3><p>游戏底图从 Steam 库自动寻找。GeoJSON 放在存档目录、存档目录下的 routes，或工具箱 routes 目录，重新自动读取即可；不需要逐份上传。时刻表导出 JSON 不会当作路线文件。</p><p>自动底图寻路需要本机 Node.js 22 或更新版；GeoJSON 与原型路线不需要。计算在后台进行，不弹终端，不上传存档或地图。</p><p>底图数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors（ODbL）</a> / OpenMapTiles。底图不是工程拓扑，自动路线必须先在新副本内检查。</p></article>
+        <article class="panel"><h3>资料在哪里读取？</h3><p>游戏底图从 Steam 库自动寻找。GeoJSON 放在存档目录、存档目录下的 routes，或工具箱 routes 目录，重新自动读取即可；不需要逐份上传。时刻表导出 JSON 不会当作路线文件。</p><p>零基础完整包已内置寻路组件，不用另装 Node.js。若提示缺失，请重新完整解压安装包；源码版才需要自行提供 Node.js 22 或更新版。GeoJSON 与原型路线不需要此组件。计算在后台进行，不弹终端，不上传存档或地图。</p><p>底图数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors（ODbL）</a> / OpenMapTiles。底图不是工程拓扑，自动路线必须先在新副本内检查。</p></article>
       </section>
       <section class="view" id="view-tilecache">
         <div class="section-header"><div><p class="eyebrow aqua">LOCAL TILE CACHE</p><h2>看过的铁路地图，留在本机。</h2><p>只缓存游戏实际查看的 ORM 瓦片，不预下载区域、不修改存档。关闭工具箱后，缓存服务仍在后台运行；可启用下方“随游戏启动”，无需先打开工具箱。</p></div></div>
@@ -183,16 +184,22 @@
           </div>
           <div class="file-grid file-grid-solo">
             <label>输入存档<select id="save-select" aria-label="输入存档"></select></label>
-            <button class="primary-button scan-button" id="scan-button"><span>开始体检 · 免 JSON</span><small>只读存档 · 几秒完成</small></button>
+            <button class="primary-button scan-button" id="scan-button"><span>开始体检 · 免 JSON</span><small>只读检查 · 大存档可能需要较久</small></button>
           </div>
-          <div class="safety-strip"><span>✓</span>整套体检只解压并读取存档，不写任何文件；写入类功能永远只创建新存档。</div>
+          <div class="safety-strip"><span>✓</span>体检不修改游戏存档；检查结果与任务记录可能保存到工具箱目录。修改游戏数据时创建新存档副本。</div>
           <details class="adv-json" id="adv-json-box">
-            <summary><span class="sd-label">高级（可选）：导出 JSON 深度核对</span><span class="sd-path">迁移 / 恢复 / 运营明细需要它</span></summary>
+            <summary><span class="sd-label">需要时刻表数据？先在游戏内导出</span><span class="sd-path">选择游戏生成的 JSON，再与存档核对</span></summary>
             <div class="adv-json-body">
-              <p class="save-dir-hint">多数功能已无需导出。仅当你要做<b>智能迁移、模板恢复、逐表运营明细（服务时段/覆盖天数/相位）</b>时，才需要与存档<b>同一时刻</b>导出的时刻表 JSON，并在此做一次深度核对。</p>
+              <p class="save-dir-hint">普通存档体检不需要此步骤。智能迁移、模板恢复、运营明细、从导出载入线路图及部分车队绑定功能，需要<b>由游戏生成的时刻表数据文件</b>；工具箱不能替你从正在运行的游戏中导出。</p>
+              <ol class="save-dir-hint">
+                <li>在 NIMBY Rails 中打开要处理的存档，<b>暂停游戏并保存</b>。</li>
+                <li>保持暂停、不修改线路或车辆，在<b>游戏内执行时刻表数据导出</b>，等待生成名称含 <code>Timetable Export</code> 的 <code>.json</code> 文件。</li>
+                <li>回到工具箱，点击右上角<b>“刷新文件”</b>，选择刚保存的存档和下方对应文件，再点<b>“核对存档与游戏导出”</b>。</li>
+              </ol>
+              <p class="save-dir-hint">列表为空？确认游戏导出已完成，并检查下方“存档目录”是否包含该文件。以后修改时刻表、线路或车辆后，需要重新保存并导出。<b>工具箱导出的线路图 JSON、运营报告或方案 JSON 不能代替这个文件。</b></p>
               <div class="file-grid">
-                <label>时刻表导出 JSON<select id="export-select" aria-label="时刻表导出 JSON"></select></label>
-                <button class="secondary-button" id="deep-scan-button">深度核对（需导出）</button>
+                <label>游戏生成的时刻表数据（Timetable Export JSON）<select id="export-select" aria-label="游戏生成的时刻表数据"></select></label>
+                <button class="secondary-button" id="deep-scan-button">核对存档与游戏导出</button>
               </div>
             </div>
           </details>
@@ -217,7 +224,7 @@
           </div>
           <p class="save-dir-hint">把游戏导出里每个车站的<b>真实名称（模组名称）</b>一键写回存档，让游戏内显示<b>真正站台名</b>而不是编号。默认只补写当前显示为编号的车站，永不改动原存档（生成新存档 + 反向解压校验）。</p>
           <div class="file-grid">
-            <label>名称来源（导出 JSON）<select id="stationname-export" aria-label="站名来源导出 JSON"></select></label>
+            <label>名称来源（游戏导出的时刻表数据）<select id="stationname-export" aria-label="站名来源：游戏时刻表数据"></select></label>
             <label class="checkbox-label"><input type="checkbox" id="stationname-all"> 连已命名车站一并覆盖</label>
             <button class="primary-button" id="stationname-write"><span>一键写入真实站名</span><small>生成新存档 · 校验后落盘</small></button>
           </div>
@@ -235,11 +242,11 @@
           <div class="overview-meta" id="overview-meta"></div>
           <div class="overview-lists" id="overview-lists" hidden>
             <div class="overview-col">
-              <div class="panel-heading small"><h4>带几何的线路</h4><span class="count-badge" id="overview-route-count">0</span></div>
+              <div class="panel-heading small"><h4>含轨道路径的线路</h4><span class="count-badge" id="overview-route-count">0</span></div>
               <div class="overview-scroll" id="overview-routes"></div>
             </div>
             <div class="overview-col">
-              <div class="panel-heading small"><h4>时刻表容器（引用线路）</h4><span class="count-badge" id="overview-container-count">0</span></div>
+              <div class="panel-heading small"><h4>运营时刻表（使用上述线路）</h4><span class="count-badge" id="overview-container-count">0</span></div>
               <div class="overview-scroll" id="overview-containers"></div>
             </div>
           </div>
@@ -250,7 +257,7 @@
             <div><p class="step">免 JSON</p><h3>逐站时刻表直读</h3></div>
             <button class="secondary-button" id="timetable-read">直读逐站时刻</button>
           </div>
-          <div class="repair-note">直接从存档的线路计时模板还原每条线路的逐站到/发时刻与单程运行时间（时间以 0.5 秒精度存储）。已用导出逐条校验：32/37 条线路（含大部分地铁线）逐站精确到秒。只读，正式存档不受影响。</div>
+          <div class="repair-note">读取线路模板中的逐站相对到发时间（存储精度 0.5 秒），不是游戏实时到发记录。模板可能包含单向、往返或环线；请按站序判断，不能直接当成车辆完整循环。</div>
           <div class="timetable-lines" id="timetable-lines"><div class="placeholder">点“直读逐站时刻”从当前存档展开各线时刻表。</div></div>
         </article>
 
@@ -260,16 +267,16 @@
             <button class="secondary-button" id="ops-read">按目标班距重算</button>
           </div>
           <div class="repair-note">
-            班距为规则推导量、<b>不入档</b>，故直接从存档估算：<code>h ≈ 循环时长 T ÷ 车数 N</code>（T、N 均从二进制直读）。
-            未计折返/层停，估算通常略偏小，实测中位误差约 <b>3.5%–5%</b>、大多数线路在 10% 以内。
-            发车时刻/精确班距/覆盖天数由游戏运行时展开，无法仅凭存档精确复现——如导出可用，将作为<b>只读真值护栏</b>逐条对账。
+            班距为规则推导量、<b>不入档</b>，故直接从存档估算：<code>h ≈ 线路模板时长 T ÷ 车数 N</code>（T、N 均从二进制直读）。
+            这是简化估算：未补齐模板以外的返程、折返、出入库及等待时间，可能低估所需车数，误差随线路而变。
+            发车时刻/精确班距/覆盖天数由游戏运行时展开，无法仅凭存档精确复现——如导出可用，将作为<b>游戏导出参考数据</b>逐条对账。
           </div>
           <div class="ops-planner">
             <label class="output-label">目标班距（秒）<input id="ops-target" type="number" min="30" step="30" placeholder="如 600 = 10 分钟"></label>
-            <label class="output-label ops-guard"><input type="checkbox" id="ops-use-export" checked> 用导出对账（真值护栏，只读）</label>
+            <label class="output-label ops-guard"><input type="checkbox" id="ops-use-export" checked> 与游戏导出的时刻表数据对比（只读）</label>
           </div>
           <div id="ops-summary" class="overview-meta"></div>
-          <div class="timetable-lines" id="ops-lines"><div class="placeholder">点“仅用存档体检（估算）”从当前存档估算各线班距；填目标班距可规划所需车数。</div></div>
+          <div class="timetable-lines" id="ops-lines"><div class="placeholder">点“按目标班距重算”从当前存档估算各线班距；填目标班距可规划所需车数。</div></div>
         </article>
 
         <div class="metric-grid" id="metric-grid" hidden></div>
@@ -291,9 +298,9 @@
       <section class="view" id="view-analytics">
         <div class="section-intro">
           <div><p class="eyebrow aqua">OPERATIONS ANALYTICS</p><h2>运营分析（只读）</h2><p>从导出 JSON 计算服务时段、班距均匀度、覆盖天数、车队规模等运营指标，绝不修改存档。</p></div>
-          <span class="phase-badge safe">零风险只读</span>
+          <span class="phase-badge safe">只读分析</span>
         </div>
-        <div class="metric-grid" id="analytics-kpi"><div class="placeholder">逐表运营明细（服务时段/覆盖天数/相位）来自导出：请在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对。班距估算可直接在“总览与体检”免 JSON 查看。</div></div>
+          <div class="metric-grid" id="analytics-kpi"><div class="placeholder">逐表运营明细需要游戏导出的时刻表数据。请展开“总览与体检 › 需要时刻表数据？先在游戏内导出”，按步骤生成并选择文件，再核对存档与游戏导出。班距估算可直接在总览查看，无需导出。</div></div>
         <article class="panel" id="analytics-panel" hidden>
           <div class="panel-heading">
             <div><p class="step">逐表指标</p><h3>时刻表运营明细</h3></div>
@@ -307,7 +314,7 @@
                 <option value="good">健康</option>
               </select>
               <button class="text-button" id="export-report-csv">导出 CSV</button>
-              <button class="text-button" id="export-report-json">导出 JSON</button>
+              <button class="text-button" id="export-report-json">导出运营报告 JSON</button>
             </div>
           </div>
           <div id="analytics-list" class="analytics-list"></div>
@@ -316,20 +323,39 @@
 
       <section class="view" id="view-map">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">TRANSIT MAP</p><h2>一键线路图（只读）</h2><p>按车站经纬度绘制单条或多条线路的路网示意图，自动识别换乘站，可导出 SVG 打印或分享。</p></div>
-          <span class="phase-badge safe">零风险只读</span>
+          <div><p class="eyebrow aqua">TRANSIT MAP</p><h2>一键线路图（只读）</h2><p>搜索并勾选线路，选择地理图、都市地铁海报或铁路总览。示意图依据真实站序和换乘关系排版，不修改游戏轨道；可导出 SVG 打印或分享。</p></div>
+          <span class="phase-badge safe">只读分析</span>
         </div>
         <article class="panel">
           <div class="panel-heading">
             <div><p class="step">第一步</p><h3>选择线路</h3></div>
             <div class="analytics-tools">
-              <button class="text-button" id="load-lines">从当前导出载入线路</button>
-              <button class="text-button" id="map-select-service">仅载客线</button>
-              <button class="text-button" id="map-select-all">全选</button>
-              <button class="text-button" id="map-clear">清空</button>
+              <button class="text-button" id="load-lines">从游戏时刻表数据载入线路</button>
+              <button class="text-button" id="map-select-service">当前结果仅选载客线</button>
+              <button class="text-button" id="map-select-all">全选当前结果</button>
+              <button class="text-button" id="map-clear">取消当前结果</button>
+              <button class="text-button" id="map-clear-all">取消全部线路</button>
             </div>
           </div>
-          <div id="map-line-list" class="map-line-grid"><div class="placeholder">点“从当前导出载入线路”，会读取上方所选的时刻表导出。</div></div>
+          <div class="map-list-tools">
+            <label>搜索线路<input id="map-line-search" type="search" placeholder="线路名称、编号或沿线站名" autocomplete="off"></label>
+            <label>排序<select id="map-line-sort"><option value="name-asc">名称 A–Z（自然排序）</option><option value="name-desc">名称 Z–A</option><option value="code-asc">线路编号 ↑</option><option value="stops-desc">站数 多 → 少</option><option value="stops-asc">站数 少 → 多</option><option value="selected-first">已选优先</option></select></label>
+            <label class="map-toggle"><input id="map-only-selected" type="checkbox">只看已选</label>
+            <p id="map-selection-summary" role="status">尚未载入线路</p>
+          </div>
+          <p class="map-selection-note">搜索只过滤列表，不改变勾选或图表；被隐藏的已选线路仍会绘制和导出。</p>
+          <div id="map-line-list" class="map-line-grid"><div class="placeholder">先在游戏内导出时刻表数据，再到“总览与体检”刷新并选择该文件，最后点击“从游戏时刻表数据载入线路”。这里不是读取工具箱导出的线路图 JSON。</div></div>
+          <details class="map-branch-controls">
+            <summary>同线路分支分组（仅影响地铁线网图）</summary>
+            <p>默认结合线路名称 / 编号与共用区间识别分支，或按同色、共用端点及至少两个共用区间识别。仅共用起点不会合并。识别不对时，可在此指定。</p>
+            <label>分组名称 <input id="map-branch-name" type="text" maxlength="80" placeholder="例如：机场线"></label>
+            <div class="button-row">
+              <button id="map-branch-group" type="button">将已选设为同一线路</button>
+              <button id="map-branch-independent" type="button">将已选设为独立线路</button>
+              <button id="map-branch-auto" type="button">已选恢复自动识别</button>
+            </div>
+            <p>作用于全部已勾选线路，包括被搜索隐藏的线路；建议先清空勾选，再选择需要分组的分支。同组采用列表数据中第一条线路的颜色，共用相邻站间只画一次，站序不同的区间仍保留。重新载入数据会清除手动分组；导出线路图 JSON 会记录分组。不修改游戏线路或存档。</p>
+          </details>
         </article>
         <article class="panel" id="map-render-panel" hidden>
           <div class="panel-heading">
@@ -339,9 +365,14 @@
                 <select id="map-style">
                   <option value="geo">地理示意（多线）</option>
                   <option value="schematic">八向示意图</option>
+                  <option value="metro">地铁线网图（共线分色 / 换乘站）</option>
                   <option value="strip">单线条形图（地铁贴纸）</option>
                 </select>
               </label>
+              <label class="map-toggle" id="map-metro-theme-wrap" hidden>线网图版式<select id="map-metro-theme"><option value="metro">都市地铁 · 圆角 / 站名沿线</option><option value="atlas">铁路总览 · 紧凑 / 小站点</option></select><select id="map-metro-orientation" aria-label="线网图方向"><option value="h">横向海报</option><option value="v">纵向总览</option><option value="geo">保持大致地理方向</option></select></label>
+              <label class="map-toggle" id="map-transfer-wrap" hidden>换乘站图标<select id="map-transfer-style"><option value="circle">大圆</option><option value="capsule">胶囊形（圆角长条）</option></select></label>
+              <label class="map-toggle" id="map-layout-wrap" hidden>布局<select id="map-metro-layout"><option value="regular">常规线网</option><option value="grid">网格布局（水平 / 垂直）</option></select></label>
+              <label class="map-toggle" id="map-merge-wrap" hidden><input id="map-merge-branches" type="checkbox" checked>合并同线路分支（自动识别及手动分组）</label>
               <label class="map-toggle" id="map-orient-wrap" hidden>方向
                 <select id="map-orient">
                   <option value="h">横向</option>
@@ -351,12 +382,13 @@
               <label class="map-toggle"><input type="checkbox" id="map-all-labels"> 显示所有站名</label>
               <label class="map-toggle"><input type="checkbox" id="map-curved" checked> 平滑曲线</label>
               <button class="text-button" id="draw-map">绘制线路图</button>
+              <label class="map-toggle">查看比例<select id="map-zoom"><option value="fit">适合窗口</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select></label>
               <button class="text-button" id="export-map-svg">导出 SVG</button>
-              <button class="text-button" id="export-map-json">导出 JSON</button>
+              <button class="text-button" id="export-map-json">导出线路图数据 JSON</button>
             </div>
           </div>
           <details class="map-advanced">
-            <summary>导出文件夹 · SVG / JSON</summary>
+            <summary>线路图导出文件夹 · 仅限本页 SVG / JSON</summary>
             <label class="map-export-label">完整文件夹路径<input id="map-export-dir" type="text" placeholder="例如 D:\NIMBY线路图"></label>
             <button class="text-button" id="map-export-save">保存文件夹</button>
             <button class="text-button" id="map-export-default">恢复默认文件夹</button>
@@ -373,8 +405,9 @@
               <label>站间距<input type="number" id="map-gap" value="66" min="24" max="200" step="2"></label>
               <button class="text-button" id="map-reset-adv">重置默认</button>
             </div>
-            <p class="map-adv-hint">画布宽高只影响“地理示意 / 八向示意图”；条形图会按内容自动排布，字号、线路粗细、站点大小、站间距对全部样式生效。</p>
+            <p class="map-adv-hint">画布宽高用于地理、八向及地铁线网图；地铁线网图采用连续直段、圆角和沿线站名；拥挤时扩展画布或使用引线，不用数字索引替代站名。支持都市地铁横向海报、铁路纵向总览或大致地理方向。站间距用于条形图及地铁线网图，平滑曲线仅用于地理示意。换乘按同一车站 ID 判断，同名不同 ID 不会自动合并。</p>
           </details>
+          <p id="map-render-status" role="status" aria-live="polite">选择线路后即可绘制；铁路总览在“地铁线网图”的版式中选择。</p>
           <div id="map-canvas" class="map-canvas"><div class="placeholder">选择线路后点“绘制线路图”。</div></div>
         </article>
       </section>
@@ -420,7 +453,7 @@
             <button class="text-button" id="realnet-go">跳转</button>
             <button class="text-button" id="realnet-fit-game">定位到游戏路网</button>
             <label class="map-toggle"><input type="checkbox" id="realnet-pin-mode"> 点图放置规划针</label>
-            <button class="text-button" id="realnet-export-geojson">导出规划针 GeoJSON</button>
+            <button class="text-button" id="realnet-export-geojson">导出站点标记 GeoJSON（非铺轨路线）</button>
             <button class="text-button" id="realnet-export-csv">导出规划针 CSV</button>
             <button class="text-button danger-text" id="realnet-clear-pins">清空规划针</button>
           </div>
@@ -457,10 +490,10 @@
         </article>
         <article class="panel" id="realnet-align-panel">
           <div class="panel-heading">
-            <div><p class="step">坐标级对齐</p><h3>把车站对齐到真实经纬度</h3></div>
+            <div><p class="step">坐标级对齐</p><h3>修改车站位置字段（不搬动轨道）</h3></div>
             <span class="phase-badge safe">只建新存档</span>
           </div>
-          <p class="repair-note">先“从当前存档直读路网”。选一个游戏车站，填目标经纬度（或勾选“点图取坐标”后在地图上点一下），加入对齐列表；生成时只覆盖每个车站坐标的 16 字节、绝不改动其它数据，并写入一个新存档。</p>
+          <p class="repair-note">先“从当前存档直读路网”。选一个游戏车站，填目标经纬度（或勾选“点图取坐标”后在地图上点一下），加入对齐列表；生成时只修改车站位置字段，不移动站台轨道、信号或连接线路；写入范围为每个车站的 16 字节、绝不改动其它数据，并写入一个新存档。</p>
           <div class="realnet-searchbar">
             <select id="align-station" aria-label="选择车站"><option value="">先直读路网…</option></select>
             <input id="align-lonlat" type="text" placeholder="目标经纬度 lon,lat（如 -79.38,43.64）" spellcheck="false">
@@ -478,37 +511,41 @@
 
       <section class="view" id="view-timetable">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>自定义时刻表设计器</h2><p>选一条线，设定运营时段与高峰/平峰班距，即时算出完整时刻表并绘制专业运行图（Marey 弦线图），给出所需车数与逐站发车板，可导出与在游戏内复刻。</p></div>
-          <span class="phase-badge safe">基于逐站真值 · 只读</span>
+          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>时刻表工具：先选择要做什么</h2><p>本页包含理论方案计算和存档修改两类操作。生成运行图不会自动配置游戏；写入新副本后仍需加载并验收。</p></div>
+          <span class="phase-badge safe">计算方案不写入 · 修改另建副本</span>
         </div>
+        <nav class="task-shortcuts" aria-label="时刻表任务入口">
+          <a href="#ttd-panel">只计算理论方案</a><a href="#ttd-write">修改停站时间</a><a href="#oprule-card">编辑游戏运营指令</a><a href="#migration-output">迁移车队</a><a href="#recover-panel">恢复历史车队</a>
+        </nav>
+        <p class="repair-note">术语：线路模板时长＝按所列站序运行一次；车辆完整循环＝回到同一发车条件的总时间（含返程、折返等）。发车偏移＝相对首车延后，例如 0 / 7 / 14 分。次日 00:30 可写作 24:30。输入框旁的“秒/分”决定单位。</p>
         <article class="panel" id="ttd-panel">
           <div class="panel-heading"><div><p class="step">时刻表工作室</p><h3>运行图设计</h3></div>
             <button class="secondary-button" id="ttd-read">重新直读线路（免 JSON）</button>
           </div>
           <div class="ttd-layout">
             <div class="ttd-form">
-              <label>线路<select id="ttd-line" aria-label="线路"><option value="">先点“直读线路”</option></select></label>
+              <label>线路<select id="ttd-line" aria-label="线路"><option value="">先点“重新直读线路（免 JSON）”</option></select></label>
               <label>运行方向
                 <select id="ttd-dir">
-                  <option value="round" selected>往返（双向）</option>
-                  <option value="single">单向</option>
+                  <option value="round" selected>去程模板 + 对称返程（估算）</option>
+                  <option value="single">按完整模板运行（不补返程）</option>
                 </select>
               </label>
               <div class="ttd-row"><label>首班<input id="ttd-first" type="text" value="05:30" placeholder="05:30"></label><label>末班<input id="ttd-last" type="text" value="24:30" placeholder="24:30"><small>次日可写 24:30 / 25:00</small></label></div>
               <div class="ttd-row"><label>高峰班距<input id="ttd-peak" type="number" min="0.5" max="180" step="0.5" value="4"><span>分</span></label><label>平峰班距<input id="ttd-offpeak" type="number" min="0.5" max="360" step="0.5" value="10"><span>分</span></label></div>
               <label>高峰时段<input id="ttd-windows" value="07:00-09:30, 16:00-19:00"><small>多个时段用逗号分开，可跨午夜</small></label>
-              <div class="ttd-row"><label>终点折返<input id="ttd-layover" type="number" min="0" max="60" step="0.5" value="4"><span>分</span></label><label>单程运行<input id="ttd-run" type="number" min="1" max="600" step="0.1" value="0" readonly><span>分</span></label></div>
-              <div class="ttd-row"><label>统一停站<input id="ttd-dwell" type="number" min="0" max="600" step="1" placeholder="用存档真值"><span>秒</span><small>留空＝用存档每站真实停站；填数则全线按此停站重算运行/车数</small></label></div>
-              <button class="primary-button full" id="ttd-generate">生成时刻表与运行图</button>
+              <div class="ttd-row"><label>终点折返<input id="ttd-layover" type="number" min="0" max="60" step="0.5" value="4"><span>分</span></label><label>模板运行<input id="ttd-run" type="number" min="1" max="600" step="0.1" value="0" readonly><span>分</span></label></div>
+              <div class="ttd-row"><label>统一停站<input id="ttd-dwell" type="number" min="0" max="600" step="1" placeholder="沿用模板停站"><span>秒</span><small>留空沿用模板停站；填数只影响此处理论计算，不会自动写入游戏</small></label></div>
+              <button class="primary-button full" id="ttd-generate">生成理论运行计划</button>
               <div class="ttd-exports" hidden id="ttd-exports">
                 <button class="text-button" id="ttd-backfill" title="把当前停站设置回填到下方“停站时间写入”">↓ 回填到停站写入</button>
                 <button class="text-button" id="ttd-export-csv">导出 CSV</button>
-                <button class="text-button" id="ttd-export-json">导出 JSON</button>
+                <button class="text-button" id="ttd-export-json">导出理论运行计划 JSON</button>
                 <button class="text-button" id="ttd-export-svg">导出运行图 SVG</button>
               </div>
             </div>
             <div class="ttd-results" id="ttd-results">
-              <div class="placeholder">先“直读线路”，选好线路与参数后点“生成时刻表与运行图”。</div>
+              <div class="placeholder">先点“重新直读线路（免 JSON）”，选好线路与参数后点“生成理论运行计划”。</div>
             </div>
           </div>
           <div class="ttd-write" id="ttd-write">
@@ -546,13 +583,13 @@
               <div><p class="step">CUSTOM TIMETABLE · 免 JSON</p><h3>自定义运营时刻表编辑器</h3></div>
               <span class="phase-badge">只写新档</span>
             </div>
-            <p class="ttd-write-note">比游戏内更集中地编辑整张指令表：支持 Order ID 安全保留与自动分配、Line、Timing、Enter/Exit/Timing 站点、插入、真正的嵌套“堆积”、星期、重复，以及全部 10 个偏移组。站点选择来自该 Line 自己的线路顺序表；所有写入都会创建新档并做结构回读。</p>
+            <p class="ttd-write-note">比游戏内更集中地编辑整张指令表：支持线路、进入/退出站、校时点、日期、重复及逐车发车偏移。新指令编号请留空自动分配；站点选项来自所选线路的站序。高级字段中的 Line＝线路、Timing＝计时方式、Enter/Exit＝进入/退出站；“堆积”是嵌套子指令，偏移组最多 10 组。写入创建新副本并复核结构。</p>
             <div class="oprule-toolbar">
               <button class="secondary-button" id="oprule-read">从当前存档读取</button>
               <label>时刻表<select id="oprule-schedule" disabled><option value="">请先直读</option></select></label>
               <div class="oprule-file-actions">
                 <button class="text-button" id="oprule-reset" disabled>撤销全部修改</button>
-                <button class="text-button" id="oprule-export" disabled>导出方案</button>
+                <button class="text-button" id="oprule-export" disabled>导出可再导入的排班方案</button>
                 <label class="text-button oprule-import">导入方案<input id="oprule-import" type="file" accept="application/json,.json" disabled></label>
               </div>
             </div>
@@ -561,7 +598,7 @@
               <div class="oprule-audit" id="oprule-audit"></div>
               <div class="oprule-timeline" id="oprule-timeline"></div>
               <div class="oprule-smartbar">
-                <div class="oprule-smart-head"><b>智能生成发车序列</b><small>按起止时间和班距追加单次指令；新 Order ID 在写入时自动、连续、安全分配</small></div>
+                <div class="oprule-smart-head"><b>智能生成发车序列</b><small>按起止时间和班距追加单次指令；新指令编号在写入时自动分配，无需手填</small></div>
                 <label class="oprule-field">Line<select id="oprule-smart-line"></select></label>
                 <label class="oprule-field">开始<input id="oprule-smart-start" type="text" value="06:00"></label>
                 <label class="oprule-field">结束<input id="oprule-smart-end" type="text" value="09:00"></label>
@@ -602,11 +639,11 @@
         </article>
         <div class="section-intro" style="margin-top:6px">
           <div><p class="eyebrow aqua">FLEET MIGRATION</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>
-          <span class="phase-badge">能力 1–3</span>
+          <span class="phase-badge">写入新副本</span>
         </div>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">智能匹配</p><h3>可执行的迁移方案</h3></div><span class="count-badge" id="pair-count">0</span></div>
-          <div id="pair-list" class="pair-list"><div class="placeholder">迁移需要导出数据：请在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对后显示可执行方案。</div></div>
+          <div id="pair-list" class="pair-list"><div class="placeholder">迁移需要游戏导出的时刻表数据：请展开“总览与体检 › 需要时刻表数据？先在游戏内导出”，按步骤选择文件并完成核对，之后才会显示可执行方案。</div></div>
         </article>
         <article class="panel action-panel">
           <div>
@@ -616,12 +653,12 @@
           <button class="primary-button" id="migrate-button">创建新存档</button>
         </article>
         <article class="panel planner-panel">
-          <div class="panel-heading"><div><p class="step">能力 03 · 已可用</p><h3>均匀相位编排器</h3></div><button class="text-button" id="export-plan">导出方案 JSON</button></div>
+          <div class="panel-heading"><div><p class="step">仅计算方案</p><h3>均匀发车偏移方案</h3></div><button class="text-button" id="export-plan">导出方案 JSON</button></div>
           <div class="planner-layout">
             <div class="planner-form">
               <label>方案名称<input id="plan-name" value="新线路 Daily"></label>
               <div class="planner-row"><label>首班<input id="plan-first" type="time" value="05:30"></label><label>末班<input id="plan-last" type="time" value="01:00"></label></div>
-              <div class="planner-row"><label>单车完整循环<input id="plan-cycle" type="number" min="5" max="1440" value="90"><span>分钟</span></label><label>相位起点<input id="plan-phase" type="number" min="0" max="60" step="0.5" value="0"><span>分钟</span></label></div>
+              <div class="planner-row"><label>单车完整循环<input id="plan-cycle" type="number" min="5" max="1440" value="90"><span>分钟</span></label><label>首车额外延后<input id="plan-phase" type="number" min="0" max="60" step="0.5" value="0"><span>分钟</span></label></div>
               <div class="planner-row"><label>高峰班距<input id="plan-peak" type="number" min="0.5" max="180" step="0.5" value="5"><span>分钟</span></label><label>平峰班距<input id="plan-offpeak" type="number" min="0.5" max="360" step="0.5" value="12"><span>分钟</span></label></div>
               <label>高峰时段<input id="plan-windows" value="07:00-09:30, 15:30-18:30"><small>多个时段用逗号分开，可跨午夜</small></label>
               <button class="primary-button full" id="calculate-plan">计算运行方案</button>
@@ -632,8 +669,8 @@
           </div>
         </article>
         <article class="panel" id="headway-panel">
-          <div class="panel-heading"><div><p class="step">能力 04 · 已可用</p><h3>班距规划器（目标班距 → 所需车数）</h3></div><span class="phase-badge safe">零风险 · 建议</span></div>
-          <p class="repair-note">每条线的<strong>单车循环时间 T</strong> 与车数无关：默认从存档直读（T=循环时长、N=分配车数，<b>免 JSON</b>）；若做过“深度核对（需导出）”，则改用导出实测班距。设定目标班距后算出各时刻表所需车数与增减量，供你在游戏内加/减车——不写任何存档。请先在“总览与体检”完成一次体检。</p>
+          <div class="panel-heading"><div><p class="step">功能工具</p><h3>班距规划器（目标班距 → 所需车数）</h3></div><span class="phase-badge safe">理论估算 · 不写存档</span></div>
+          <p class="repair-note">默认使用存档线路模板时长和分配车数估算；若已有核对结果，则用游戏导出班距 × 当前车数反推时长。二者均不保证等于车辆完整循环。理论车数按“时长 ÷ 目标班距”向上取整，不含额外出入库、冲突等待及备用；请补齐这些时间后再决定增减车。先到总览点击“开始体检 · 免 JSON”，或完成“核对存档与游戏导出”。</p>
           <div class="headway-controls">
             <label>目标班距<input id="headway-target" type="number" min="0.5" max="240" step="0.5" value="5"><span>分钟</span></label>
             <label class="map-toggle"><input type="checkbox" id="headway-only-service" checked> 只看载客线路</label>
@@ -641,11 +678,11 @@
             <button class="text-button" id="headway-export" hidden>导出方案 CSV</button>
           </div>
           <div class="headway-summary" id="headway-summary"></div>
-          <div class="headway-table-wrap"><table class="headway-table" id="headway-table" hidden><thead><tr><th>时刻表</th><th>当前车数</th><th>当前班距</th><th>循环 T</th><th>目标班距</th><th>所需车数</th><th>增减</th></tr></thead><tbody id="headway-rows"></tbody></table></div>
+          <div class="headway-table-wrap"><table class="headway-table" id="headway-table" hidden><thead><tr><th>时刻表</th><th>当前车数</th><th>当前班距</th><th>模板/推算时长 T</th><th>目标班距</th><th>所需车数</th><th>增减</th></tr></thead><tbody id="headway-rows"></tbody></table></div>
         </article>
         <article class="panel" id="recover-panel">
-          <div class="panel-heading"><div><p class="step">模板恢复</p><h3>从历史导出恢复车队</h3></div><span class="phase-badge safe">安全重建</span></div>
-          <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史导出里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。此功能依赖导出：请先在“总览与体检 › 高级（可选）：导出 JSON 深度核对”完成一次核对。</p>
+          <div class="panel-heading"><div><p class="step">模板恢复</p><h3>从历史导出恢复车队</h3></div><span class="phase-badge safe">写入新副本 · 需验收</span></div>
+          <p class="repair-note">当某张 Daily 模板的车队丢失时，用历史游戏时刻表数据里的车队名单，按当前存档的模板结构重建；会写入一个新存档，正式存档不改动。请先在“总览与体检”按“需要时刻表数据？先在游戏内导出”的提示完成当前文件核对。历史恢复依据仍需保留丢失前的游戏导出文件，新导出不能还原已经丢失的名单。</p>
           <div class="file-grid recover-grid">
             <label>目标模板（当前空白表）<select id="recover-target" aria-label="目标模板"></select></label>
             <button class="secondary-button" id="find-reference-btn">自动查找历史车队</button>
@@ -662,13 +699,14 @@
       </section>
 
       <section class="view" id="view-extensions">
+        <p class="repair-note">车库接班扩展只放宽既有列车的接班位置匹配，不会建车库、自动安排回库或绕过信号。首次使用先在“脚本规则”生成车库接班模组，解压到游戏存档目录的 mods 文件夹，在游戏启用并保存；再回来核对文件及批量绑定。诊断助手的只读日志模组是另一种模组，不能替代它。</p>
         <div class="section-intro">
           <div><p class="eyebrow aqua">DEPOT CONTROL</p><h2>车库接班扩展</h2><p>批量加入或移除 Timetable garage join，只影响所选时刻表已分配的列车。</p></div>
           <span class="phase-badge">唯一 ID 模式</span>
         </div>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">选择车队</p><h3>已配置的时刻表</h3></div><button class="text-button" id="toggle-schedules">全选</button></div>
-          <div id="schedule-list" class="schedule-grid"><div class="placeholder">完成体检后会显示可选车队。</div></div>
+          <div id="schedule-list" class="schedule-grid"><div class="placeholder">先到“总览与体检”选择存档与游戏时刻表导出，点击“核对存档与游戏导出”，成功后此处显示车队。免 JSON 体检不会填充此列表。</div></div>
         </article>
         <article class="panel action-panel">
           <label class="output-label">新存档名称<input id="extension-output" type="text" spellcheck="false"></label>
@@ -685,12 +723,12 @@
           <div class="panel-heading">
             <div><p class="step">第一步</p><h3>选择要绑定的线路</h3></div>
             <div class="analytics-tools">
-              <button class="text-button" id="binder-load-lines">从当前导出载入线路</button>
+              <button class="text-button" id="binder-load-lines">从游戏时刻表数据载入线路</button>
               <button class="text-button" id="binder-lines-all">全选</button>
               <button class="text-button" id="binder-lines-none">清空</button>
             </div>
           </div>
-          <div id="binder-line-list" class="map-line-grid"><div class="placeholder">点“从当前导出载入线路”，会读取上方所选的时刻表导出。</div></div>
+          <div id="binder-line-list" class="map-line-grid"><div class="placeholder">先在“总览与体检”选择游戏生成的时刻表数据，再点击“从游戏时刻表数据载入线路”。</div></div>
         </article>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">第二步</p><h3>运营规则模组（安全）</h3></div><span class="phase-badge safe">生成 mod，不碰存档</span></div>
@@ -710,13 +748,13 @@
           <div class="panel-heading">
             <div><p class="step">第三步（可选）</p><h3>批量车库接班 · 写入新存档</h3></div>
             <div class="analytics-tools">
-              <button class="text-button" id="binder-load-fleets">从深度核对载入车队</button>
+              <button class="text-button" id="binder-load-fleets">从核对结果载入车队</button>
               <button class="text-button" id="binder-fleets-all">全选</button>
               <button class="text-button" id="binder-fleets-none">清空</button>
             </div>
           </div>
-          <p class="repair-note">只创建新存档，绝不覆盖原档。请先在“总览与体检 → 高级”选择匹配的导出，完成“深度核对（需导出）”。普通免 JSON 体检不提供车库扩展绑定信息。</p>
-          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">完成深度核对后点“从深度核对载入车队”。</div></div>
+          <p class="repair-note">只创建新存档，绝不覆盖原档。请先在游戏内导出时刻表数据，再到“总览与体检”选择匹配文件，点击“核对存档与游戏导出”。普通免 JSON 体检不提供车库扩展绑定信息。</p>
+          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">完成“核对存档与游戏导出”后点“从核对结果载入车队”。</div></div>
           <div class="binder-meta">
             <label class="output-label">新存档名称<input id="binder-output" type="text" spellcheck="false"></label>
             <button class="primary-button" id="binder-write-garage">批量写入车库接班</button>
@@ -726,8 +764,8 @@
 
       <section class="view" id="view-vehicle">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">ROLLING STOCK WORKSHOP</p><h2>车辆与资产模组制作器</h2><p>按官方 schema=2 生成可直接加载的车辆模组（mod.txt + 占位贴图）。填好参数即得一个可上路的车型，之后随时替换贴图美化。绝不改动存档。</p></div>
-          <span class="phase-badge">能力 06 · 已可用</span>
+          <div><p class="eyebrow aqua">ROLLING STOCK WORKSHOP</p><h2>车辆与资产模组制作器</h2><p>生成车辆模组包，包含配置文件和占位贴图。解压至 private mods、在游戏中启用后，需购车测试；生成成功不等于游戏验收通过。之后可替换贴图。</p></div>
+          <span class="phase-badge">生成模组文件</span>
         </div>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">只读导入</p><h3>已安装车辆与 Steam 工坊</h3></div><button class="text-button" id="veh-scan-mods">扫描车辆模组</button></div>
@@ -813,7 +851,7 @@
             <button class="primary-button full" id="generate-vehicle">生成车辆模组压缩包</button>
           </article>
           <article class="panel script-preview">
-            <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">schema=2 TrainUnit</span></div>
+            <div class="panel-heading"><div><p class="step">工作方式</p><h3>生成后怎么用</h3></div><span class="verified-chip">车辆模组格式 v2</span></div>
             <ol class="install-steps"><li><b>1</b><span>下载并解压车辆包</span></li><li><b>2</b><span>把文件夹放进 NIMBY Rails 的 mods 目录</span></li><li><b>3</b><span>在游戏主菜单启用模组</span></li><li><b>4</b><span>购车时即可选到这个车型与编组</span></li></ol>
             <div class="veh-preview" id="veh-preview"><div class="placeholder">点“生成车辆模组压缩包”后，这里会显示编组与 mod.txt 预览。</div></div>
             <div class="script-safety"><strong>安全边界</strong><p>只生成模组文件，从不修改存档。贴图是程序化占位（1024×128、34.13 px/m）。预估使用游戏公开公式：牵引力取 0.75×功率/速度 与最大牵引力的较小值。</p></div>
@@ -824,7 +862,7 @@
       <section class="view" id="view-scripts">
         <div class="section-intro">
           <div><p class="eyebrow aqua">SCRIPT WORKSHOP</p><h2>NimbyScript 规则生成器</h2><p>勾选经过官方接口核对的规则，生成一个可直接解压到 private mods 的完整模组包。</p></div>
-          <span class="phase-badge">能力 04 · 已可用</span>
+          <span class="phase-badge">功能工具</span>
         </div>
         <div class="script-layout">
           <article class="panel script-builder">
@@ -850,13 +888,13 @@
 
       <section class="view" id="view-cleanup">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>副本清理中心</h2><p>所有清理目标先预览，再移入 Windows 回收站；正式存档和普通自动存档永不参与。</p></div>
+          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>副本清理中心</h2><p>手动清理先预览确认；开启自动清理后，启动时按规则移入回收站。仅处理有生成记录且内容未改变的工具副本；缺少记录、已被游戏改写或标为永久保留的副本会跳过。</p></div>
           <span class="phase-badge safe">可恢复清理</span>
         </div>
         <div class="cleanup-grid">
           <article class="panel cleanup-settings">
             <p class="step">自动规则</p><h3>保留策略</h3>
-            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>启动时自动检查</strong><small>只清理超过期限且超出保留数量的副本</small></span></label>
+            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>启动时自动清理（移入回收站）</strong><small>默认关闭；开启后不逐次确认，按天数与保留份数执行</small></span></label>
             <div class="number-grid">
               <label>超过天数<input id="cleanup-days" type="number" min="1" max="365"></label>
               <label>至少保留<input id="cleanup-keep" type="number" min="1" max="50"></label>
@@ -868,13 +906,14 @@
         <article class="panel">
           <div class="panel-heading"><div><p class="step">候选文件</p><h3>清理预览</h3></div><div class="segmented"><button class="active" data-clean-mode="automatic">自动规则</button><button data-clean-mode="compact">立即瘦身</button></div></div>
           <div id="cleanup-list" class="cleanup-list"></div>
+          <details class="map-advanced"><summary>副本保留管理 · 勾选后永久保留</summary><p>取消勾选不会立即清理，仍须符合生成记录、内容校验和清理规则。没有生成记录的旧副本请自行检查，不会自动补认。</p><div id="cleanup-protection"></div></details>
           <div class="cleanup-actions"><p id="cleanup-explanation"></p><button class="danger-button" id="execute-cleanup">移入回收站</button></div>
         </article>
       </section>
 
       <section class="view" id="view-history">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">FLEET HISTORY</p><h2>历史与性能</h2><p>并行盘点存档目录中的历史导出，并对比任意两份导出之间的时刻表变化。全部为只读操作。</p></div>
+          <div><p class="eyebrow aqua">FLEET HISTORY</p><h2>历史数据对比</h2><p>并行盘点存档目录中的历史导出，并对比任意两份导出之间的时刻表变化。全部为只读操作。</p></div>
           <span class="phase-badge">多核并行</span>
         </div>
         <article class="panel">
@@ -892,7 +931,7 @@
           <div id="compare-result" class="compare-result"><div class="placeholder">选择两份导出后点击“对比”。</div></div>
         </article>
         <article class="panel">
-          <div class="panel-heading"><div><p class="step">存档差分实验室</p><h3>线路与车站字段差分</h3></div><span class="phase-badge safe">只读</span></div>
+          <div class="panel-heading"><div><p class="step">路网导出对比</p><h3>线路与车站字段差分</h3></div><span class="phase-badge safe">只读</span></div>
           <div class="file-grid compare-grid">
             <label>较早导出<select id="netdiff-before" aria-label="较早导出（路网）"></select></label>
             <label>较新导出<select id="netdiff-after" aria-label="较新导出（路网）"></select></label>
@@ -904,7 +943,7 @@
 
       <section class="view" id="view-roadmap">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">CAPABILITY LADDER</p><h2>按可靠性依次开发</h2><p>越靠前越稳定、越适合现在投入正式使用；涉及物理路网的功能必须经过存档差分验证。</p></div>
+          <div><p class="eyebrow aqua">CAPABILITY LADDER</p><h2>功能一览与使用范围</h2><p>以下按功能分类列出，不代表可靠性排名。“可用”表示已有实现，不等于每份存档均已通过游戏验收。</p></div>
         </div>
         <div class="roadmap" id="roadmap-list"></div>
       </section>
@@ -948,6 +987,10 @@
       <div class="cmdk-foot"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> 呼出 · <kbd>Alt</kbd>+<kbd>1…9</kbd> 快速切换</div>
     </div>
   </div>
+  <!-- Compatibility for an already-running older local server. The current
+       server removes these two tags and bundles the dependencies into app.js. -->
+  <script src="/metro.js"></script>
+  <script src="/metro-poster.js"></script>
   <script src="/app.js"></script>
   <script src="/tilecache.js"></script>
   <script src="/autotrack.js"></script>

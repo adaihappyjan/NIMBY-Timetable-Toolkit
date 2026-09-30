@@ -1,0 +1,26 @@
+.task-shortcuts {display:flex;flex-wrap:wrap;gap:10px;margin:18px 0;}
+.task-shortcuts a {padding:10px 16px;border:1px solid #537486;border-radius:10px;color:#a4efdf;text-decoration:none;}
+.task-shortcuts a:focus-visible {outline:3px solid #72dac4;outline-offset:3px;}
+.error-help {position:fixed;right:24px;bottom:24px;z-index:5000;width:min(480px,calc(100vw - 48px));max-height:65vh;overflow:auto;background:#172733;color:#f0f5f7;border:1px solid #e3aa75;border-radius:14px;padding:20px;box-shadow:0 15px 60px #0008;font-size:14px;}
+.error-help button {float:right;color:inherit;background:transparent;border:1px solid #607887;border-radius:6px;padding:4px 10px;cursor:pointer;}
+.error-help p {line-height:1.6;}
+.error-help pre {white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;}
+#cleanup-protection input {width:18px;height:18px;flex-shrink:0;}
+#cleanup-protection .cleanup-item {justify-content:flex-start;gap:12px;}
+.transit-svg text {user-select:text;}
+#map-metro-theme-wrap[hidden],#map-orient-wrap[hidden],#map-transfer-wrap[hidden],#map-layout-wrap[hidden],#map-merge-wrap[hidden] {display:none;}
+#map-canvas {max-height:82vh;}
+#map-canvas .transit-svg {margin-inline:auto;}
+#map-render-status {font-size:13px;color:var(--muted);line-height:1.6;}
+.map-list-tools {display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin:16px 0 6px;}
+.map-list-tools>label {display:flex;flex-direction:column;gap:6px;font-size:12px;}
+.map-list-tools>label:first-child {flex:1;min-width:230px;}
+.map-list-tools input[type=search],.map-list-tools select {padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);}
+.map-list-tools>label.map-toggle {flex-direction:row;align-items:center;padding-bottom:10px;}
+.map-selection-note,#map-selection-summary {font-size:12px;color:var(--muted);}
+.map-list-tools input:focus-visible,.map-list-tools select:focus-visible {outline:2px solid var(--aqua);outline-offset:2px;}
+.map-branch-controls {margin:14px 0;padding:12px 16px;border:1px solid var(--line);border-radius:10px;font-size:13px;}
+.map-branch-controls summary {cursor:pointer;font-weight:600;}
+.map-branch-controls p {line-height:1.7;color:var(--muted);}
+.map-branch-controls input {padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);max-width:100%;}
+.map-branch-controls .button-row {display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}

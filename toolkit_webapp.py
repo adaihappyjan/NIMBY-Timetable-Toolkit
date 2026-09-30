@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import mimetypes
 import os
@@ -24,6 +25,33 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 BACKEND = ROOT / "toolkit_backend.py"
 ASSET_VERSION = uuid.uuid4().hex[:8]
+APP_SCRIPT_PARTS = ("metro.js", "metro-poster.js", "app.js")
+
+
+def app_script_bytes() -> bytes:
+    """One response defines map dependencies before the UI, including in WebView2."""
+    chunks = []
+    for name in APP_SCRIPT_PARTS:
+        path = WEB_ROOT / name
+        if not path.is_file():
+            raise FileNotFoundError(f"工具箱安装不完整，缺少 web/{name}；请重新解压完整安装包。")
+        chunks.append(b"\n;/* " + name.encode("ascii") + b" */\n" + path.read_bytes())
+    return b"".join(chunks)
+
+
+def version_static_html(html: str) -> str:
+    """Version every local script/style; app.js includes its map dependencies."""
+    html = re.sub(r'\s*<script src="/(?:metro|metro-poster)\.js"></script>', '', html)
+    def replace(match: re.Match) -> str:
+        attribute, route = match.groups()
+        path = WEB_ROOT / route.lstrip("/")
+        try:
+            data = app_script_bytes() if route == "/app.js" else path.read_bytes()
+            version = hashlib.sha256(data).hexdigest()[:16]
+        except OSError:
+            version = ASSET_VERSION  # The resource request will give a clear error.
+        return f'{attribute}="{route}?v={version}"'
+    return re.sub(r'(src|href)="(/[^"?]+\.(?:js|css))"', replace, html)
 # NIMBY Rails stores saves under a "Saved Games/Weird and Wry/NIMBY Rails"
 # folder, but the exact location differs per machine (OneDrive redirect, custom
 # Steam library, Linux/Proton, macOS). SAVE_DIR is resolved at startup by
@@ -55,7 +83,7 @@ _DOWNLOADS = Path.home() / "Downloads"
 EXPORT_DIR = (_DOWNLOADS if _DOWNLOADS.is_dir() else Path.home()) / "NIMBY 线路图导出"
 
 sys.path.insert(0, str(ROOT))
-from toolkit_cleanup import cleanup_preview, execute_cleanup  # noqa: E402
+from toolkit_cleanup import cleanup_preview, execute_cleanup, set_copy_protection  # noqa: E402
 from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E402
 from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
@@ -76,7 +104,7 @@ APP_VERSION = read_current_version(ROOT)
 
 def read_settings() -> dict:
     defaults = {
-        "enabled": True,
+        "enabled": False,
         "days": 14,
         "keep": 5,
         "workers": max(1, min(4, (os.cpu_count() or 2) - 1)),
@@ -1047,18 +1075,19 @@ UPDATE_LOCK = threading.Lock()
 
 
 CAPABILITIES = [
-    {"rank": 1, "name": "时刻表健康与安全修复", "status": "available", "detail": "存档匹配、缺日、循环、车队与相位诊断"},
+    {"rank": "轨道", "name": "多站自动铺轨（实验功能）", "status": "available", "detail": "按多个站点分段寻路、预览失败区间；只写新副本，需游戏内接轨与验收"},
+    {"rank": 1, "name": "时刻表检查与副本修复", "status": "available", "detail": "存档匹配、缺日、循环、车队与相位诊断"},
     {"rank": 2, "name": "智能迁移与车库接班", "status": "available", "detail": "按唯一 ID 迁移车队并批量绑定扩展"},
-    {"rank": 3, "name": "时刻表编排器", "status": "available", "detail": "计算高峰/平峰间隔、均匀相位、跨午夜班次和最低车数"},
+    {"rank": 3, "name": "时刻表编排器", "status": "available", "detail": "计算高峰/平峰间隔、发车偏移、跨午夜班次和理论车数"},
     {"rank": 4, "name": "NimbyScript 规则生成器", "status": "available", "detail": "生成车库接班、到站等待和信号限速 private mod"},
     {"rank": 5, "name": "运营分析与运营报告", "status": "available", "detail": "服务时段、班距均匀度、覆盖天数、车队规模 KPI，导出 CSV/JSON"},
-    {"rank": 6, "name": "车辆工坊与模组体检", "status": "available", "detail": "任意 TrainUnit / 多编组生成，完整 schema=2 字段、物理曲线，以及内置/private/Steam 工坊只读扫描导入"},
-    {"rank": 7, "name": "一键线路图", "status": "available", "detail": "按经纬度绘制单/多线路网图，支持八向示意图风格与 SVG 导出"},
+    {"rank": 6, "name": "车辆工坊与模组体检", "status": "available", "detail": "生成车辆单元与编组文件，读取已有车型参数；需游戏启用和购车测试"},
+    {"rank": 7, "name": "一键线路图", "status": "available", "detail": "地理、八向、地铁线网及条形图；共线分色、换乘站，支持 SVG / JSON 和独立导出文件夹"},
     {"rank": 8, "name": "现实路网参考图", "status": "available", "detail": "叠加 OpenRailwayMap 与游戏路网，规划针本地存储、导出 GeoJSON/CSV"},
-    {"rank": 9, "name": "存档差分实验室", "status": "available", "detail": "逐项对比两份导出的线路、车站、站序与坐标变化"},
-    {"rank": 10, "name": "NimbyScript 规则与安全绑定", "status": "available", "detail": "规则包、源码静态检查、距离限定信号限速；固定脚本 ID 与存档定义双重核验后才允许车库接班写入"},
+    {"rank": 9, "name": "路网导出对比", "status": "available", "detail": "只对比两份游戏时刻表导出的线路、车站、站序与坐标，不是二进制存档差分"},
+    {"rank": 10, "name": "规则包批量绑定", "status": "available", "detail": "规则包、源码静态检查、距离限定信号限速；固定脚本 ID 与存档定义双重核验后才允许车库接班写入"},
     {"rank": 11, "name": "现实路网导入向导", "status": "available", "detail": "从 OSM 拉取真实线路与站序，生成复刻对照清单并导出 JSON/CSV，一键把站点加入规划针"},
-    {"rank": 12, "name": "安全自动更新", "status": "available", "detail": "启动自动检查 GitHub Release，软件内下载、SHA-256/逐文件校验、失败回滚并自动重启"},
+    {"rank": 12, "name": "程序更新", "status": "available", "detail": "启动自动检查 GitHub Release，软件内下载、SHA-256/逐文件校验、失败尝试恢复；恢复不完整时停止自动重启并保留备份"},
 ]
 
 
@@ -1275,8 +1304,16 @@ class Handler(BaseHTTPRequestHandler):
                     keep=int(payload.get("keep", 5)),
                     compact=bool(payload.get("compact", False)),
                 )
+                if payload.get('token') != preview['token']:
+                    raise RuntimeError('清理列表已变化，未执行清理。请重新预览并确认。')
                 result = execute_cleanup(SAVE_DIR, preview)
                 self.send_json({"ok": True, "result": result, "files": recent_files()})
+                return
+            if route == "/api/cleanup/protect":
+                if not isinstance(payload.get('protected'), bool):
+                    raise RuntimeError('保留选项无效。')
+                set_copy_protection(SAVE_DIR, str(payload.get('name', '')), payload['protected'])
+                self.send_json({'ok': True})
                 return
             if route == "/api/script/generate":
                 data, meta = build_mod_zip(payload)
@@ -1337,13 +1374,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         if not path.is_file():
-            path = WEB_ROOT / "index.html"
-        data = path.read_bytes()
+            self.send_error(HTTPStatus.NOT_FOUND, "Static resource not found")
+            return
+        try:
+            data = app_script_bytes() if relative == "app.js" else path.read_bytes()
+        except OSError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if path.name == "index.html":
             html = data.decode("utf-8")
-            html = html.replace('href="/styles.css"', f'href="/styles.css?v={ASSET_VERSION}"')
-            html = html.replace('src="/app.js"', f'src="/app.js?v={ASSET_VERSION}"')
+            html = version_static_html(html)
             html = html.replace("仅在本机运行", f"仅在本机运行 · v{APP_VERSION}")
             data = html.encode("utf-8")
         if content_type.startswith("text/") or content_type in ("application/javascript", "application/json"):
@@ -1351,6 +1392,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")

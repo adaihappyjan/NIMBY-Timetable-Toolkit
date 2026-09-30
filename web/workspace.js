@@ -19,7 +19,7 @@
   const section=document.createElement('section'); section.id='view-workspace'; section.className='view';
   section.innerHTML=`
     <div class="ws-intro"><div><h2>先选线路，再处理问题</h2><p>读取已保存文件，不控制游戏。不覆盖原存档。</p></div><button class="primary-button" id="ws-load">读取所选存档</button></div>
-    <p id="ws-source">在“总览与体检”选择存档和导出，再点击读取。</p>
+    <p id="ws-source">在“总览与体检”选择存档，再点击“读取所选存档”。此步骤不需要游戏时刻表导出。</p>
     <div id="ws-status" class="ws-notice" role="status" aria-live="polite">等待读取</div>
     <div class="ws-tools"><input id="ws-search" type="search" placeholder="搜索线路、时刻表、车辆名称或 ID…" aria-label="搜索运营对象"><label><input type="checkbox" id="ws-templates">显示线路模板</label><button id="ws-select-visible">勾选筛选结果</button><button id="ws-select-none">清空勾选</button><span id="ws-count">已选 0 张表</span></div>
     <div id="ws-catalog" class="ws-catalog"><p>尚未读取。</p></div>
@@ -41,9 +41,9 @@
       <div class="ws-fields"><label>支线 A<select id="ws-line-a"></select></label><label>支线 B<select id="ws-line-b"></select></label><label>共同入口区间<select id="ws-segment"></select></label><label>A 始发至入口秒数<input id="ws-travel-a" type="number" value="0" min="0"></label><label>B 始发至入口秒数<input id="ws-travel-b" type="number" value="0" min="0"></label></div>
       <div class="ws-fields"><label>时段开始<input id="ws-window-start" value="07:00"></label><label>时段结束<input id="ws-window-end" value="09:30"></label><label>A 班距秒数<input id="ws-headway-a" type="number" value="420" min="10"></label><label>B 班距秒数<input id="ws-headway-b" type="number" value="840" min="10"></label><label>B 错开秒数<input id="ws-phase-b" type="number" value="210" min="0"></label></div>
       <div class="ws-tools"><button id="ws-add-window">加入时段</button><button id="ws-clear-windows">清空时段</button><button id="ws-corridor" class="primary-button">计算合流序列</button><button id="ws-download-corridor" disabled>导出序列 CSV</button></div><div id="ws-windows"></div><div id="ws-corridor-result"></div></article>
-    <article class="ws-panel" data-ws-panel="accounting" hidden><h3>实际运营问题排行</h3><p>从存档目录读取 Accounting TSV；这是历史统计，不是实时监控。</p>
-      <div class="ws-fields"><label>会计导出<select id="ws-account-file"></select></label><label>对象<select id="ws-kind"><option value="line">线路</option><option value="station">车站</option><option value="train">列车</option></select></label><label>周期<select id="ws-period"><option>daily</option><option>weekly</option><option>monthly</option></select></label><label>日期 / 时间戳<select id="ws-account-stamp"><option value="">最新周期</option></select></label><label>指标<select id="ws-metric"><option value="trains_signal_stop_time">信号等待累计</option><option value="trains_late_arrival_time">到达晚点累计</option><option value="pax_waited_too_long">候车超时人数</option><option value="pax_lost">流失乘客</option><option value="train_departed_full">满载发车次数</option><option value="full_departure_ratio">满载发车比例</option></select></label></div>
-      <button id="ws-accounting" class="primary-button">读取并排行</button><div id="ws-accounting-result"></div></article>
+    <article class="ws-panel" data-ws-panel="accounting" hidden><h3>实际运营问题排行</h3><p>使用游戏导出的会计统计表（Accounting TSV），不是时刻表 JSON。先在游戏会计/统计界面执行统计数据导出，将 TSV 放入当前存档目录，再刷新列表。若游戏未提供该导出或没有统计数据，可跳过此项，不影响其他工具；这里显示历史统计，不是实时监控。</p>
+      <div class="ws-fields"><label>会计导出<select id="ws-account-file"></select></label><label>对象<select id="ws-kind"><option value="line">线路</option><option value="station">车站</option><option value="train">列车</option></select></label><label>周期<select id="ws-period"><option value="daily">每日</option><option value="weekly">每周</option><option value="monthly">每月</option></select></label><label>日期 / 时间戳<select id="ws-account-stamp"><option value="">最新周期</option></select></label><label>指标<select id="ws-metric"><option value="trains_signal_stop_time">信号等待累计</option><option value="trains_late_arrival_time">到达晚点累计</option><option value="pax_waited_too_long">候车超时人数</option><option value="pax_lost">流失乘客</option><option value="train_departed_full">满载发车次数</option><option value="full_departure_ratio">满载发车比例</option></select></label></div>
+      <button id="ws-account-refresh">刷新统计文件列表</button><button id="ws-accounting" class="primary-button">读取并排行</button><div id="ws-accounting-result"></div></article>
     <article class="ws-panel" data-ws-panel="diagnostic" hidden><h3>只读诊断模组 · 预览版</h3><p>不改变调度、占用检查或列车位置。仅对游戏内勾选扩展的列车采集状态，最多每 60 模拟秒输出一次，稳定状态每 5 分钟一次。1.19.10 已有零编译错误及部分状态运行记录；你的具体路网仍需单独验收。</p>
       <ol><li>点击安装，将模组放入当前存档目录的 mods 子目录。</li><li>游戏内启用 private mod，并在需检查的列车上启用 Toolkit read-only diagnostic。</li><li>本次会话手动开启脚本日志。短时运行后关闭日志，将文本粘贴到下方。</li></ol>
       <div class="ws-tools"><button id="ws-diag-status">检查文件安装状态</button><button id="ws-diag-install">安装只读诊断模组</button></div><p id="ws-diag-state">安装状态未读取；游戏内启用状态无法从文件存在与否推断。</p>
@@ -119,6 +119,7 @@
   }catch(e){status(e.message,true);}}
   $('#ws-tasks-refresh').onclick=files;
   $('#ws-mod-refresh').onclick=files;
+  $('#ws-account-refresh').onclick=files;
   $('#ws-mod-install').onclick=guard(async()=>{const packageName=$('#ws-mod-package').value;if(!packageName)throw new Error('请先生成并选择模组包');if(!confirm(`安装 ${packageName} 到游戏 private mods？不会自动启用。`))return;const r=await send('/api/workspace/install-mod',{package:packageName});$('#ws-diag-state').textContent=`${r.path} · ${r.note}`;});
   async function diag(install){const r=await send('/api/workspace/diagnostic',{install});$('#ws-diag-state').textContent=`${r.path||''} ${r.installed||r.path?'模组文件已安装':'未安装'}；游戏内启用状态未知。请按上方步骤操作。`;}
   $('#ws-diag-status').onclick=guard(()=>diag(false));$('#ws-diag-install').onclick=guard(()=>{if(confirm('安装只读诊断预览模组？不会自动启用或覆盖已有不同文件。'))return diag(true);});

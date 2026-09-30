@@ -103,14 +103,14 @@ def estimate_headway(cycle_seconds: int, train_count: int) -> int | None:
 
 
 def plan_train_count(cycle_seconds: int, target_headway: int) -> int | None:
-    """Trains needed to reach a target headway: N = round(cycle / h_target).
+    """Trains needed to reach a target headway: N = ceil(cycle / h_target).
 
-    Exact inverse of :func:`estimate_headway`; both share the h = T/N relation
-    that is empirically validated against real exports.
+    Theoretical lower bound under h = T/N; does not include missing turnback,
+    depot, conflict or reserve time. Round up to avoid missing the target.
     """
-    if not cycle_seconds or not target_headway or target_headway <= 0:
+    if not cycle_seconds or not target_headway or cycle_seconds <= 0 or target_headway <= 0:
         return None
-    return max(1, round(cycle_seconds / target_headway))
+    return max(1, math.ceil(cycle_seconds / target_headway))
 
 
 def export_service_kpis(schedule: dict) -> dict | None:
@@ -1484,7 +1484,8 @@ def _overview_health(
         "schedules_with_trains": schedules_with_trains,
         "note": (
             "存档直读体检：仅覆盖可从二进制可靠判定的结构/运营项；"
-            "线路“是否缺车/空跑”等需 route↔service 语义，仍需导出 JSON 做深度核对。"
+            "判断线路是否缺车或空跑还需要关联运营时刻表。请先在游戏内导出时刻表数据，"
+            "回工具箱选择对应文件，点击“核对存档与游戏导出”。"
         ),
     }
 
@@ -2982,8 +2983,8 @@ def write_output(
         partial_save.replace(output_save)
     except PermissionError as exc:
         raise RuntimeError(
-            "当前后台进程没有存档目录的写入权限。请关闭所有旧工具箱窗口，"
-            "再从资源管理器重新双击“启动工具箱.vbs”。无法写入："
+            "无法写入新副本。请检查目录写入权限、磁盘空间和文件占用；"
+            "必要时选择有写入权限的目录后重试。无法写入："
             f"{partial_save}"
         ) from exc
     finally:

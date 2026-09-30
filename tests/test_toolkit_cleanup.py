@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -17,6 +19,10 @@ NOW = datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc)
 
 def touch(path: Path, age: timedelta, content: bytes = b"save") -> None:
     path.write_bytes(content)
+    if path.suffix == '.nimbyrails5':
+        path.with_suffix('.manifest.json').write_text(json.dumps({
+            'output_save': str(path), 'output_file_sha256': hashlib.sha256(content).hexdigest()
+        }), encoding='utf-8')
     timestamp = (NOW - age).timestamp()
     os.utime(path, (timestamp, timestamp))
 
@@ -47,12 +53,11 @@ class CleanupPreviewTests(unittest.TestCase):
                 touch(path, timedelta(minutes=index))
                 paths.append(path)
             manifest = paths[-1].with_suffix(".manifest.json")
-            touch(manifest, timedelta(minutes=3), b"{}")
             result = cleanup_preview(
                 directory, days=14, keep=2, compact=True, now=NOW
             )
         self.assertEqual(result["candidate_count"], 2)
-        self.assertEqual(result["candidate_file_count"], 3)
+        self.assertEqual(result["candidate_file_count"], 4)
         self.assertTrue(
             any(
                 manifest.name in {Path(value).name for value in row["paths"]}

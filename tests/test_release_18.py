@@ -7,6 +7,18 @@ import toolkit_webapp as app
 from test_toolkit_autotrack import fixture_raw
 
 
+def test_game_export_instructions_are_actionable_and_distinct_from_map_json():
+    root=Path(__file__).resolve().parents[1]
+    html=(root/'web/index.html').read_text('utf-8')
+    script=(root/'web/app.js').read_text('utf-8')
+    for text in ['需要时刻表数据？先在游戏内导出','暂停游戏并保存',
+                 'Timetable Export','核对存档与游戏导出','不能代替这个文件']:
+        assert text in html
+    for old in ['导出 JSON 深度核对','深度核对（需导出）','从当前导出载入线路']:
+        assert old not in html and old not in script
+    assert '不代表两者匹配，也不会替你在游戏内导出' in script
+
+
 def station_table(free_slots=(), count=3, objects=None):
     values=[]; live=[]
     for slot in range(count):

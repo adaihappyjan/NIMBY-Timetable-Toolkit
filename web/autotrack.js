@@ -170,7 +170,7 @@
       $('#at-stations').replaceChildren(...result.stations.map(s=>option(s.name,stationLabel(s))));
       $('#at-route-path').replaceChildren(...(result.routes.length?result.routes.map(r=>option(r.name,r.path)):[option('未发现路线文件','')]));
       if(!$('#at-map-path').value&&result.maps.length===1)$('#at-map-path').value=result.maps[0];
-      $('#at-catalog-state').textContent=`已读取 ${result.stations.length} 站 · ${result.routes.length} 份本地路线 · ${result.maps.length} 份游戏底图。${result.node_ready?'自动寻路运行时已找到。':'未找到 Node.js，自动寻路需安装 Node.js 22+；GeoJSON 仍可用。'}`;
+      $('#at-catalog-state').textContent=`已读取 ${result.stations.length} 站 · ${result.routes.length} 份本地路线 · ${result.maps.length} 份游戏底图。${result.node_ready?'自动寻路运行时已找到。':'未找到 Node.js，自动寻路寻路组件缺失：完整包请重新完整解压；源码版需提供 Node.js 22+；GeoJSON 仍可用。'}`;
       $('#at-state').textContent='资料已就绪，请选择路线并预览';updateMode();return;
     }
     if (result.output_save) {
