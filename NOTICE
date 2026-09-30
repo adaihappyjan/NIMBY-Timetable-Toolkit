@@ -13,7 +13,20 @@ and attribution requirements, including:
 - Base maps — © OpenStreetMap contributors (ODbL) / © CARTO
 - Railway overlays — © OpenRailwayMap (CC-BY-SA 2.0)
 - Geocoding & station data — © OpenStreetMap (Nominatim / Overpass)
+- Bundled Vandry–Dessane reference alignment — © OpenStreetMap contributors,
+  ODbL (https://www.openstreetmap.org/copyright), extracted from local
+  OpenMapTiles-derived osm400.pmtiles (2026-02-23 snapshot).
 - Zstandard v1.5.7 runtime — Copyright (c) Meta Platforms, Inc. and affiliates
   (BSD license; see third_party/zstd/LICENSE)
+- Bundled local tile decoder: @maplibre/mlt 1.2.1 (MIT), PMTiles 4.3.0
+  (BSD-3-Clause), @mapbox/point-geometry (ISC), fflate (MIT).
+  Complete notices: third_party/autotrack/LICENSES.txt.
 
 Please comply with each service's usage terms and attribution requirements.
+
+The optional novice Windows bundle also redistributes official CPython and Node.js
+runtimes and pywebview, pythonnet, clr_loader, cffi, pycparser, bottle,
+typing_extensions and proxy_tools. Their original license files are preserved
+inside runtime/runtime.zip (Python license, wheel dist-info licenses, and
+licenses/). Exact sources, versions and hashes: licenses/runtime-sources.json
+inside that archive. These components retain their own licenses.

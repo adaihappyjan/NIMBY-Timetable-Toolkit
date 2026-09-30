@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from toolkit_tilecache import atomic_json, control
 
 MARKER = 'NIMBY Toolkit ORM game-start watcher v1'

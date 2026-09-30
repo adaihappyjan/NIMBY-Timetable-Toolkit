@@ -2,6 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
+if exist "%~dp0NIMBYToolkit.exe" if /i not "%~1"=="--check" (
+  start "" "%~dp0NIMBYToolkit.exe"
+  exit /b 0
+)
+
 rem Use pythonw (no console). Python's official Windows installer provides it.
 set "PYW=%NIMBY_TOOLKIT_PYTHONW%"
 set "PYW_ARGS="

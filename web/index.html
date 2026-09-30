@@ -7,6 +7,7 @@
   <title>NIMBY Rails 运营工作台</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/studio.css">
+  <link rel="stylesheet" href="/autotrack.css">
 </head>
 <body>
   <div class="app-shell">
@@ -22,6 +23,7 @@
         <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
         <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
+        <button class="nav-item" data-view="autotrack"><span>⇢</span>自动铺轨 · 实验</button>
         <button class="nav-item" data-view="tilecache"><span>▧</span>ORM 地图缓存</button>
         <button class="nav-item" data-view="timetable"><span>◫</span>时刻表配置</button>
         <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
@@ -65,6 +67,45 @@
         <button class="primary-button" id="update-install" type="button">下载并重启更新</button>
       </aside>
 
+      <section class="view" id="view-autotrack">
+        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINT LAB</p><h2>选两站，沿游戏底图生成双轨蓝图。</h2><p>自动读取本机资料，后台寻路，先预览再创建新副本。两端保留接轨空隙，不自动改站台、道岔或信号。</p></div><button class="text-button" id="at-help">使用教学</button></div>
+        <article class="panel" id="at-tutorial" hidden aria-label="自动铺轨首次使用教学"><h3 id="at-tutorial-title">第一次使用</h3><p id="at-tutorial-text"></p><div class="button-row"><button class="secondary-button" id="at-tutorial-back">上一步</button><button class="primary-button" id="at-tutorial-next">下一步</button><button class="text-button" id="at-tutorial-close">稍后再看</button></div></article>
+        <article class="panel">
+          <div class="panel-heading"><h3>① 选择存档与路线</h3><span class="local-chip">离线预览 · 无需时刻表 JSON</span></div>
+          <p>使用“总览与体检”中选定的存档：<strong id="at-save-name">尚未选择</strong> <button class="text-button" id="at-choose-save">去选择存档</button></p>
+          <p id="at-catalog-state" role="status">打开此页后自动读取站点、游戏底图与本地路线。</p><button class="secondary-button" id="at-refresh">重新自动读取</button>
+          <div class="form-grid">
+            <label>路线来源<select id="at-preset"><option value="auto">自动 · 连接所选两站的底图路线</option><option value="file">自动发现的本地 GeoJSON</option><option value="vandry-dessane">Vandry–Dessane · 原型参考路线</option><option value="custom">手动导入（备用）</option></select></label>
+            <label>起点站（可搜索；或输入 经度,纬度）<input id="at-from" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
+            <label>终点站（可搜索；或输入 经度,纬度）<input id="at-to" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
+            <datalist id="at-stations"></datalist>
+            <label>沿哪类现实铁路寻路<select id="at-rail-type"><option value="auto">自动 · 所有可见铁路类型</option><option value="rail">铁路 rail</option><option value="light_rail">轻轨 light_rail</option><option value="subway">地铁 subway</option><option value="tram">有轨电车 tram</option><option value="narrow_gauge">窄轨 narrow_gauge</option><option value="monorail">单轨 monorail</option><option value="funicular">缆索铁路 funicular</option></select></label>
+            <label>本地路线<select id="at-route-path"><option value="">尚未读取</option></select></label>
+            <label>游戏矢量底图（自动发现；可修正路径）<input id="at-map-path" placeholder="游戏目录/resources/maps/osm400.pmtiles"></label>
+            <label>自定义路线文件<input id="at-file" type="file" accept=".json,.geojson,application/json" disabled></label>
+            <label>结构模式<select id="at-structure"><option value="auto">自动 · 默认地面，保留底图桥隧</option><option value="ground">全部地面（忽略底图桥隧）</option><option value="bridge">全部高架 +1 层</option><option value="tunnel">全部隧道 -1 层</option></select></label>
+            <label>地面速度类型<select id="at-variant"><option value="6">自动 / 中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
+            <label>桥梁速度类型<select id="at-bridge-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
+            <label>隧道速度类型<select id="at-tunnel-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
+            <label>接轨预留（米）<input id="at-gap" type="number" value="50" min="20" max="200"></label>
+            <label>起点里程（米）<input id="at-start" type="number" value="0" min="0" step="1"></label>
+            <label>终点里程（米；留空至路线末端）<input id="at-end" type="number" min="0" step="1" placeholder="整段"></label>
+          </div>
+          <button class="primary-button" id="at-preview">② 检查冲突并预览</button>
+          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。两站直线距离 0.1–100 公里，底图读取最多 1024 瓦片，长线请加中间点分段。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>
+          <p id="at-summary">将显示长度、节点数、桥梁与避让结果。</p>
+          <svg id="at-map" viewBox="0 0 900 320" role="img" aria-label="离线路线预览；青色为地面，橙色为桥梁" style="width:100%;height:320px;background:#0b1e2c;border-radius:12px"></svg>
+          <p>青色：地面　橙色：桥梁 +1 层　紫色：隧道 -1 层。此图无地形底图，不能代替游戏内净空和坡度检查。</p>
+          <ul id="at-warnings"></ul>
+          <label><input id="at-accept" type="checkbox">我会先保存游戏进度，在新副本内暂停检查，不覆盖正式存档。</label>
+          <div class="button-row"><button class="primary-button" id="at-apply" disabled>生成新的测试存档</button><button class="secondary-button" id="at-download" disabled>导出预览方案</button></div>
+          <p id="at-output" role="status"></p>
+        </article>
+        <article class="panel"><h3>资料在哪里读取？</h3><p>游戏底图从 Steam 库自动寻找。GeoJSON 放在存档目录、存档目录下的 routes，或工具箱 routes 目录，重新自动读取即可；不需要逐份上传。时刻表导出 JSON 不会当作路线文件。</p><p>自动底图寻路需要本机 Node.js 22 或更新版；GeoJSON 与原型路线不需要。计算在后台进行，不弹终端，不上传存档或地图。</p><p>底图数据 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors（ODbL）</a> / OpenMapTiles。底图不是工程拓扑，自动路线必须先在新副本内检查。</p></article>
+      </section>
       <section class="view" id="view-tilecache">
         <div class="section-header"><div><p class="eyebrow aqua">LOCAL TILE CACHE</p><h2>看过的铁路地图，留在本机。</h2><p>只缓存游戏实际查看的 ORM 瓦片，不预下载区域、不修改存档。关闭工具箱后，缓存服务仍在后台运行；可启用下方“随游戏启动”，无需先打开工具箱。</p></div></div>
         <article class="panel">
@@ -894,6 +935,7 @@
   </div>
   <script src="/app.js"></script>
   <script src="/tilecache.js"></script>
+  <script src="/autotrack.js"></script>
   <script src="/workspace.js"></script>
   <script src="/tutorial.js"></script>
 </body>

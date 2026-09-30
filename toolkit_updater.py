@@ -581,6 +581,12 @@ def _write_update_result(path: Path, payload: dict) -> None:
 def _restart_app(python_executable: str, target_root: Path) -> None:
     executable = Path(python_executable)
     app = target_root / "toolkit_webapp.py"
+    launcher = target_root / 'NIMBYToolkit.exe'
+    if launcher.is_file() and (target_root / 'runtime/runtime.zip').is_file():
+        subprocess.Popen([str(launcher)], cwd=str(target_root), stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        return
     if not executable.is_file() or not app.is_file():
         return
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

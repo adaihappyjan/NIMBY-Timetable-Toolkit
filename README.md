@@ -8,7 +8,17 @@
 
 ---
 
-## v1.6：线路工作台与教程中心
+## v1.7：免安装 EXE、自动铺轨与地图缓存
+
+- 完整解压后双击 `NIMBYToolkit.exe`，内置 Python、Node.js 和桌面组件，无需配置开发环境。
+- 新增中文 TXT 入门说明和故障诊断 EXE；原有便携版更新后自动转用新入口。
+- 自动铺轨实验页：两站寻路、本地底图自动读取、分结构轨道类型、首次教学与新副本预览写入。
+- ORM 按需地图缓存、静默游戏启动联动，以及 1.19.10 存档版本与过期预览保护。
+- 自动铺轨不自动接站、不生成信号；新电车/隧道/混合速度工程仍需游戏内验收。
+
+完整更新记录见 [1.7.0 发布说明](docs/RELEASE_1.7.0.txt)。保留全部 v1.6 线路工作台与教程中心功能。
+
+## 线路工作台与教程中心
 
 从左侧“线路工作台”进入：读取存档 → 搜索并勾选运营表 → 预览 → 写入一个新存档。
 
@@ -44,7 +54,11 @@
 
 ## 下载与启动
 
-建议从 [Releases](https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit/releases) 下载名称含 `portable` 的便携包，完整解压后双击 `启动工具箱.cmd`。默认入口不再经过 Windows Script Host，不包含 VBS、PowerShell 或不便携的快捷方式；它只负责找到本机已安装的官方 Python 3，再启动工具箱。
+新增的**零基础 EXE 包**完整解压后双击 `NIMBYToolkit.exe`，无需安装 Python、Node.js、运行命令或使用管理员权限，也不弹出黑色终端。先阅读包内 `先看这里.txt`；打不开时双击 `故障诊断.exe`，它会生成并打开中文 TXT 报告。支持 Windows 10/11 x64（Intel / AMD），桌面窗口需要 WebView2；缺少时可退回默认浏览器。
+
+请从 [Releases](https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit/releases) 下载 v1.7.0 或更新版的 `portable` 附件，**不是 Code → Download ZIP 源码包**。旧源码入口 `启动工具箱.cmd` 继续保留：有 EXE 时优先使用它，否则查找本机 Python。
+
+运行库在首次启动时校验并解压到 `%LOCALAPPDATA%\NIMBY_Timetable_Toolkit\runtimes`，不修改系统 Python 或 PATH。运行库下载地址和 SHA-256 固定在构建锁文件中，启动不需要下载依赖。发布构建与维护说明见源码目录中的 `scripts/零基础包构建说明.txt`。
 
 **v1.6.0 内置安全自动更新。** 没有更新按钮的旧版本用户需手动下载并完整解压一次 v1.6.0；已有更新按钮的便携版可直接更新。以后启动时自动检查正式 Release，发现新版后点击“下载并重启更新”。工具会校验官方仓库来源、Release 版本、ZIP SHA-256 和逐文件清单，等待当前进程退出后替换；失败会尝试回滚旧文件。若回滚不完整，明确列出错误并停止自动重启，保留备份供恢复。存档和个人设置不参与更新。源码/Git 工作区不会被自动覆盖。自动检查可以关闭；安装始终需要用户确认。
 
@@ -52,7 +66,7 @@
 
 界面与本地服务只监听 `127.0.0.1` 的随机端口，并校验请求来源，其他网页无法驱动本工具。若本机缺少 pywebview 或 Edge WebView2 运行时，工具会自动退回“本地服务 + 默认浏览器”模式，功能一致。
 
-运行必须有 Python 3.10 或更高版本；`pywebview` 仅用于原生单窗口体验，不安装时仍可使用默认浏览器。需要原生窗口时再安装：
+仅**源码运行**需要自行安装 Python 3.10 或更高版本；EXE 包已内置依赖，无需执行下面的命令。源码版需要原生窗口时安装：
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -60,14 +74,15 @@ python -m pip install -r requirements.txt
 
 ### Windows 11“智能应用控制”说明
 
-从 `v1.3.1` 起，便携包不再分发会被应用控制直接检查的 VBS/PowerShell 启动路径，改由 CMD 调用官方 Python；Release 同时提供 `SHA256SUMS.txt` 供下载完整性校验。若下载的 ZIP 在属性页显示“解除锁定”，请先确认文件来自本仓库的 Release、核对 SHA-256，再解除锁定并完整解压。
+新 EXE 启动器目前没有受信任的代码签名，可能被 SmartScreen 或智能应用控制拦截。Release 提供 `SHA256SUMS.txt` 供完整性校验，但哈希不等于代码签名，也不能让安全策略自动放行。遇到拦截请保留提示并联系维护者，不要为运行本工具关闭安全防护。
 
-这能避开旧版最容易触发拦截的 Windows Script Host 路径，但项目目前没有受信任的代码签名，因此无法承诺在所有开启 Smart App Control 的电脑上都必定放行。微软给出的彻底方案是通过 Microsoft Store 分发，或使用 Microsoft Trusted Root Program 中证书机构签发的 RSA 代码签名证书（参见 [Smart App Control 签名要求](https://learn.microsoft.com/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control) 与 [Windows 代码签名方案](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options)）。**不建议为了本工具关闭智能应用控制**；微软说明关闭后需要重置或重装 Windows 才能重新开启。
+因此无法承诺所有电脑均可放行。维护者发布前应评估代码签名，参见 [Smart App Control 签名要求](https://learn.microsoft.com/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control) 与 [Windows 代码签名方案](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options)。
 
 旧的 PowerShell 界面（`NIMBY_Timetable_Toolkit.ps1`）仅作为应急入口保留，启动器已不再默认使用它。
 
 ## 功能页一览
 
+- **自动铺轨 · 实验**：选两个存档站点或经纬度，自动读取游戏本地矢量底图并寻路；自动发现 GeoJSON、首次四步教学。三种内置轨道（默认中速），地面 / 桥梁 / 隧道分别选速度类型。后台计算、彩色预览、重复与冲突检查、指纹校验、只生成新副本，不自动接站或添加信号。自动寻路需要 Node.js 22+；直线距离 0.1–100 公里、最多 1024 瓦片，断路不画直线替代，不支持任意工坊轨道。新版输出仍需游戏验收。详见 [自动铺轨指南](docs/AUTOTRACK.md)。
 - **ORM 地图缓存**：为游戏提供本机 HTTP 栅格地图源，按需持久缓存标准/限速/信号/电气化/轨距图层。受限双任务下载、相同瓦片请求合并、访问时间批量写入、容量与保留期清理、离线模式及队列/超时统计。Windows 可选择随游戏启动，无需先打开工具箱；不预下载区域、不修改存档。见 [缓存与游戏联动指南](docs/ORM_CACHE.md)。
 - **总览与体检**：选择存档和即时导出、查看健康分、严重问题与完整匹配状态，并显示自动识别的**游戏版本**（见下）。另含 **JSON-free 结构总览**：无需导出，直接从存档二进制直读并显示站/线/信号/车/时刻表/**标签分类**数、每张时刻表的分配列车数、色块与**单程运行时间**；以及 **JSON-free 逐站时刻表直读**：还原每条线路逐站到/发时刻与停站时长（时间以 0.5 秒精度存档，已用导出逐条校验，32/37 条线路含大部分地铁线精确到秒）。读取器已优化到秒级。
 - **安全自动更新**：默认每 6 小时至多联网检查一次最新 GitHub Release；软件内一键下载、校验、关闭、替换并重启。校验覆盖固定官方仓库、精确资产名、版本号、SHA-256、ZIP 路径和每个文件的大小/摘要；安装前逐文件备份，异常则完整回滚。可在更新提示中关闭“启动时自动检查”，也可随时手动检查。详见 [自动更新安全设计](docs/AUTO_UPDATE.md)。

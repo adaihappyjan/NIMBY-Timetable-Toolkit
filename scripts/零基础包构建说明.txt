@@ -1,0 +1,29 @@
+零基础 EXE 包维护说明（开发者使用，普通用户不用执行）
+
+1. 在 Windows x64 上准备 Python 3.10+ 和系统 .NET Framework C# 编译器。
+2. 在项目根目录运行：
+   python scripts/build_novice.py --version v1.6.0 --output dist/novice
+   版本号只是示例；正式发布必须与 VERSION、Git 标签一致。
+3. 构建从官方来源下载固定版本运行库，核对 SHA-256；不执行依赖安装钩子。
+   下载缓存：dist/novice-downloads。缓存校验失败会停止，不会静默忽略。
+4. 产物：便携 ZIP 和 SHA256SUMS.txt。完整 ZIP 包含两个 EXE 和运行库。
+   scripts/build_portable.py 单独运行仍生成需要系统 Python 的源码包。
+5. 解压到中文和空格路径，用 EXE --self-test --report "绝对报告路径" 验收。
+   测试时从 PATH 移除系统 Python/Node，确认使用内置运行库。
+   自动自检不是实际窗口验收，也不是在全新 Windows 虚拟机上的验收。
+6. 正式发布前还应测试 WebView2 窗口、旧版升级、杀毒软件和签名状态。
+   当前 EXE 未签名；不要指示用户关闭安全防护。
+
+维护依赖：scripts/novice-runtime.lock.json 固定下载 URL、版本和 SHA-256。
+更新依赖时重新核对官方发布文件、许可证及 Python ABI，再构建测试。
+升级 Python 次版本时还需同步 build_novice.py 的 python313._pth 文件名。
+普通 GUI 不依赖 MCP；对外 MCP Server 的 SDK 属开发者额外依赖，未随包内置。
+
+启动器是 WinExe，不创建终端；运行库先校验再解压到每用户缓存，内容哈希分目录。
+运行库不放在正在更新的安装目录中，避免更新时 Python DLL 被进程锁定。
+更新后使用新 EXE 选择新运行库；保留旧运行库用于仍在运行的后台服务。
+不会自动删除旧运行库，避免误杀 ORM 缓存等后台任务。
+
+GitHub release-portable 工作流已改为构建此包并运行隔离 PATH 自检。
+工作流仅在发布标签或明确手动触发时上传，不代表本地构建已发布。
+发布新功能应使用新的版本标签，不能用同版本覆盖冒充自动更新。

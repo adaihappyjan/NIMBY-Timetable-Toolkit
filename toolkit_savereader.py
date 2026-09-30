@@ -636,6 +636,7 @@ class _TrackNode:
     heading: float
     tangent_scale: float
     position: int
+    state_code: int = 0
 
 
 def _haversine_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -653,8 +654,14 @@ def read_track_geometry(
     max_segment_m: float | None = None,
     region_end: int | None = None,
     region_start: int = 0,
+    include_planned: bool = False,
+    _node_sink: dict | None = None,
 ) -> TrackGeometry:
     """Read the complete, JSON-free track graph from a decompressed save.
+
+    Defaults to state-0 tracks for compatibility with existing analysis views.
+    ``include_planned=True`` also reads state-1 blueprints, essential for
+    construction conflict checks. ``_node_sink`` is an internal reader adapter.
 
     A persisted drawn-track node has the observed shape::
 
@@ -699,8 +706,8 @@ def read_track_geometry(
             break
         # The third byte is a real structural/elevation layer, not padding.
         if not (
-            raw[e] == 0
-            and raw[e + 1] in (2, 6)
+            raw[e] in ((0, 1) if include_planned else (0,))
+            and raw[e + 1] in (2, 4, 6)
             and raw[e + 2] <= 31
             and raw[e + 3] in (1, 255)
         ):
@@ -756,6 +763,7 @@ def read_track_geometry(
             heading=heading,
             tangent_scale=tangent_scale,
             position=i,
+            state_code=raw[e],
         )
         if ident in nodes_by_id:
             duplicate_records += 1
@@ -763,6 +771,8 @@ def read_track_geometry(
             nodes_by_id[ident] = node
         i = e
 
+    if _node_sink is not None:
+        _node_sink.update(nodes_by_id)
     level_counts: dict[int, int] = {}
     variant_counts: dict[int, int] = {}
     for node in nodes_by_id.values():
@@ -819,6 +829,13 @@ def read_track_geometry(
         duplicate_record_count=duplicate_records,
         scan_bytes=max(0, end - start),
     )
+
+
+def read_track_nodes(raw: bytes, *, include_planned: bool = False) -> dict[int, _TrackNode]:
+    """Read nodes with record offsets; explicitly opt in to state-1 blueprints."""
+    nodes: dict[int, _TrackNode] = {}
+    read_track_geometry(raw, include_planned=include_planned, _node_sink=nodes)
+    return nodes
 
 
 def read_network(

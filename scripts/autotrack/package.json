@@ -1,0 +1,8 @@
+{
+  "name": "nimby-toolkit-local-tile-decoder-build",
+  "private": true,
+  "type": "module",
+  "scripts": {"build": "node build.mjs"},
+  "dependencies": {"@maplibre/mlt": "1.2.1", "pmtiles": "4.3.0"},
+  "devDependencies": {"esbuild": "0.25.12"}
+}

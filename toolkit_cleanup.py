@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import json
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -8,11 +10,11 @@ from typing import Iterable
 
 
 TOOL_COPY_RE = re.compile(
-    r"_(Toolkit|Extension|Recovery|Repair|Workspace)_(\d{8}_\d{6})\.nimbyrails5$",
+    r"_(Toolkit|Extension|Recovery|Repair|Workspace|Autotrack)_(\d{8}_\d{6})\.nimbyrails5$",
     re.IGNORECASE,
 )
 TOOL_PARTIAL_RE = re.compile(
-    r"_(Toolkit|Extension|Recovery|Repair|Workspace)_(\d{8}_\d{6})\.nimbyrails5\.partial$",
+    r"_(Toolkit|Extension|Recovery|Repair|Workspace|Autotrack)_(\d{8}_\d{6})\.nimbyrails5\.partial$",
     re.IGNORECASE,
 )
 
@@ -23,6 +25,27 @@ def _utc_timestamp(path: Path) -> str:
 
 def _manifest_for(save_path: Path) -> Path:
     return save_path.with_suffix(".manifest.json")
+
+
+def _recognized_copy(path: Path) -> bool:
+    match = TOOL_COPY_RE.search(path.name)
+    if not match:
+        return False
+    if match.group(1).lower() != 'autotrack':
+        return True  # Preserve established handling of older toolkit copies.
+    # A player may load and subsequently save over an experimental copy. Never
+    # auto-retire that newer work, nor a manually named lookalike without proof.
+    try:
+        manifest = json.loads(_manifest_for(path).read_text('utf-8'))
+        if manifest.get('operation') != 'autotrack' or Path(manifest['output_save']).resolve() != path.resolve():
+            return False
+        hasher = hashlib.sha256()
+        with path.open('rb') as stream:
+            for block in iter(lambda: stream.read(1024*1024), b''):
+                hasher.update(block)
+        return hasher.hexdigest() == manifest.get('output_sha256')
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def cleanup_preview(
@@ -53,7 +76,7 @@ def cleanup_preview(
         (
             path
             for path in directory.iterdir()
-            if path.is_file() and TOOL_COPY_RE.search(path.name)
+            if path.is_file() and _recognized_copy(path)
         ),
         key=lambda path: path.stat().st_mtime,
         reverse=True,

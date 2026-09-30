@@ -20,6 +20,7 @@ FIXED_FILES = (
     "requirements.txt",
     "VERSION",
     "libzstd.dll",
+    "先看这里.txt",
 )
 DIRECTORIES = ("web", "docs", "third_party")
 FORBIDDEN_SUFFIXES = {".vbs", ".ps1", ".lnk", ".exe", ".msi"}
@@ -60,7 +61,7 @@ def portable_files(root: Path = ROOT) -> list[Path]:
     return files
 
 
-def build_portable(version: str, output_dir: Path, root: Path = ROOT) -> tuple[Path, Path]:
+def build_portable(version: str, output_dir: Path, root: Path = ROOT, *, extras: dict[str, bytes] | None = None) -> tuple[Path, Path]:
     clean_version = version.strip() or "dev"
     if not re.fullmatch(r"[A-Za-z0-9._-]+", clean_version):
         raise ValueError("version contains unsafe path characters")
@@ -76,6 +77,10 @@ def build_portable(version: str, output_dir: Path, root: Path = ROOT) -> tuple[P
             if relative == "VERSION"
             else path.read_bytes()
         )
+    if extras:
+        if set(extras) != {'NIMBYToolkit.exe', '故障诊断.exe', 'runtime/runtime.zip'}:
+            raise ValueError('零基础包只允许两个指定启动器和已校验运行库')
+        entries.update(extras)
     manifest = {
         "schema": 1,
         "version": package_version,

@@ -1,0 +1,14 @@
+#view-autotrack .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px 24px; margin:24px 0; }
+#view-autotrack .form-grid label { display:flex; flex-direction:column; gap:9px; font-size:14px; color:#b6c9d3; min-width:0; }
+#view-autotrack [hidden] { display:none !important; }
+#view-autotrack #at-tutorial { border:1px solid #33ccb9; background:linear-gradient(120deg,#10382f,#152b3e); }
+#view-autotrack .form-grid input, #view-autotrack .form-grid select { width:100%; min-width:0; min-height:44px; padding:10px 12px; border:1px solid #36505e; border-radius:9px; background:#0d2330; color:#edf9fd; font:inherit; }
+#view-autotrack .form-grid input:focus, #view-autotrack .form-grid select:focus { outline:2px solid #33ccb9; outline-offset:2px; }
+#view-autotrack input:disabled { opacity:.5; }
+#view-autotrack .button-row { display:flex; flex-wrap:wrap; gap:12px; margin-top:20px; }
+#view-autotrack #at-warnings { padding-left:22px; line-height:1.8; color:#c1d2dc; }
+#view-autotrack #at-output { overflow-wrap:anywhere; color:#6ae6cd; line-height:1.7; }
+#view-autotrack #at-accept { width:18px; height:18px; vertical-align:middle; margin-right:8px; accent-color:#2dd4bf; }
+#view-autotrack #at-summary { line-height:1.8; }
+#view-autotrack #at-file::file-selector-button { margin-right:10px; padding:3px 8px; border:0; border-radius:5px; background:#23504e; color:white; }
+@media(max-width:850px) { #view-autotrack .form-grid { grid-template-columns:1fr; } }

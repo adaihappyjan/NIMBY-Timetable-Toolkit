@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .venv/
+node_modules/
 venv/
 
 # Runtime task artifacts (progress/result files written next to the app)

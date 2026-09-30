@@ -1503,7 +1503,7 @@ async function startTask(action, payload, context = null) {
     if (worker) worker.postMessage('start'); else fallbackLoop();
     pollOnce();
     return true;
-  } catch (e) { finishTask(); window.workspaceFailure?.(e.message); toast(e.message, true); return false; }
+  } catch (e) { finishTask(); if(action === 'autotrack') window.autotrackFailure?.(e.message); window.workspaceFailure?.(e.message); toast(e.message, true); return false; }
 }
 async function pollOnce() {
   if (state.pollBusy || !state.taskActive) return;
@@ -1517,7 +1517,8 @@ async function pollOnce() {
     }
     if (s.state === 'complete') {
       finishTask();
-      if (s.action === 'workspace') { await window.workspaceResult?.(s.result, taskContext); }
+      if (s.action === 'autotrack') { await window.autotrackResult?.(s.result, taskContext); }
+      else if (s.action === 'workspace') { await window.workspaceResult?.(s.result, taskContext); }
       else if (s.action === 'analyze') renderAnalysis(s.result);
       else if (s.action === 'inventory') renderInventory(s.result);
       else if (s.action === 'compare') renderCompare(s.result);
@@ -1538,7 +1539,7 @@ async function pollOnce() {
       else { toast(`新存档已创建：${s.result.output_save?.split(/[\\/]/).pop() || '操作完成'}`); await refreshFileLists(); refreshOutputNames(); }
       return;
     }
-    if (s.state === 'failed') { finishTask(); window.workspaceFailure?.(s.result?.error || '后台操作失败'); toast(s.result?.error || '后台操作失败', true); return; }
+    if (s.state === 'failed') { finishTask(); if(s.action === 'autotrack') window.autotrackFailure?.(s.result?.error || '后台操作失败'); window.workspaceFailure?.(s.result?.error || '后台操作失败'); toast(s.result?.error || '后台操作失败', true); return; }
   } catch (e) {
     state.pollFailures = (state.pollFailures || 0) + 1;
     if (state.pollFailures <= 10) { $('#task-message').textContent = `连接中断，正在重试…(${state.pollFailures})`; return; }

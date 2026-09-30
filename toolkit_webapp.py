@@ -295,7 +295,7 @@ def file_info(path: Path) -> dict:
         "size": stat.st_size,
         "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         "tool_generated": any(
-            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_", "_Workspace_")
+            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_", "_Workspace_", "_Autotrack_")
         ),
     }
 
@@ -401,6 +401,20 @@ class TaskManager:
         self.task: dict | None = None
 
     def _build_args(self, action: str, payload: dict) -> list[str]:
+        if action == 'autotrack':
+            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'map_path', 'route_path', 'rail_type') if k in payload}
+            request['save'] = str(validate_input_path(payload.get('save', ''), '.nimbyrails5'))
+            request['apply'] = payload.get('apply') is True
+            if request['apply']:
+                request['output'] = str(validate_output_path(payload.get('output', '')))
+                if not request.get('fingerprint'):
+                    raise RuntimeError('请先预览自动铺轨方案')
+            if len(json.dumps(request, allow_nan=False)) > 600000:
+                raise RuntimeError('路线数据过大')
+            TASK_DIR.mkdir(parents=True, exist_ok=True)
+            request_path = TASK_DIR / (uuid.uuid4().hex + '.request.json')
+            atomic_store(request_path, request)
+            return ['autotrack', '--request-file', str(request_path)]
         if action == 'workspace':
             operation = payload.get('operation')
             if operation not in {'catalog', 'pair', 'batch', 'audit', 'corridor', 'accounting'}:
@@ -913,7 +927,7 @@ class TaskManager:
                 "progress_cursor": 0,
                 "progress_tail": b'',
                 "last_progress": None,
-                "protected_write": action in {'batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write'} or (action == 'workspace' and bool(payload.get('apply'))),
+                "protected_write": action in {'batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write'} or (action in {'workspace', 'autotrack'} and bool(payload.get('apply'))),
             }
             return {"task_id": token, "action": action}
 

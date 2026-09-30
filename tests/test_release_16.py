@@ -28,7 +28,9 @@ def test_release_includes_workspace_tutorial_and_style(tmp_path):
     assert digest in sums.read_text()
     package, manifest = updater.extract_verified_archive(data, digest, '1.6.0', tmp_path / 'stage')
     for name in ['toolkit_workspace.py', 'toolkit_diagnostics.py', 'web/workspace.js',
-                 'web/tutorial.js', 'web/studio.css', 'docs/WORKSPACE_GUIDE.md']:
+                 'web/tutorial.js', 'web/studio.css', 'docs/WORKSPACE_GUIDE.md',
+                 'toolkit_autotrack.py', 'toolkit_autoroute.py', 'third_party/autotrack/tiles.mjs', 'third_party/autotrack/LICENSES.txt', 'web/autotrack.js', 'web/autotrack.css',
+                 'web/assets/autotrack-vandry-dessane.json', 'docs/AUTOTRACK.md']:
         assert name in manifest['files']
         assert (package / name).is_file()
     html = (package / 'web/index.html').read_text('utf-8')

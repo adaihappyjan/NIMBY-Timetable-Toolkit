@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -3554,6 +3555,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     workspace = sub.add_parser('workspace')
     workspace.add_argument('--request-file', type=Path, required=True)
+    autotrack = sub.add_parser('autotrack')
+    autotrack.add_argument('--request-file', type=Path, required=True)
     scan = sub.add_parser("scan")
     scan.add_argument("--export", type=Path, required=True)
     analyze = sub.add_parser("analyze")
@@ -3704,7 +3707,12 @@ def main() -> None:
     args.workers = max(1, min(32, args.workers))
     configure_progress(args.progress_file)
     try:
-        if args.command == 'workspace':
+        if args.command == 'autotrack':
+            from toolkit_autotrack import dispatch
+            emit_progress('autotrack', 1, 3, '正在检查路线、待建轨道和存档结构…')
+            result = dispatch(json.loads(args.request_file.read_text('utf-8')))
+            emit_progress('autotrack', 3, 3, '自动铺轨处理完成，请查看结果和验收提示。')
+        elif args.command == 'workspace':
             from toolkit_workspace import dispatch
             # Dispatch imports this module by name, while CLI entry is __main__.
             import toolkit_backend as workspace_backend

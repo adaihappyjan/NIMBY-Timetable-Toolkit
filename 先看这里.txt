@@ -1,0 +1,57 @@
+NIMBY Rails 工具箱 · 零基础免安装包
+=================================
+
+本说明适用于包含 NIMBYToolkit.exe 的免安装包。
+若你下载的是不含 EXE 的源码版，请到官方 Release 下载完整免安装 ZIP。
+
+三步开始：
+1. 下载官方 Release 中的完整 Windows 64 位 ZIP。
+2. 右键 ZIP →“全部解压”，建议放到“文档\NIMBY工具箱”。
+3. 打开解压后的文件夹，双击 NIMBYToolkit.exe。
+
+不用安装 Python，不用安装 Node.js，不用输入命令，也不用管理员权限。
+首次启动需要校验并准备运行环境，请耐心等候；不会弹黑色命令窗口。
+不要在 ZIP 预览里直接运行，不要只把 EXE 拖到桌面。
+需要桌面入口时，请为 NIMBYToolkit.exe 创建快捷方式，保留整个文件夹。
+
+适用系统：Windows 10/11，64 位 Intel/AMD。
+桌面窗口使用 Microsoft Edge WebView2。系统缺少相关组件时，可能退回浏览器窗口。
+若需要安装 WebView2，只从微软官方网站下载，由你自行确认安装：
+https://developer.microsoft.com/microsoft-edge/webview2/
+不支持以关闭杀毒软件、Smart App Control 或绕过公司安全策略来启动。
+EXE 暂未购买商业代码签名证书；系统拦截时请暂停，核对官方来源并联系维护者。
+
+第一次使用：
+1. 先在游戏里保存进度。
+2. 工具箱总览会寻找存档；找不到时展开“存档目录”手动选择。
+3. 先做只读体检，阅读程序内“操作教程”。
+4. 修改只生成新副本；在游戏内验证后，再决定是否替换正式存档。
+5. 自动铺轨会自动读取本地底图，首次打开有四步教学；仍需游戏内接轨和验收。
+
+启动不了：
+双击“故障诊断.exe”，会打开一个 TXT 报告。它不修改游戏存档，也不自动上传。
+把报告和错误截图发给维护者前，请检查其中的用户名和本地路径是否需要遮盖。
+日志位置：%LOCALAPPDATA%\NIMBY_Timetable_Toolkit\logs
+若提示缺文件、校验失败或空间不足，请重新完整解压，并留出至少 600 MB 空间。
+
+更新：
+用右上角“检查更新”，阅读说明后确认安装。更新不会安装到系统 Python，也不改 PATH。
+只有正式 GitHub Release 才参与自动更新，预览 ZIP 不等于正式发布。
+没有更新按钮或 Git 源码版，请下载新版完整 ZIP，解压到一个新文件夹后使用。
+升级时不要把 runtime 目录删掉，不要混用不同版本的 EXE 和 runtime.zip。
+
+数据与卸载：
+游戏存档仍在你自己的存档目录。
+设置、日志、运行环境缓存位于 %LOCALAPPDATA%\NIMBY_Timetable_Toolkit。
+删除程序文件夹不会删除游戏存档。若启用了“随游戏启动缓存”，先在程序内关闭。
+程序关闭后可自行删除该运行环境缓存子目录 runtimes；不要误删整个游戏存档目录。
+
+包内文件：
+NIMBYToolkit.exe     正常启动入口
+故障诊断.exe        启动不了时使用
+runtime\runtime.zip  内置 Python、桌面组件、Node.js 和许可证（不可单独删除）
+toolkit_*.py / web   工具箱程序，不需要手动打开或编辑
+启动工具箱.cmd      兼容旧习惯的备用入口；推荐直接双击 EXE
+
+官方项目：https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit
+本工具非游戏官方出品。安全原则：先预览，再写副本，再进游戏验收。
