@@ -11,4 +11,12 @@
 #view-autotrack #at-accept { width:18px; height:18px; vertical-align:middle; margin-right:8px; accent-color:#2dd4bf; }
 #view-autotrack #at-summary { line-height:1.8; }
 #view-autotrack #at-file::file-selector-button { margin-right:10px; padding:3px 8px; border:0; border-radius:5px; background:#23504e; color:white; }
+#view-autotrack .at-wide { grid-column:1/-1; border:1px solid #36505e; border-radius:12px; padding:16px; }
+#view-autotrack .at-via-row { display:flex; gap:10px; align-items:end; margin:12px 0; flex-wrap:wrap; }
+#view-autotrack .at-via-row label { flex:1 1 240px; }
+#view-autotrack .at-via-row button { min-height:44px; }
+#view-autotrack .at-leg { border-left:3px solid #53decc; background:#102632; padding:12px 16px; margin:10px 0; border-radius:6px; overflow-wrap:anywhere; }
+#view-autotrack .at-leg-error { border-color:#ff8d83; }
+#view-autotrack .at-leg p { margin:8px 0; }
+#view-autotrack .at-leg button { margin:4px 10px 4px 0; }
 @media(max-width:850px) { #view-autotrack .form-grid { grid-template-columns:1fr; } }

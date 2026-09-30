@@ -122,6 +122,9 @@ def test_web_task_request_and_output_guard(tmp_path,monkeypatch):
     assert args[0]=='autotrack'
     value=json.loads(Path(args[-1]).read_text('utf-8'))
     assert value['apply'] is False
+    via = [{'coord': [30.005, 20]}]
+    multi_args = web.TaskManager()._build_args('autotrack', {**request, 'preset': 'auto', 'via': via})
+    assert json.loads(Path(multi_args[-1]).read_text('utf-8'))['via'] == via
     with pytest.raises(RuntimeError,match='预览'):
         web.TaskManager()._build_args('autotrack',{**request,'apply':True,'output':str(tmp_path/'new.nimbyrails5')})
     with pytest.raises(RuntimeError,match='存档目录'):
@@ -152,3 +155,106 @@ def test_unknown_save_version(tmp_path):
     data=bytearray(source.read_bytes());data[10]=11;source.write_bytes(data)
     with pytest.raises(RuntimeError):
         at.dispatch({'save':str(source),'preset':'vandry-dessane'})
+
+
+@pytest.fixture
+def multi_route(monkeypatch):
+    import toolkit_autoroute as ar
+    calls = []
+    def route(request, stations):
+        a, b = request['from_coord'], request['to_coord']
+        calls.append((a, b))
+        return {'type': 'LineString', 'coordinates': [a, b]}, {
+            'snap_m': [0, 0], 'rail_types': ['rail'], 'tiles': 1,
+            'map_path': 'fixture', 'map_size': 1, 'map_mtime_ns': 1}
+    monkeypatch.setattr(ar, 'automatic_route', route)
+    monkeypatch.setattr(at, 'station_catalog', lambda raw: [])
+    return calls
+
+
+def multi_request(tmp_path):
+    return {'save': str(save_fixture(tmp_path)), 'preset': 'auto',
+            'from_coord': [30, 20], 'via': [{'coord': [30.005, 20]}], 'to_coord': [30.01, 20]}
+
+
+def test_multi_station_single_output_and_prior_leg_avoidance(tmp_path, multi_route):
+    request = multi_request(tmp_path); before = Path(request['save']).read_bytes()
+    progress = []
+    preview = at.dispatch(request, progress=lambda *args: progress.append(args))
+    assert preview['can_apply'] and preview['successful_legs'] == 2
+    assert len(progress) == 2
+    assert preview['legs'][1]['preview']['avoided_intervals'] > 0
+    assert not list(tmp_path.glob('*.manifest.json'))
+    output = tmp_path/'multi.nimbyrails5'
+    result = at.dispatch({**request, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)})
+    assert output.is_file() and result['appended_nodes'] == preview['nodes']
+    assert len(list(tmp_path.glob('*.manifest.json'))) == 1
+    assert Path(request['save']).read_bytes() == before
+    new_raw = at.Zstd().decompress(at.split_save(output)[1])
+    _, _, old_end, _ = at.layout(fixture_raw())
+    _, _, new_end, nodes = at.layout(new_raw)
+    assert len(nodes) == 4+preview['nodes']
+    assert new_raw[new_end:] == fixture_raw()[old_end:]
+
+
+def test_bad_middle_station_reports_both_legs_but_keeps_other_preview(tmp_path, multi_route):
+    request = multi_request(tmp_path)
+    request.update(via=[{'station': 'missing'}, {'coord': [30.01, 20]}], to_coord=[30.015, 20])
+    preview = at.dispatch(request)
+    assert preview['failed_legs'] == 2 and preview['successful_legs'] == 1
+    assert preview['waypoints'][1]['status'] == 'invalid'
+    assert [leg['status'] for leg in preview['legs']] == ['error', 'error', 'ok']
+    assert preview['legs'][0]['error'] == preview['legs'][1]['error']
+    assert len(multi_route) == 1  # Never bridge over the missing station.
+    output = tmp_path/'blocked.nimbyrails5'
+    with pytest.raises(ValueError, match='仍有失败区间'):
+        at.dispatch({**request, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)})
+    assert not output.exists() and not list(tmp_path.glob('*.partial'))
+    request['via'].pop(0)
+    assert at.dispatch(request)['can_apply']
+
+
+def test_route_failure_is_local_and_does_not_skip_a_station(tmp_path, multi_route, monkeypatch):
+    import toolkit_autoroute as ar
+    route = ar.automatic_route
+    def failing(request, stations):
+        if request['from_coord'] == [30, 20]: raise ValueError('底图断线')
+        return route(request, stations)
+    monkeypatch.setattr(ar, 'automatic_route', failing)
+    result = at.dispatch(multi_request(tmp_path))
+    assert result['failed_legs'] == result['successful_legs'] == 1
+    assert result['legs'][0]['error'] == '底图断线'
+    assert multi_route == [([30.005, 20], [30.01, 20])]
+
+
+def test_deleting_or_reordering_waypoint_invalidates_write(tmp_path, multi_route):
+    request = multi_request(tmp_path); preview = at.dispatch(request)
+    changed = {**request, 'via': [], 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(tmp_path/'no.nimbyrails5')}
+    with pytest.raises(ValueError, match='重新预览'): at.dispatch(changed)
+    assert not Path(changed['output']).exists()
+
+
+def test_duplicate_waypoint_and_all_failed_plan(tmp_path, multi_route):
+    request = multi_request(tmp_path); request['via'] = [{'coord': [30, 20]}]
+    result = at.dispatch(request)
+    assert result['failed_legs'] == 2 and not result['can_apply']
+    assert '重复' in result['waypoints'][1]['errors'][0]
+    assert result['nodes'] == 0
+
+
+@pytest.mark.parametrize('via', [None, {}, [None]*19])
+def test_multi_station_count_and_schema_bound(tmp_path, via):
+    request = multi_request(tmp_path); request['via'] = via
+    with pytest.raises(ValueError, match='20 站'): at.dispatch(request)
+
+
+def test_multi_station_rejects_ambiguous_mileage_crop(tmp_path, multi_route):
+    request = multi_request(tmp_path); request['start_m'] = 100
+    with pytest.raises(ValueError, match='里程'): at.dispatch(request)
+
+
+def test_later_leg_overlapping_earlier_leg_blocks_entire_write(tmp_path, multi_route):
+    request = multi_request(tmp_path); request['to_coord'] = [30.001, 20]
+    result = at.dispatch(request)
+    assert result['successful_legs'] == 1 and result['failed_legs'] == 1
+    assert '中部' in result['legs'][1]['error'] or '100 米' in result['legs'][1]['error']

@@ -3710,7 +3710,8 @@ def main() -> None:
         if args.command == 'autotrack':
             from toolkit_autotrack import dispatch
             emit_progress('autotrack', 1, 3, '正在检查路线、待建轨道和存档结构…')
-            result = dispatch(json.loads(args.request_file.read_text('utf-8')))
+            result = dispatch(json.loads(args.request_file.read_text('utf-8')),
+                              progress=lambda done, total, message: emit_progress('autotrack', done, total, message))
             emit_progress('autotrack', 3, 3, '自动铺轨处理完成，请查看结果和验收提示。')
         elif args.command == 'workspace':
             from toolkit_workspace import dispatch

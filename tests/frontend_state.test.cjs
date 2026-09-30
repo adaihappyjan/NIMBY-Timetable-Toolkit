@@ -26,6 +26,32 @@ function harness() {
     WRITE_ACTIONS:new Set(), messages, nodes});
   return c;
 }
+
+test('map JSON exports only selected lines and referenced original stations', () => {
+  const c=harness();
+  c.state.bootstrap={app_version:'1.8.0'};
+  c.state.network={stations:{a:{name:'起点',lon:10,lat:20},b:{name:'终点',lon:11,lat:21},c:{name:'未选'}}};
+  c.selectedMapLines=()=>[{id:'L1',stops:['a','b','missing']}];
+  c.mapStyle=()=>'schematic'; c.mapOpts=()=>({W:1400,H:940});
+  vm.runInContext(between(app,'function buildMapJsonData()', 'async function exportMapJson()'),c);
+  const result=c.buildMapJsonData();
+  assert.deepEqual(Object.keys(result.stations),['a','b']);
+  assert.equal(result.stations.a.lon,10);
+  assert.equal(result.schema,'nimby-toolkit-line-map.v1');
+  assert.equal(result.missing_station_ids[0],'missing');
+  assert.equal(result.drawing.style,'schematic');
+  c.selectedMapLines=()=>[];
+  assert.throws(()=>c.buildMapJsonData(),/勾选/);
+});
+
+test('map JSON export reports the actual path and errors without fake success', async () => {
+  const c=harness();c.timestamp=()=>'test'; c.buildMapJsonData=()=>({schema:'test'});
+  vm.runInContext(between(app,'async function exportMapJson()', 'async function saveMapExportFolder'),c);
+  c.api=async(route,request)=>{assert.equal(route,'/api/map/export');assert.equal(JSON.parse(request.body).format,'json');return {path:'D:/maps/test.json'};};
+  await c.exportMapJson(); assert.match(c.$('#map-export-status').textContent,/D:\/maps\/test.json/);
+  c.api=async()=>{throw Error('permission denied');};
+  await c.exportMapJson();assert.match(c.messages.at(-1),/导出失败.*permission denied/);
+});
 test('double click keeps the original task and context alive', async () => {
   const c = harness(); let resolve, requests = 0, polls = 0;
   c.api = () => {requests++; return new Promise(r=>resolve=r);};

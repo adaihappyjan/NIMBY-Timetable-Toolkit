@@ -76,6 +76,7 @@ function setCompareOptions(exports) {
 }
 async function loadBootstrap() {
   const data = await api('/api/bootstrap'); state.bootstrap = data;
+  $('#map-export-dir').value = data.map_export_dir || '';
   setOptions($('#save-select'), data.files.saves); setOptions($('#export-select'), data.files.exports); setCompareOptions(data.files.exports); refreshOutputNames();
   $('#cleanup-enabled').checked = data.settings.enabled; $('#cleanup-days').value = data.settings.days; $('#cleanup-keep').value = data.settings.keep;
   state.cleanup = data.cleanup; renderCleanup(); renderRoadmap(data.capabilities);
@@ -870,15 +871,42 @@ async function exportMapSvg() {
   // window (WebView2 often ignores JS blob downloads); show the full path.
   try {
     const res = await api('/api/map/export', { method: 'POST', body: JSON.stringify({ svg: data, filename, format: 'svg' }) });
-    toast(`已保存到下载文件夹：${res.path}`);
+    $('#map-export-status').textContent = `已保存：${res.path}`;
+    toast(`已保存：${res.path}`);
     return;
   } catch (e) {
-    // Fall back to a browser download if the service save is unavailable.
-    const blob = new Blob([data], { type: 'image/svg+xml' });
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename;
-    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 500);
-    toast('已触发下载（若窗口未弹出，请查看浏览器/下载文件夹）');
+    toast(`导出失败：${e.message}`, true);
   }
+}
+function buildMapJsonData() {
+  const lines = selectedMapLines();
+  if (!lines.length) throw Error('请先载入路网并勾选需要导出的线路');
+  const ids = new Set(lines.flatMap(line => line.stops || []));
+  const stations = Object.fromEntries(Object.entries(state.network.stations).filter(([id]) => ids.has(id)));
+  return {schema:'nimby-toolkit-line-map.v1', exported_at:new Date().toISOString(),
+    toolkit_version:state.bootstrap?.app_version || '', lines, stations,
+    missing_station_ids:[...ids].filter(id=>!stations[id]),
+    drawing:{style:mapStyle(), orientation:$('#map-orient').value,
+      all_labels:$('#map-all-labels').checked, curved:$('#map-curved').checked, ...mapOpts()}};
+}
+async function exportMapJson() {
+  try {
+    const res = await api('/api/map/export', {method:'POST', body:JSON.stringify({
+      format:'json', filename:`线路图_${timestamp()}.json`, data:buildMapJsonData()})});
+    $('#map-export-status').textContent = `已保存：${res.path}`;
+    toast(`已保存：${res.path}`);
+  } catch(e) { toast(`导出失败：${e.message}`,true); }
+}
+async function saveMapExportFolder(reset=false) {
+  try {
+    const res = await api('/api/settings',{method:'POST',body:JSON.stringify({
+      map_export_dir:reset ? '' : $('#map-export-dir').value.trim()})});
+    const folder = res.settings.map_export_dir;
+    if (folder) $('#map-export-dir').value = folder;
+    else { const data=await api('/api/bootstrap'); $('#map-export-dir').value=data.map_export_dir; }
+    $('#map-export-status').textContent = `导出文件夹已保存：${$('#map-export-dir').value}`;
+    toast('导出文件夹已保存，SVG 和 JSON 均使用此位置');
+  } catch(e) { toast(`文件夹未保存：${e.message}`,true); }
 }
 function renderNetworkDiff(r) {
   const grid = `<div class="metric-grid"><div class="metric-card"><small>线路变化</small><b>${r.line_change_count}</b><em>条</em></div><div class="metric-card"><small>车站变化</small><b>${r.station_change_count}</b><em>个</em></div><div class="metric-card"><small>较早路网</small><b>${r.before_summary.lines}/${r.before_summary.stations}</b><em>线/站</em></div><div class="metric-card"><small>较新路网</small><b>${r.after_summary.lines}/${r.after_summary.stations}</b><em>线/站</em></div></div>`;
@@ -1748,6 +1776,9 @@ $('#fix-button').addEventListener('click',()=>{
 $('#load-lines').addEventListener('click',()=>{ if(!$('#export-select').value)return toast('请先在“总览与体检”选择时刻表导出',true); startTask('map-data',{export:$('#export-select').value}); });
 $('#draw-map').addEventListener('click',drawTransitMap);
 $('#export-map-svg').addEventListener('click',exportMapSvg);
+$('#export-map-json').addEventListener('click',exportMapJson);
+$('#map-export-save').addEventListener('click',()=>saveMapExportFolder());
+$('#map-export-default').addEventListener('click',()=>saveMapExportFolder(true));
 $('#map-all-labels').addEventListener('change',drawTransitMap);
 $('#map-curved').addEventListener('change',drawTransitMap);
 $('#map-style').addEventListener('change',()=>{ $('#map-orient-wrap').hidden = mapStyle()!=='strip'; drawTransitMap(); });

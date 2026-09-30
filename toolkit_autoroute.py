@@ -147,6 +147,15 @@ def route_graph(features,start,end,rail_type='auto'):
         for idx,(u,v,props) in enumerate(edges):
             t,q=projection(p,nodes[u][0],nodes[v][0]);choices.append((math.dist(p,q),idx,t,q))
         distance,idx,t,q=min(choices)
+        # A station/waypoint rounded to decimal degrees may project a fraction
+        # of a millimetre beside an existing vertex. Reuse that vertex instead
+        # of emitting a tiny extra segment rejected by the blueprint writer.
+        u,v,_=edges[idx]
+        if math.dist(q,nodes[u][0])*scale<0.05:
+            t,q=0,nodes[u][0]
+        elif math.dist(q,nodes[v][0])*scale<0.05:
+            t,q=1,nodes[v][0]
+        distance=math.dist(p,q)
         if distance*scale>500:raise ValueError(f'站点离所选铁路约 {distance*scale:.0f} 米，超过 500 米；请选择对应线路类型或准确坐标')
         node=len(nodes);nodes.append((q,(),True));splits[idx].append((t,node));terminals.append(node);snap.append(round(distance*scale,1))
     adj=defaultdict(list)

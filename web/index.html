@@ -68,15 +68,21 @@
       </aside>
 
       <section class="view" id="view-autotrack">
-        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINT LAB</p><h2>选两站，沿游戏底图生成双轨蓝图。</h2><p>自动读取本机资料，后台寻路，先预览再创建新副本。两端保留接轨空隙，不自动改站台、道岔或信号。</p></div><button class="text-button" id="at-help">使用教学</button></div>
+        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINT LAB</p><h2>按站点顺序，沿游戏底图逐段铺轨。</h2><p>可添加多个途经站，逐段检查失败原因，调整后一次生成新副本。各站附近保留接轨空隙，不自动改站台、道岔或信号。</p></div><button class="text-button" id="at-help">使用教学</button></div>
         <article class="panel" id="at-tutorial" hidden aria-label="自动铺轨首次使用教学"><h3 id="at-tutorial-title">第一次使用</h3><p id="at-tutorial-text"></p><div class="button-row"><button class="secondary-button" id="at-tutorial-back">上一步</button><button class="primary-button" id="at-tutorial-next">下一步</button><button class="text-button" id="at-tutorial-close">稍后再看</button></div></article>
         <article class="panel">
           <div class="panel-heading"><h3>① 选择存档与路线</h3><span class="local-chip">离线预览 · 无需时刻表 JSON</span></div>
           <p>使用“总览与体检”中选定的存档：<strong id="at-save-name">尚未选择</strong> <button class="text-button" id="at-choose-save">去选择存档</button></p>
           <p id="at-catalog-state" role="status">打开此页后自动读取站点、游戏底图与本地路线。</p><button class="secondary-button" id="at-refresh">重新自动读取</button>
           <div class="form-grid">
-            <label>路线来源<select id="at-preset"><option value="auto">自动 · 连接所选两站的底图路线</option><option value="file">自动发现的本地 GeoJSON</option><option value="vandry-dessane">Vandry–Dessane · 原型参考路线</option><option value="custom">手动导入（备用）</option></select></label>
+            <label>路线来源<select id="at-preset"><option value="auto">自动 · 按顺序连接多个站点</option><option value="file">自动发现的本地 GeoJSON</option><option value="vandry-dessane">Vandry–Dessane · 原型参考路线</option><option value="custom">手动导入（备用）</option></select></label>
             <label>起点站（可搜索；或输入 经度,纬度）<input id="at-from" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
+            <div id="at-via-panel" class="at-wide">
+              <h3>途经站 · 按从上到下的顺序连接</h3>
+              <p>起点 → 途经站 1 → 途经站 2 → … → 终点。最多共 20 站；上下移动可调整站序。删除仅从铺轨方案移除，不会删除游戏内车站；删除后需重新预览。</p>
+              <div id="at-via-list"></div>
+              <button type="button" class="secondary-button" id="at-add-via">＋ 添加途经站</button>
+            </div>
             <label>终点站（可搜索；或输入 经度,纬度）<input id="at-to" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
             <datalist id="at-stations"></datalist>
             <label>沿哪类现实铁路寻路<select id="at-rail-type"><option value="auto">自动 · 所有可见铁路类型</option><option value="rail">铁路 rail</option><option value="light_rail">轻轨 light_rail</option><option value="subway">地铁 subway</option><option value="tram">有轨电车 tram</option><option value="narrow_gauge">窄轨 narrow_gauge</option><option value="monorail">单轨 monorail</option><option value="funicular">缆索铁路 funicular</option></select></label>
@@ -97,8 +103,9 @@
         <article class="panel">
           <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>
           <p id="at-summary">将显示长度、节点数、桥梁与避让结果。</p>
+          <div id="at-leg-results" aria-live="polite"></div>
           <svg id="at-map" viewBox="0 0 900 320" role="img" aria-label="离线路线预览；青色为地面，橙色为桥梁" style="width:100%;height:320px;background:#0b1e2c;border-radius:12px"></svg>
-          <p>青色：地面　橙色：桥梁 +1 层　紫色：隧道 -1 层。此图无地形底图，不能代替游戏内净空和坡度检查。</p>
+          <p>青色：地面　橙色：桥梁 +1 层　紫色：隧道 -1 层。红色站点关联未通过的区间；图上不会连接失败区间。此图无地形底图，不能代替游戏内净空和坡度检查。</p>
           <ul id="at-warnings"></ul>
           <label><input id="at-accept" type="checkbox">我会先保存游戏进度，在新副本内暂停检查，不覆盖正式存档。</label>
           <div class="button-row"><button class="primary-button" id="at-apply" disabled>生成新的测试存档</button><button class="secondary-button" id="at-download" disabled>导出预览方案</button></div>
@@ -345,8 +352,16 @@
               <label class="map-toggle"><input type="checkbox" id="map-curved" checked> 平滑曲线</label>
               <button class="text-button" id="draw-map">绘制线路图</button>
               <button class="text-button" id="export-map-svg">导出 SVG</button>
+              <button class="text-button" id="export-map-json">导出 JSON</button>
             </div>
           </div>
+          <details class="map-advanced">
+            <summary>导出文件夹 · SVG / JSON</summary>
+            <label class="map-export-label">完整文件夹路径<input id="map-export-dir" type="text" placeholder="例如 D:\NIMBY线路图"></label>
+            <button class="text-button" id="map-export-save">保存文件夹</button>
+            <button class="text-button" id="map-export-default">恢复默认文件夹</button>
+            <p id="map-export-status" role="status">JSON 导出当前勾选线路、站序、原始经纬度和绘图设置，不是游戏时刻表导出或自动铺轨 GeoJSON。</p>
+          </details>
           <details class="map-advanced">
             <summary>高级选项 · 字号 / 画布 / 线宽 / 站点</summary>
             <div class="map-adv-grid">

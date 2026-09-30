@@ -82,6 +82,7 @@ def read_settings() -> dict:
         "workers": max(1, min(4, (os.cpu_count() or 2) - 1)),
         "save_dir": "",
         "auto_check_updates": True,
+        "map_export_dir": "",
     }
     try:
         stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
@@ -93,6 +94,7 @@ def read_settings() -> dict:
         "keep": stored.get("keep", stored.get("Keep")),
         "workers": stored.get("workers", stored.get("Workers")),
         "save_dir": stored.get("save_dir", stored.get("SaveDir")),
+        "map_export_dir": stored.get("map_export_dir"),
         "auto_check_updates": stored.get(
             "auto_check_updates", stored.get("AutoCheckUpdates")
         ),
@@ -111,7 +113,7 @@ def read_settings() -> dict:
 
 def write_settings(settings: dict) -> dict:
     current = read_settings()
-    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates"):
+    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates", "map_export_dir"):
         if key in settings:
             current[key] = settings[key]
     current["enabled"] = bool(current["enabled"])
@@ -120,6 +122,12 @@ def write_settings(settings: dict) -> dict:
     current["workers"] = max(1, min(32, int(current["workers"])))
     current["save_dir"] = str(current.get("save_dir") or "")
     current["auto_check_updates"] = bool(current["auto_check_updates"])
+    if "map_export_dir" in settings:
+        value = str(settings["map_export_dir"] or "").strip()
+        folder = map_export_directory(value)
+        folder.mkdir(parents=True, exist_ok=True)
+        ensure_directory_writable(folder)
+        current["map_export_dir"] = str(folder) if value else ""
     SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
     partial = SETTINGS_FILE.with_suffix(".json.partial")
     partial.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -326,25 +334,53 @@ def _safe_export_name(value: str, default: str, suffix: str) -> str:
     ).strip().strip(".")
     if not cleaned:
         cleaned = default
+    if re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", cleaned):
+        cleaned = "_" + cleaned
     return cleaned[:80] + suffix
 
 
+def map_export_directory(value=None) -> Path:
+    if value is None:
+        value = read_settings().get("map_export_dir", "")
+    folder = Path(value) if value else EXPORT_DIR
+    if not folder.is_absolute() or folder == Path(folder.anchor):
+        raise RuntimeError("请选择完整的导出文件夹路径，不能直接使用磁盘根目录")
+    folder = folder.resolve()
+    if folder.exists() and not folder.is_dir():
+        raise RuntimeError("导出位置是文件，请选择文件夹")
+    return folder
+
+
 def save_map_export(payload: dict) -> Path:
-    """Write a client-generated map (SVG/text) into a discoverable folder."""
+    """Save selected map data/settings or SVG, never overwrite an existing file."""
+    format_name = str(payload.get("format", "svg")).lower()
+    if format_name not in ("svg", "json", "txt"):
+        raise RuntimeError("不支持的导出格式")
     content = payload.get("svg")
+    if format_name == "json":
+        data = payload.get("data")
+        if (not isinstance(data, dict) or data.get("schema") != "nimby-toolkit-line-map.v1"
+                or not isinstance(data.get("lines"), list) or not isinstance(data.get("stations"), dict)):
+            raise RuntimeError("线路图 JSON 数据格式无效")
+        content = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False)
     if not isinstance(content, str) or not content.strip():
         raise RuntimeError("没有可导出的内容")
-    if len(content) > 20_000_000:
+    if len(content.encode("utf-8")) > 20_000_000:
         raise RuntimeError("导出内容过大")
-    suffix = ".svg" if str(payload.get("format", "svg")).lower() == "svg" else ".txt"
+    suffix = "." + format_name
     default = f"线路图_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     name = _safe_export_name(payload.get("filename", ""), default, suffix)
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    path = EXPORT_DIR / name
-    if path.exists():
-        path = EXPORT_DIR / f"{path.stem}_{uuid.uuid4().hex[:6]}{suffix}"
-    path.write_text(content, encoding="utf-8")
-    return path
+    folder = map_export_directory()
+    folder.mkdir(parents=True, exist_ok=True)
+    for attempt in range(5):
+        path = folder / (name if attempt == 0 else f"{Path(name).stem}_{uuid.uuid4().hex[:8]}{suffix}")
+        try:
+            with path.open("x", encoding="utf-8") as output:
+                output.write(content)
+            return path
+        except FileExistsError:
+            continue
+    raise RuntimeError("导出文件名冲突，请重试")
 
 
 def validate_input_path(value: str, suffix: str) -> Path:
@@ -402,7 +438,7 @@ class TaskManager:
 
     def _build_args(self, action: str, payload: dict) -> list[str]:
         if action == 'autotrack':
-            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'map_path', 'route_path', 'rail_type') if k in payload}
+            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'via', 'map_path', 'route_path', 'rail_type') if k in payload}
             request['save'] = str(validate_input_path(payload.get('save', ''), '.nimbyrails5'))
             request['apply'] = payload.get('apply') is True
             if request['apply']:
@@ -1088,6 +1124,7 @@ class Handler(BaseHTTPRequestHandler):
                         "save_status": save_dir_info(),
                         "files": files,
                         "settings": settings,
+                        "map_export_dir": str(map_export_directory()),
                         "cleanup": preview,
                         "startup_cleanup": STARTUP_CLEANUP,
                         "app_version": APP_VERSION,

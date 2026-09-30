@@ -24,6 +24,14 @@ def test_continuous_route_split_same_edge():
     assert info['snap_m']==[0,0]
 
 
+def test_waypoint_near_existing_vertex_does_not_emit_microscopic_edge():
+    data,info=route.route_graph([feature([(100,100),(2000,100),(4000,100)])],ll(2000.00001,100),ll(3800,100))
+    points=data['features'][0]['geometry']['coordinates']
+    assert len(points)==2
+    assert points[0]==pytest.approx(ll(2000,100))
+    at.route_data({'geojson':data})  # No sub-5 cm duplicate vertex remains.
+
+
 def test_no_junction_invented_at_crossing():
     with pytest.raises(ValueError,match='没有连续'):
         route.route_graph([feature([(0,1000),(4000,1000)]),feature([(2000,0),(2000,4000)])],ll(100,1000),ll(2000,3900))

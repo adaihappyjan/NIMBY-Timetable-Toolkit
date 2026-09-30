@@ -103,12 +103,24 @@ def registry(raw, offset, kind):
     count, cursor = read_uvarint(raw, offset)
     check(0 < count <= 300_000, '对象表数量无效')
     ids = []
-    for _ in range(count):
+    for slot in range(count):
         value, cursor = read_uvarint(raw, cursor)
+        # Station registries keep deleted slots as signed, type-FFFF IDs.
+        # Do not extend this to Track: appending to a sparse Track allocator
+        # needs a separately verified allocation policy.
+        if kind == 2:
+            check(value < 1 << 64, '车站索引超出 64 位范围')
+            ident = ((value >> 1) ^ -(value & 1)) & ((1 << 64) - 1)
+            check((ident >> 16 & 0xffffffff) == slot, '车站槽位顺序异常')
+            check(ident & 0xffff, '车站槽位代数无效')
+            if value & 1:
+                check(ident >> 48 == 0xffff, '车站空槽标记无效')
+                continue
         check(value % 2 == 0 and value//2 >> 48 == kind, '对象表 ID 类型不匹配')
         ids.append(value//2)
     objects, start = read_uvarint(raw, cursor)
-    check(objects == count and len(set(ids)) == count, '对象表索引、数量不一致')
+    check(objects == len(ids) and len(set(ids)) == len(ids), '对象表有效索引、数量不一致')
+    check(ids, '对象表没有有效对象')
     return ids, start
 
 
@@ -126,7 +138,8 @@ def layout(raw):
         try:
             _, p = read_uvarint(raw, offset)
             first, _ = read_uvarint(raw, p)
-            if first % 2 or first//2 >> 48 != 2:
+            decoded = ((first >> 1) ^ -(first & 1)) & ((1 << 64) - 1)
+            if decoded >> 48 not in (2, 0xffff):
                 continue
             station_ids, records = registry(raw, offset, 2)
             ident, _ = read_uvarint(raw, records)
@@ -134,7 +147,8 @@ def layout(raw):
                 candidates.append(offset)
         except (ValueError, IndexError):
             continue
-    check(len(candidates) == 1, '不能唯一确定轨道表结束位置，已禁止写入')
+    check(candidates, '未找到通过校验的车站表，无法确定轨道表结束位置；存档结构可能尚未兼容，已禁止写入')
+    check(len(candidates) == 1, '找到多个候选车站表，不能唯一确定轨道表结束位置，已禁止写入')
     return ids, start, candidates[0], nodes
 
 
@@ -324,7 +338,85 @@ def route_files(save_dir):
     return sorted(result,key=lambda r:r['mtime'],reverse=True)
 
 
-def dispatch(request):
+def waypoint_plan(raw, request, stations, progress=None):
+    """Stage independent legs in memory; never silently skip failed sections."""
+    from toolkit_autoroute import automatic_route, tile_point
+    via = request.get('via')
+    check(isinstance(via, list) and len(via) <= 18, '最多添加 18 个途经站（共 20 站）')
+    check(not via or (request.get('start_m', 0) == 0 and request.get('end_m') is None),
+          '多站模式按各区间全长生成，不支持起终里程裁剪；请清空里程设置')
+    entries = [{'station': request.get('from_station'), 'coord': request.get('from_coord')},
+               *via, {'station': request.get('to_station'), 'coord': request.get('to_coord')}]
+    waypoints = []; seen = set()
+    for index, entry in enumerate(entries):
+        point = {'index': index, 'label': f'第 {index+1} 站', 'status': 'ready', 'errors': []}
+        try:
+            check(isinstance(entry, dict), '站点格式无效，请重新选择')
+            ident = entry.get('station')
+            if ident:
+                check(isinstance(ident, str), '站点 ID 无效')
+                matches = [s for s in stations if s['id'] == ident]
+                check(len(matches) == 1, '所选站点不在当前存档，请重新自动读取或删除此站')
+                station = matches[0]
+                point.update(label=station['name'], station_id=ident, coord=[station['lon'], station['lat']])
+            else:
+                coord = entry.get('coord')
+                check(isinstance(coord, list) and len(coord) == 2 and all(type(v) in (int, float) for v in coord),
+                      '请选择完整站名，或输入 经度,纬度')
+                point.update(coord=list(coord), label=', '.join(map(str, coord)))
+            tile_point(point['coord'])
+            key = tuple(point['coord'])
+            check(key not in seen, '重复站点或坐标：请删除重复项，不支持往返重叠铺设')
+            seen.add(key)
+        except (ValueError, TypeError, OverflowError) as exc:
+            point.update(status='invalid', errors=[str(exc)], validation_error=str(exc))
+        waypoints.append(point)
+    legs = []; candidate = raw; total_nodes = 0; total_length = 0; map_signature = None
+    for index, (a, b) in enumerate(zip(waypoints, waypoints[1:])):
+        leg = {'index': index, 'from_index': index, 'to_index': index+1,
+               'from_name': a['label'], 'to_name': b['label'], 'status': 'error'}
+        if progress:
+            progress(index+1, len(waypoints)-1, f"检查区间 {index+1}/{len(waypoints)-1}：{a['label']} → {b['label']}")
+        try:
+            invalid = [p for p in (a, b) if p['status'] == 'invalid']
+            check(not invalid, '；'.join(f"第 {p['index']+1} 站：{p['validation_error']}" for p in invalid))
+            single = {k: v for k, v in request.items() if k not in ('via', 'from_station', 'to_station', 'from_coord', 'to_coord')}
+            single.update(from_coord=a['coord'], to_coord=b['coord'])
+            geojson, info = automatic_route(single, stations)
+            signature = tuple(info.get(k) for k in ('map_path', 'map_size', 'map_mtime_ns'))
+            check(map_signature is None or signature == map_signature, '底图在分段读取期间改变，请重新预览全部区间')
+            map_signature = signature
+            single['geojson'] = geojson
+            prepared = prepare(candidate, single)
+            detail = dict(prepared[0]); detail['routing'] = info
+            check(total_nodes + detail['nodes'] <= MAX_POINTS*2, '整条方案超过 8000 个双轨节点，请减少站点、分批生成')
+            check(total_length + detail['length_m'] <= 150_000, '整条方案超过 150 公里，请减少站点、分批生成')
+            updated = patch(candidate, prepared)
+            candidate = updated
+            total_nodes += detail['nodes']; total_length += detail['length_m']
+            if info.get('auto_family_fallback'):
+                detail['warnings'].append('本区间回退到共同铁路类型：'+', '.join(info['rail_types'])+'，请核对路线。')
+            leg.update(status='ok', preview=detail)
+        except (ValueError, OSError) as exc:
+            leg['error'] = str(exc)
+            for point in (a, b):
+                if point['status'] != 'invalid': point['status'] = 'warning'
+                point['errors'].append(f'区间 {index+1} 未通过：{exc}')
+        legs.append(leg)
+    good = [leg['preview'] for leg in legs if leg['status'] == 'ok']
+    failed = len(legs)-len(good)
+    warnings = list(dict.fromkeys(message for detail in good for message in detail['warnings'])) or list(WARNINGS)
+    warnings.append('逐段生成待建双轨；各站附近可能保留接轨空隙，不会自动连接站台。')
+    if failed: warnings.append(f'{failed} 个区间未通过；成功区间仅供预览。删除或调整站点后重新检查，全部通过才可写入。')
+    result = {'multi_station': True, 'waypoints': waypoints, 'legs': legs, 'can_apply': failed == 0,
+              'successful_legs': len(good), 'failed_legs': failed, 'length_m': round(total_length, 1),
+              'nodes': total_nodes, 'warnings': warnings, 'coordinates': [], 'levels': [], 'routing': {}}
+    for key in ('bridge_nodes', 'tunnel_nodes', 'avoided_intervals', 'full_length_m'):
+        result[key] = sum(detail[key] for detail in good)
+    return result, candidate
+
+
+def dispatch(request, progress=None):
     source=Path(request['save']).resolve()
     original=source.read_bytes(); source_hash=digest(original)
     header,frame,_=split_save(source)
@@ -341,7 +433,11 @@ def dispatch(request):
         return {'action':'autotrack','operation':'catalog','stations':stations,'maps':game_maps(),
                 'node_ready':bool(node_runtime()),'routes':routes,'save':str(source),'source_sha256':source_hash}
     resolved=dict(request);route_info={}
-    if request.get('preset')=='auto':
+    batch = 'via' in request
+    check(not batch or request.get('preset') == 'auto', '途经站只适用于自动寻路模式')
+    if batch:
+        result, batch_raw = waypoint_plan(raw, request, stations, progress)
+    elif request.get('preset')=='auto':
         from toolkit_autoroute import automatic_route
         resolved['geojson'],route_info=automatic_route(request,stations)
     elif request.get('preset')=='file':
@@ -350,22 +446,24 @@ def dispatch(request):
         data=selected.read_bytes();check(len(data)<500000,'路线文件过大')
         resolved['geojson']=json.loads(data)
         route_info={'route_path':str(selected),'route_sha256':digest(data)}
-    prepared=prepare(raw,resolved)
-    result=dict(prepared[0])
-    result['routing']=route_info
+    if not batch:
+        prepared=prepare(raw,resolved)
+        result=dict(prepared[0])
+        result['routing']=route_info
     if route_info.get('auto_family_fallback'):
         result['warnings']=result['warnings']+['最近轨道不在同一网络；已回退选择两端均可接入的 '+', '.join(route_info['rail_types'])+'。请核对是否为你要建的线路。']
     settings={k:v for k,v in request.items() if k not in ('apply','output','fingerprint','save')}
     token=digest(json.dumps({'save':source_hash,'settings':settings,'preview':result},sort_keys=True,allow_nan=False).encode())
     result.update(action='autotrack',fingerprint=token,source_sha256=source_hash)
     if not request.get('apply'): return result
+    check(result.get('can_apply', True), '仍有失败区间，未写入任何存档。请删除或调整相关站点后重新预览')
     check(request.get('fingerprint')==token,'存档或参数已变化，请重新预览后再生成')
     output=Path(request['output']).resolve()
     check(output!=source and output.suffix.lower()=='.nimbyrails5','输出须为不同的新存档')
     manifest=output.with_suffix('.manifest.json')
     partial=output.with_name(output.name+'.partial')
     check(not any(p.exists() for p in (output,manifest,partial)), '输出或清单已存在，请换一个名称')
-    patched=patch(raw,prepared)
+    patched=batch_raw if batch else patch(raw,prepared)
     packed=Zstd().compress(patched)
     check(Zstd().decompress(packed)==patched,'压缩回读失败')
     check(digest(source.read_bytes())==source_hash,'生成期间原存档改变，请重新预览')
