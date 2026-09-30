@@ -4,12 +4,13 @@
   viewMeta.autotrack = ['TRACK BLUEPRINT LAB', '自动铺轨 · 实验'];
   let imported = null, preview = null, revision = 0, catalog = null;
   let viaValues=[];
-  const tutorialKey='nimby.autotrack.tutorial.v4';
+  let discovery=null, discoveredSource=null;
+  const tutorialKey='nimby.autotrack.tutorial.v5';
   let tutorialSeen=false,tutorialTouched=false;
   const tutorialReady=api('/api/workspace/state',{method:'POST',body:JSON.stringify({key:tutorialKey})}).then(r=>{if(!tutorialTouched)tutorialSeen=r.value?.seen===true;}).catch(()=>{});
   const lessons=[
     ['先选存档，再自动读取','在总览选择刚保存的文件。打开本页会自动读取站名、Steam 底图和本地路线。自动寻路需要 Node.js 22+；缺少时会提示，不会静默安装。'],
-    ['按顺序添加起点、途经站和终点','选择含 ID 的完整站名，同名站不会混淆；也可输入 经度,纬度。用“添加途经站”和上下移动调整站序，最多 20 站。逐段检查，不会跳过失败站点或用直线顶替断路。'],
+    ['手动添加或识别沿途站','选好存档中的完整首尾站名，可点“识别首尾之间的沿途站”，勾选路径附近的已建站 / 蓝图站并确认替换途经站。不会创建现实车站；平行线须手动核对，最多共 20 站。首尾不设公里数上限，底图范围过大时仍须分批。也可手动添加途经站、输入坐标和调整站序。'],
     ['地面、桥梁、隧道分别设置','自动模式默认中速地面，并保留底图桥隧标记。三种结构可分别选中速、高速、电车；也可强制全程地面、高架或隧道。速度是类型上限，桥隧层级不是地形高程。'],
     ['可只生成通过的区间','检查每段结果。有失败区间时，可勾选“仅生成通过区间”保留其余蓝图，失败段留空、不自动补连；全部失败则不能生成。也可删除相关站点或修改类型后重新预览。蓝图写入新测试存档；游戏内需手动接站、处理缺口和设置信号，不覆盖正式档。']
   ];
@@ -69,7 +70,7 @@
   async function readCatalog(){
     const save=$('#save-select').value;if(!save)return;
     if(state.taskActive){toast('请等待当前后台任务完成，再重新自动读取。',true);return;}
-    invalidate();catalog=null;$('#at-catalog-state').textContent='正在后台读取站点、游戏底图与本地路线…';
+    invalidate();catalog=null;discoveredSource=null;$('#at-catalog-state').textContent='正在后台读取站点、游戏底图与本地路线…';
     await startTask('autotrack',{save,operation:'catalog'},{catalogSave:save});
   }
   function updateMode(){
@@ -82,6 +83,8 @@
   }
   function invalidate() {
     revision++; preview = null;
+    discovery=null;$('#at-discovery').hidden=true;$('#at-discovery-list').replaceChildren();
+    $('#at-discovery-replace').checked=false;$('#at-use-discovery').disabled=true;
     $('#at-apply').disabled = $('#at-download').disabled = true;
     $('#at-accept').checked = false;
     $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
@@ -114,7 +117,7 @@
         via:viaValues.map(parse),map_path:$('#at-map-path').value,rail_type:$('#at-rail-type').value};
     }
     if(preset==='file')extra.route_path=$('#at-route-path').value;
-    return {save, preset, ...extra, geojson:preset === 'custom' ? imported : null,
+    return {save, preset, ...extra, ...(discoveredSource?{discovery_source_sha256:discoveredSource}:{}),geojson:preset === 'custom' ? imported : null,
       bridge_variant:Number($('#at-bridge-variant').value||6),tunnel_variant:Number($('#at-tunnel-variant').value||6),structure_mode:$('#at-structure').value||'auto',
       variant:Number($('#at-variant').value), start_m:preset==='auto'&&viaValues.length?0:Number($('#at-start').value),
       end_m:preset==='auto'&&viaValues.length?null:($('#at-end').value === '' ? null : Number($('#at-end').value)), gap_m:Number($('#at-gap').value)};
@@ -179,6 +182,20 @@
       $('#at-catalog-state').textContent=`已读取 ${result.stations.length} 站 · ${result.routes.length} 份本地路线 · ${result.maps.length} 份游戏底图。${result.node_ready?'自动寻路运行时已找到。':'未找到 Node.js，自动寻路寻路组件缺失：完整包请重新完整解压；源码版需提供 Node.js 22+；GeoJSON 仍可用。'}`;
       $('#at-state').textContent='资料已就绪，请选择路线并预览';updateMode();return;
     }
+    if(result.operation==='discover'){
+      let current;try{current=JSON.stringify(request());}catch{current=null;}
+      if(context?.revision!==revision||context?.signature!==current){invalidate();toast('识别期间参数改变，请重新识别。',true);return;}
+      discovery={result,signature:current,rows:[]};
+      $('#at-discovery-list').replaceChildren(...result.candidates.map(station=>{
+        const row=document.createElement('label');row.className='at-candidate';
+        const box=document.createElement('input');box.type='checkbox';box.checked=false;
+        const label=document.createElement('span');
+        label.textContent=`${stationLabel(station)} · 沿线 ${(station.along_m/1000).toFixed(2)} 公里 · 距路径 ${station.distance_m} 米${station.ambiguous?' · 多处接近，站序需核对':''}`;
+        box.addEventListener('change',syncDiscovery);row.append(box,label);discovery.rows.push({station,box});return row;
+      }));
+      $('#at-discovery').hidden=false;$('#at-discovery-replace').checked=false;
+      $('#at-state').textContent='沿途站识别完成 · 勾选确认后再预览';syncDiscovery();return;
+    }
     if (result.output_save) {
       preview = null; $('#at-apply').disabled = $('#at-download').disabled = true;
       $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
@@ -204,11 +221,38 @@
   };
   window.autotrackFailure = message => {
     preview=null; $('#at-apply').disabled=$('#at-download').disabled=true;
+    discovery=null;$('#at-discovery').hidden=true;$('#at-use-discovery').disabled=true;
     $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
     $('#at-state').textContent='已停止 · 未完成生成';
     $('#at-output').textContent=message;
     if(!catalog)$('#at-catalog-state').textContent=`自动读取未就绪：${message}`;
   };
+  function syncDiscovery(){
+    if(!discovery)return;
+    const count=discovery.rows.filter(r=>r.box.checked).length;
+    $('#at-discovery-summary').textContent=`找到 ${discovery.rows.length} 个候选站，已选 ${count}/18。${discovery.result.warnings.join(' ')}`;
+    $('#at-use-discovery').disabled=!!state.taskActive||count===0||count>18||!$('#at-discovery-replace').checked;
+  }
+  $('#at-discover').addEventListener('click',async()=>{
+    try{
+      if(state.taskActive)throw new Error('请等待当前后台任务完成');
+      invalidate();const payload=request();
+      if(payload.preset!=='auto'||!payload.from_station||!payload.to_station)throw new Error('请先选择存档中的完整起点站和终点站，不能只输入坐标');
+      const started=await startTask('autotrack',{...payload,operation:'discover'},{revision,signature:JSON.stringify(payload)});
+      if(started)$('#at-state').textContent='正在后台寻路并识别沿途站…';
+    }catch(e){toast(e.message,true);}
+  });
+  $('#at-discovery-replace').addEventListener('change',syncDiscovery);
+  $('#at-use-discovery').addEventListener('click',()=>{
+    try{
+      if(state.taskActive)throw new Error('请等待当前后台任务完成');
+      if(!discovery||discovery.signature!==JSON.stringify(request()))throw new Error('参数改变，请重新识别沿途站');
+      const chosen=discovery.rows.filter(r=>r.box.checked);
+      if(!chosen.length||chosen.length>18||!$('#at-discovery-replace').checked)throw new Error('请选择 1–18 个候选站，并确认替换途经站');
+      viaValues=chosen.map(r=>stationLabel(r.station));discoveredSource=discovery.result.source_sha256;
+      invalidate();renderVia();updateMode();toast(`已填入 ${viaValues.length} 个途经站，请检查站序并重新预览。`);
+    }catch(e){toast(e.message,true);}
+  });
   $('#at-preview').addEventListener('click',async()=>{
     try { invalidate(); const payload=request(); const started=await startTask('autotrack',payload,{revision,signature:JSON.stringify(payload)}); if(started)$('#at-state').textContent='正在后台检查…'; }
     catch(e){toast(e.message,true);}
@@ -233,6 +277,7 @@
   $('#at-accept').addEventListener('change',syncApply);
   $('#at-partial-accept').addEventListener('change',syncApply);
   ['#at-variant','#at-bridge-variant','#at-tunnel-variant','#at-structure','#at-from','#at-to','#at-map-path','#at-route-path','#at-rail-type','#at-start','#at-end','#at-gap','#save-select'].forEach(id=>$(id).addEventListener('change',invalidate));
+  ['#at-from','#at-to','#at-map-path'].forEach(id=>$(id).addEventListener('input',invalidate));
   $('#at-preset').addEventListener('change',()=>{invalidate();updateMode();});
   $('#at-file').addEventListener('change',async()=>{
     invalidate(); imported=null;

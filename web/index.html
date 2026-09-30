@@ -83,6 +83,14 @@
               <p>起点 → 途经站 1 → 途经站 2 → … → 终点。最多共 20 站；上下移动可调整站序。删除仅从铺轨方案移除，不会删除游戏内车站；删除后需重新预览。</p>
               <div id="at-via-list"></div>
               <button type="button" class="secondary-button" id="at-add-via">＋ 添加途经站</button>
+              <button type="button" class="secondary-button" id="at-discover">识别首尾之间的沿途站</button>
+              <p>仅识别存档中的已建站 / 蓝图站，不创建车站。先选完整首尾站名；按铁路路径找候选，不按直线找站。首尾不设公里数上限，底图范围过大时仍须分批。已有途经站不参与本次识别。</p>
+              <div id="at-discovery" hidden>
+                <p id="at-discovery-summary" role="status"></p>
+                <div id="at-discovery-list"></div>
+                <label><input type="checkbox" id="at-discovery-replace">确认用勾选站替换现有途经站列表（不修改游戏车站）</label>
+                <button type="button" class="secondary-button" id="at-use-discovery" disabled>将勾选站填入途经站</button>
+              </div>
             </div>
             <label>终点站（可搜索；或输入 经度,纬度）<input id="at-to" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
             <datalist id="at-stations"></datalist>
@@ -99,7 +107,7 @@
             <label>终点里程（米；留空至路线末端）<input id="at-end" type="number" min="0" step="1" placeholder="整段"></label>
           </div>
           <button class="primary-button" id="at-preview">② 检查冲突并预览</button>
-          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。每段两站直线距离 0.1–100 公里，底图读取最多 1024 瓦片；最多 20 个站点，整条生成路线最多 150 公里、8000 个节点。中间点只能分段，不能突破总量限制。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
+          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。首尾距离和路线总长均不设公里数上限，两站须至少相距 0.1 公里。底图单次读取最多 1024 瓦片；最多 20 个站点，整条方案最多 8000 个双轨节点，超过时须分批生成。保留局部坐标范围检查，不支持跨日期线。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
         </article>
         <article class="panel">
           <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>
@@ -889,16 +897,16 @@
 
       <section class="view" id="view-cleanup">
         <div class="section-intro">
-          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>副本清理中心</h2><p>手动清理先预览确认；开启自动清理后，启动时按规则移入回收站。仅处理有生成记录且内容未改变的工具副本；缺少记录、已被游戏改写或标为永久保留的副本会跳过。</p></div>
+          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>副本与旧导出清理</h2><p>先预览，再勾选文件移入回收站。工具存档副本需有生成记录且内容未改变；改写或永久保留的副本会跳过。时刻表 / 线路图 JSON 仅参与手动清理，不会随启动自动清理。</p></div>
           <span class="phase-badge safe">可恢复清理</span>
         </div>
         <div class="cleanup-grid">
           <article class="panel cleanup-settings">
             <p class="step">自动规则</p><h3>保留策略</h3>
-            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>启动时自动清理（移入回收站）</strong><small>默认关闭；开启后不逐次确认，按天数与保留份数执行</small></span></label>
+            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>启动时自动清理工具副本（移入回收站）</strong><small>默认关闭；仅处理工具副本及超过 1 小时的未完成临时文件，不包含导出 JSON</small></span></label>
             <div class="number-grid">
               <label>超过天数<input id="cleanup-days" type="number" min="1" max="365"></label>
-              <label>至少保留<input id="cleanup-keep" type="number" min="1" max="50"></label>
+              <label>每组至少保留<input id="cleanup-keep" type="number" min="1" max="50"></label>
             </div>
             <button class="secondary-button full" id="save-cleanup-settings">保存自动规则</button>
           </article>
@@ -906,9 +914,15 @@
         </div>
         <article class="panel">
           <div class="panel-heading"><div><p class="step">候选文件</p><h3>清理预览</h3></div><div class="segmented"><button class="active" data-clean-mode="automatic">自动规则</button><button data-clean-mode="compact">立即瘦身</button></div></div>
+          <div class="cleanup-extra">
+            <label><input id="cleanup-timetables" type="checkbox">手动检查旧游戏时刻表导出 JSON（存档目录）</label>
+            <label><input id="cleanup-maps" type="checkbox">手动检查旧线路图 JSON（存档目录及当前地图导出文件夹）</label>
+            <p>工具副本和时刻表按项目分组；地图按线路选择及绘图设置分组，各组保留最新文件。较旧不等于无用，请逐项勾选。保护总览、历史对比中当前选中的文件；不扫描子文件夹，不处理未知 JSON。地图 SVG / TXT 暂不纳入。</p>
+            <button id="refresh-cleanup" class="secondary-button">刷新清理预览</button>
+          </div>
           <div id="cleanup-list" class="cleanup-list"></div>
           <details class="map-advanced"><summary>副本保留管理 · 勾选后永久保留</summary><p>取消勾选不会立即清理，仍须符合生成记录、内容校验和清理规则。没有生成记录的旧副本请自行检查，不会自动补认。</p><div id="cleanup-protection"></div></details>
-          <div class="cleanup-actions"><p id="cleanup-explanation"></p><button class="danger-button" id="execute-cleanup">移入回收站</button></div>
+          <div class="cleanup-actions"><p id="cleanup-explanation"></p><button class="danger-button" id="execute-cleanup" disabled>将勾选文件移入回收站</button></div>
         </article>
       </section>
 

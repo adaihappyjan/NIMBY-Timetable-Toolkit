@@ -71,7 +71,7 @@ def route_data(request):
     xy = [tuple(v*scale for v in lonlat_to_mercator(*p)) for p in coords]
     lengths = [math.dist(a,b) for a,b in zip(xy,xy[1:])]
     check(all(0.05 <= length <= 2000 for length in lengths), '相邻节点须相距 0.05–2000 米；请先清理重复点或补充线形')
-    check(100 <= sum(lengths) <= 150_000, '实验版路线长度须在 0.1–150 公里之间')
+    check(sum(lengths) >= 100, '路线长度须至少 0.1 公里')
     chain = [0.0]
     for length in lengths:
         chain.append(chain[-1]+length)
@@ -393,7 +393,6 @@ def waypoint_plan(raw, request, stations, progress=None):
             prepared = prepare(candidate, single)
             detail = dict(prepared[0]); detail['routing'] = info
             check(total_nodes + detail['nodes'] <= MAX_POINTS*2, '整条方案超过 8000 个双轨节点，请减少站点、分批生成')
-            check(total_length + detail['length_m'] <= 150_000, '整条方案超过 150 公里，请减少站点、分批生成')
             updated = patch(candidate, prepared)
             candidate = updated
             total_nodes += detail['nodes']; total_length += detail['length_m']
@@ -424,23 +423,69 @@ def waypoint_plan(raw, request, stations, progress=None):
     return result, candidate
 
 
+def discover_stations(request, stations, progress=None):
+    """Suggest saved stations near a routed centerline; never infer membership."""
+    from toolkit_autoroute import automatic_route, projection
+    check(request.get('preset') == 'auto', '沿途站识别只适用于自动寻路')
+    endpoints = [request.get(key+'_station') for key in ('from', 'to')]
+    check(all(ident and sum(s['id'] == ident for s in stations) == 1 for ident in endpoints),
+          '识别沿途站前，请选择存档中的完整起点站和终点站，不使用坐标或未建站')
+    check(endpoints[0] != endpoints[1], '起点和终点不能是同一站')
+    if progress: progress(0, 1, '沿首尾站寻找铁路路径，再识别存档中的沿途站…')
+    geojson, routing = automatic_route(request, stations)
+    xy, chain, scale, _ = route_data({'geojson': geojson})
+    radius = 200
+    bounds = (min(p[0] for p in xy)-radius, min(p[1] for p in xy)-radius,
+              max(p[0] for p in xy)+radius, max(p[1] for p in xy)+radius)
+    candidates = []
+    for index, station in enumerate(stations):
+        if station['id'] in endpoints: continue
+        point = tuple(v*scale for v in lonlat_to_mercator(station['lon'], station['lat']))
+        if not (bounds[0] <= point[0] <= bounds[2] and bounds[1] <= point[1] <= bounds[3]): continue
+        hits = []
+        for i, (a, b) in enumerate(zip(xy, xy[1:])):
+            t, foot = projection(point, a, b)
+            distance = math.dist(point, foot)
+            if distance <= radius:
+                hits.append((distance, chain[i]+t*(chain[i+1]-chain[i])))
+        if not hits: continue
+        distance, mileage = min(hits)
+        if not 1 < mileage < chain[-1]-1: continue
+        ambiguous = any(abs(m-mileage) > 500 and d <= distance+20 for d, m in hits)
+        candidates.append({**station, 'distance_m': round(distance, 1), 'along_m': round(mileage, 1),
+                           'ambiguous': ambiguous})
+        if progress and index % 50 == 0: progress(index+1, len(stations), '正在按路线里程排列候选站…')
+    candidates.sort(key=lambda s: (s['along_m'], s['id']))
+    return {'action': 'autotrack', 'operation': 'discover', 'candidates': candidates,
+            'length_m': round(chain[-1], 1), 'radius_m': radius, 'routing': routing,
+            'warnings': ['仅列出当前存档中距路径 200 米内的车站对象，包含已建站和蓝图站；不创建车站。',
+                         '距离近不代表属于这条铁路，平行线、换乘站及分支请逐项确认；候选默认不勾选。',
+                         '按首尾站路径识别，暂不使用手动途经站；确认后替换途经站列表，仍需重新预览并在游戏内接轨。']}
+
+
 def dispatch(request, progress=None):
     check(type(request.get('allow_partial', False)) is bool, '跳过失败区间的确认值无效')
     source=Path(request['save']).resolve()
     original=source.read_bytes(); source_hash=digest(original)
+    check(not request.get('discovery_source_sha256') or request['discovery_source_sha256'] == source_hash,
+          '存档在识别沿途站后改变，请重新自动读取并识别')
     header,frame,_=split_save(source)
     check(digest(source.read_bytes())==source_hash,'读取期间存档改变，请重试')
     require_verified_save(header)
     raw=Zstd().decompress(frame)
     operation=request.get('operation','preview')
-    check(operation in ('catalog','preview'), '自动铺轨操作无效')
-    check(not (operation=='catalog' and request.get('apply')), '读取列表不能同时写入')
-    stations=station_catalog(raw) if operation=='catalog' or request.get('preset')=='auto' else []
+    check(operation in ('catalog','preview','discover'), '自动铺轨操作无效')
+    check(not (operation in ('catalog','discover') and request.get('apply')), '读取列表或识别沿途站不能同时写入')
+    stations=station_catalog(raw) if operation in ('catalog','discover') or request.get('preset')=='auto' else []
     if operation=='catalog':
         from toolkit_autoroute import game_maps,node_runtime
         routes=route_files(source.parent)
         return {'action':'autotrack','operation':'catalog','stations':stations,'maps':game_maps(),
                 'node_ready':bool(node_runtime()),'routes':routes,'save':str(source),'source_sha256':source_hash}
+    if operation == 'discover':
+        result = discover_stations(request, stations, progress)
+        check(digest(source.read_bytes()) == source_hash, '识别期间存档改变，请重新识别')
+        return dict(result, source_sha256=source_hash)
     resolved=dict(request);route_info={}
     batch = 'via' in request
     check(not batch or request.get('preset') == 'auto', '途经站只适用于自动寻路模式')

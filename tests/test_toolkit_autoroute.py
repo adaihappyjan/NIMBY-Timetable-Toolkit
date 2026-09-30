@@ -63,8 +63,15 @@ def test_filters_and_distance_limits():
         route.route_graph([feature([(0,100),(4000,100)])],ll(100,100),ll(3000,100),'tram')
     with pytest.raises(ValueError,match='500 米'):
         route.route_graph([feature([(0,100),(4000,100)])],ll(100,3000),ll(3000,100))
-    with pytest.raises(ValueError,match='直线距离'):
+    with pytest.raises(ValueError,match='日期线'):
         route.bounds_for([179,0],[-179,0],3000)
+
+
+def test_over_100km_bounds_are_allowed_but_short_and_dateline_are_not():
+    bounds = route.bounds_for([30, 20], [32, 20], 3000)
+    assert bounds[2] > bounds[0]
+    with pytest.raises(ValueError, match='至少'):
+        route.bounds_for([30, 20], [30.00001, 20], 3000)
 
 
 def test_auto_retries_common_family_without_linking_distinct_networks():

@@ -6,6 +6,7 @@ const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'../web'), output=path.resolve(process.argv[2]);
 fs.mkdirSync(output,{recursive:true});
 const exportsSeen=[];
+const cleanupCalls=[];
 const bootstrap={ok:true,app_version:fs.readFileSync(path.join(root,'../VERSION'),'utf8').trim(),files:{saves:[],exports:[]},settings:{enabled:false,days:14,keep:5,auto_check_updates:false},
   cleanup:{completed_copy_count:1,protected_copy_count:1,candidate_count:0,candidate_bytes:0,keep:5,days:14,targets:[],copies:[{name:'QA_Workspace_20260101_000000.nimbyrails5',pinned:true}]},capabilities:[],map_export_dir:output};
 const server=http.createServer(async(req,res)=>{
@@ -14,6 +15,16 @@ const server=http.createServer(async(req,res)=>{
     let body='';for await(const part of req)body+=part;const payload=body?JSON.parse(body):{};
     let result={ok:true,value:{},accounting:[],packages:[],tasks:[]};
     if(url.pathname==='/api/bootstrap')result=bootstrap;
+    if(url.pathname==='/api/cleanup/preview'){
+      const targets=[{name:'旧时刻表.json',path:'QA-old-timetable.json',kind:'timetable-json',bytes:100,reason:'旧游戏导出，需确认'},
+        {name:'旧线路图.json',path:'QA-old-map.json',kind:'map-json',bytes:200,reason:'旧地图，需确认'}]
+        .filter(x=>x.kind==='map-json'?payload.include_maps:payload.include_timetables);
+      result={ok:true,cleanup:{...bootstrap.cleanup,token:'qa-cleanup',days:payload.days,keep:payload.keep,
+        targets,candidate_count:targets.length,candidate_bytes:targets.reduce((s,x)=>s+x.bytes,0)}};
+    }
+    if(url.pathname==='/api/cleanup/execute'){
+      cleanupCalls.push(payload);result={ok:true,result:{moved_group_count:payload.selected.length,moved_file_count:payload.selected.length,recoverable:true}};
+    }
     if(url.pathname==='/api/map/export'){
       assert.ok(!payload.filename.includes('/')&&!payload.filename.includes('\\'));
       const file=path.join(output,payload.filename);
@@ -266,6 +277,22 @@ const server=http.createServer(async(req,res)=>{
     await page.getByText('副本保留管理 · 勾选后永久保留').click();
     assert.equal(await page.locator('[data-protect-copy]').isChecked(),true);
     await page.locator('#view-cleanup').screenshot({path:path.join(output,'cleanup-guidance.png')});
+    await page.check('#cleanup-timetables');await page.check('#cleanup-maps');
+    await page.click('#refresh-cleanup');
+    await page.waitForFunction(()=>!state.cleanupBusy&&state.cleanup?.candidate_count===2);
+    assert.equal(await page.locator('.cleanup-select:checked').count(),0);
+    assert.ok(await page.locator('#execute-cleanup').isDisabled());
+    await page.locator('.cleanup-select').first().check();
+    assert.ok(await page.locator('#execute-cleanup').isEnabled());
+    await page.fill('#cleanup-days','20');await page.locator('#cleanup-days').blur();
+    assert.ok(await page.locator('#execute-cleanup').isDisabled());
+    await page.click('#refresh-cleanup');await page.waitForFunction(()=>!state.cleanupBusy&&state.cleanup.days===20);
+    await page.locator('.cleanup-select').first().check();
+    await page.evaluate(()=>{document.querySelector('#toast').hidden=true;});
+    await page.locator('#view-cleanup').screenshot({path:path.join(output,'cleanup-export-selection.png')});
+    page.once('dialog',dialog=>dialog.accept());await page.click('#execute-cleanup');
+    await page.waitForFunction(()=>!state.cleanupBusy);
+    assert.equal(cleanupCalls.length,1);assert.deepEqual(cleanupCalls[0].selected,['QA-old-timetable.json']);
     await page.evaluate(()=>toast(updateFailureMessage({rollback_complete:false,backup_dir:'QA backup',error:'测试恢复失败'}),true));
     assert.ok((await page.locator('#error-help').innerText()).includes('展开诊断信息'));
     await page.click('#error-help summary');
@@ -313,6 +340,35 @@ const server=http.createServer(async(req,res)=>{
     await page.evaluate(()=>window.autotrackResult({...window.qaPartialResult,partial_output:true,output_save:'QA-only.nimbyrails5'}));
     assert.match(await page.locator('#at-output').innerText(),/跳过 1 个区间.*B 西站 → C 东站/);
     assert.ok(await page.locator('#at-partial-wrap').isHidden());
+    // Saved-station discovery: mock only worker output; exercise the real controls.
+    await page.evaluate(async()=>{
+      const stations=[{id:'a',name:'起点站'},{id:'z',name:'终点站'},
+        {id:'built',name:'沿线站',along_m:1300,distance_m:12,ambiguous:false},
+        {id:'planned',name:'沿线站',along_m:2700,distance_m:95,ambiguous:true}];
+      await window.autotrackResult({operation:'catalog',stations,maps:['QA-map'],routes:[],node_ready:true},{catalogSave:'QA-source.nimbyrails5'});
+      window.qaDiscoveryStations=stations;
+    });
+    await page.fill('#at-from','起点站 — a');await page.fill('#at-to','终点站 — z');
+    await page.click('#at-discover');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.operation),'discover');
+    await page.evaluate(()=>window.autotrackResult({operation:'discover',source_sha256:'qa-snapshot',
+      candidates:window.qaDiscoveryStations.slice(2),warnings:['仅列出存档中的已建站 / 蓝图站；平行线路请逐项确认。']},window.qaPartialTask.context));
+    assert.equal(await page.locator('#at-discovery-list input:checked').count(),0);
+    assert.ok(await page.locator('#at-use-discovery').isDisabled());
+    await page.locator('#at-discovery-list input').nth(0).check();
+    await page.locator('#at-discovery-list input').nth(1).check();
+    assert.ok(await page.locator('#at-use-discovery').isDisabled());
+    await page.check('#at-discovery-replace');
+    assert.ok(await page.locator('#at-use-discovery').isEnabled());
+    assert.equal(await page.locator('#at-discovery-list label').first().evaluate(e=>getComputedStyle(e).flexDirection),'row');
+    assert.ok((await page.locator('#at-discovery-replace').boundingBox()).height<=24);
+    await page.evaluate(()=>{document.querySelector('#toast').hidden=true;});
+    await page.locator('#at-discovery').screenshot({path:path.join(output,'station-discovery.png')});
+    await page.click('#at-use-discovery');
+    assert.equal(await page.locator('#at-via-0').inputValue(),'沿线站 — built');
+    assert.equal(await page.locator('#at-via-1').inputValue(),'沿线站 — planned');
+    await page.click('#at-preview');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.discovery_source_sha256),'qa-snapshot');
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({page_errors:errors,exports:exportsSeen,screenshots:output,tutorial_lessons:9},null,2));
   }finally{await browser.close();server.close();}

@@ -122,3 +122,47 @@ test('late result after waypoint edit cannot restore write permission',async()=>
   await h.$('#at-preview').click();h.$('#at-via-0').value='30.008,20';h.$('#at-via-0').events.input();
   await h.context.window.autotrackResult(h.result,h.calls[0].ctx);assert.equal(h.$('#at-apply').disabled,true);
 });
+
+async function discoveryHarness(count=2){
+  const h=await autoHarness();
+  const candidates=Array.from({length:count},(_,i)=>({id:'mid'+i,name:'同名候选站',lon:30.001+i*.001,lat:20,along_m:100+i*100,distance_m:30,ambiguous:false}));
+  const stations=[{id:'a',name:'A'},{id:'z',name:'Z'},...candidates];
+  await h.context.window.autotrackResult({operation:'catalog',stations,maps:['map'],routes:[],node_ready:true},{catalogSave:'source.nimbyrails5'});
+  h.$('#at-from').value='A — a';h.$('#at-to').value='Z — z';
+  await h.$('#at-discover').click();
+  const result={operation:'discover',candidates,source_sha256:'snapshot',warnings:['请核对平行线']};
+  return {...h,discoveryResult:result};
+}
+
+test('discovery is read-only, requires selection and replacement consent, then fills ordered IDs',async()=>{
+  const h=await discoveryHarness();
+  assert.equal(h.calls[0].payload.operation,'discover');assert.equal(h.calls[0].payload.apply,undefined);
+  await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
+  assert.equal(h.$('#at-discovery').hidden,false);assert.equal(h.$('#at-use-discovery').disabled,true);
+  for(const row of h.$('#at-discovery-list').children){assert.equal(row.children[0].checked,false);row.children[0].checked=true;row.children[0].events.change();}
+  assert.equal(h.$('#at-use-discovery').disabled,true);
+  h.$('#at-discovery-replace').checked=true;h.$('#at-discovery-replace').events.change();
+  assert.equal(h.$('#at-use-discovery').disabled,false);
+  await h.$('#at-use-discovery').click();
+  assert.equal(h.$('#at-via-0').value,'同名候选站 — mid0');assert.equal(h.$('#at-via-1').value,'同名候选站 — mid1');
+  assert.equal(h.$('#at-apply').disabled,true);
+  await h.$('#at-preview').click();
+  assert.equal(h.calls[1].payload.discovery_source_sha256,'snapshot');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls[1].payload.via)),[{station:'mid0'},{station:'mid1'}]);
+});
+
+test('discovery results and chosen candidates cannot survive stale parameters',async()=>{
+  const h=await discoveryHarness();h.$('#at-to').value='A — a';
+  await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
+  assert.equal(h.$('#at-discovery').hidden,true);assert.equal(h.$('#at-use-discovery').disabled,true);
+});
+
+test('discovery rejects coordinates, too many selected stations and empty selection',async()=>{
+  const coord=await autoHarness();await coord.$('#at-discover').click();assert.equal(coord.calls.length,0);
+  const h=await discoveryHarness(19);await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
+  h.$('#at-discovery-replace').checked=true;h.$('#at-discovery-replace').events.change();
+  assert.equal(h.$('#at-use-discovery').disabled,true);
+  for(const row of h.$('#at-discovery-list').children){row.children[0].checked=true;row.children[0].events.change();}
+  assert.equal(h.$('#at-use-discovery').disabled,true);
+  await h.$('#at-use-discovery').click();assert.equal(h.$('#at-via-list').children.length,0);
+});

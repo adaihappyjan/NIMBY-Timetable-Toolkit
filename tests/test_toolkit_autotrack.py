@@ -338,3 +338,155 @@ def test_map_change_during_plan_is_global_failure_not_skippable(tmp_path, multi_
     with pytest.raises(RuntimeError, match='底图.*改变'):
         at.dispatch({**request, 'allow_partial': True})
     assert not list(tmp_path.glob('*.partial')) and not list(tmp_path.glob('*.manifest.json'))
+
+
+@pytest.mark.parametrize('multi', [False, True])
+def test_over_150km_blueprint_preview_and_write(tmp_path, monkeypatch, multi):
+    import math
+    import toolkit_autoroute as ar
+
+    def centerline(a, b):
+        steps = math.ceil(abs(b[0]-a[0])/0.01)
+        return {'type': 'LineString', 'coordinates': [
+            [a[0]+(b[0]-a[0])*i/steps, a[1]] for i in range(steps+1)]}
+
+    def route(request, stations):
+        a, b = request['from_coord'], request['to_coord']
+        ar.bounds_for(a, b, 3000)  # Each automatic leg still meets its own bound.
+        return centerline(a, b), {'map_path': 'fixture', 'map_size': 1, 'map_mtime_ns': 1}
+
+    source = save_fixture(tmp_path); original = source.read_bytes()
+    request = {'save': str(source), 'geojson': centerline([30, 20], [32.01, 20])}
+    if multi:
+        monkeypatch.setattr(ar, 'automatic_route', route)
+        monkeypatch.setattr(at, 'station_catalog', lambda raw: [])
+        request = {'save': str(source), 'preset': 'auto', 'from_coord': [30, 20],
+                   'via': [{'coord': [30.67, 20]}, {'coord': [31.34, 20]}], 'to_coord': [32.01, 20]}
+    preview = at.dispatch(request)
+    assert preview['length_m'] > 200_000
+    if multi:
+        assert preview['successful_legs'] == 3 and preview['failed_legs'] == 0
+    output = tmp_path/'long.nimbyrails5'
+    result = at.dispatch({**request, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)})
+    assert source.read_bytes() == original
+    assert result['appended_nodes'] == preview['nodes']
+    raw = at.Zstd().decompress(at.split_save(output)[1])
+    ids, old_start, old_end, _ = at.layout(fixture_raw())
+    _, start, end, nodes = at.layout(raw)
+    assert len(nodes) == len(ids)+preview['nodes']
+    assert raw[start:start+old_end-old_start] == fixture_raw()[old_start:old_end]
+    assert raw[end:] == fixture_raw()[old_end:]
+
+
+def test_distance_removal_preserves_minimum_spacing_and_point_limits():
+    for coords, error in [([[30, 20], [30.0001, 20]], '至少'),
+                          ([[30, 20], [30.03, 20]], '相邻节点'),
+                          ([[30, 20]]*(at.MAX_POINTS+1), '节点')]:
+        with pytest.raises(ValueError, match=error):
+            at.route_data({'geojson': {'type': 'LineString', 'coordinates': coords}})
+
+
+def test_total_node_budget_still_blocks_later_leg(tmp_path, multi_route, monkeypatch):
+    monkeypatch.setattr(at, 'MAX_POINTS', 3)
+    preview = at.dispatch(multi_request(tmp_path))
+    assert preview['successful_legs'] == 1 and preview['failed_legs'] == 1
+    assert '双轨节点' in preview['skipped_legs'][0]['error']
+
+
+def test_distance_limit_help_matches_remaining_bounds():
+    root = Path(__file__).resolve().parents[1]
+    html = (root/'web/index.html').read_text('utf-8')
+    assert '首尾距离和路线总长均不设公里数上限' in html and '0.1–100 公里' not in html
+    assert '最多 150 公里' not in html
+
+
+@pytest.fixture
+def discovery_case(tmp_path, monkeypatch):
+    import toolkit_autoroute as ar
+    stations = [
+        {'id': 'end', 'name': '终点', 'lon': 30.01, 'lat': 20.01},
+        {'id': 'blueprint', 'name': '同名站', 'lon': 30.01, 'lat': 20.005},
+        {'id': 'built', 'name': '同名站', 'lon': 30.005, 'lat': 20},
+        {'id': 'start', 'name': '起点', 'lon': 30, 'lat': 20},
+        {'id': 'diagonal', 'name': '直线附近但不沿铁路', 'lon': 30.005, 'lat': 20.005},
+        {'id': 'nearby', 'name': '附近平行线待确认', 'lon': 30.005, 'lat': 20.001},
+    ]
+    monkeypatch.setattr(at, 'station_catalog', lambda raw: stations)
+    monkeypatch.setattr(ar, 'automatic_route', lambda request, saved: (
+        {'type': 'LineString', 'coordinates': [[30, 20], [30.01, 20], [30.01, 20.01]]},
+        {'map_path': 'fixture', 'map_size': 1, 'map_mtime_ns': 1}))
+    return {'save': str(save_fixture(tmp_path)), 'preset': 'auto', 'operation': 'discover',
+            'from_station': 'start', 'to_station': 'end'}, stations
+
+
+def test_discovery_uses_saved_stations_route_order_and_never_writes(discovery_case, tmp_path):
+    request, stations = discovery_case
+    before = Path(request['save']).read_bytes()
+    result = at.dispatch(request)
+    ids = [s['id'] for s in result['candidates']]
+    assert ids == ['built', 'nearby', 'blueprint']
+    assert set(ids) <= {s['id'] for s in stations}
+    assert result['candidates'][0]['distance_m'] == 0
+    assert 100 < result['candidates'][1]['distance_m'] < 120
+    assert not result['candidates'][0]['ambiguous']
+    assert result['source_sha256'] == at.digest(before)
+    assert Path(request['save']).read_bytes() == before
+    assert list(tmp_path.iterdir()) == [Path(request['save'])]
+    with pytest.raises(ValueError, match='不能同时写入'):
+        at.dispatch({**request, 'apply': True})
+
+
+@pytest.mark.parametrize('changes', [{'from_station': None, 'from_coord': [30, 20]},
+                                    {'to_station': 'missing'}, {'to_station': 'start'},
+                                    {'preset': 'custom'}])
+def test_discovery_requires_saved_distinct_endpoints(discovery_case, changes):
+    request, _ = discovery_case
+    with pytest.raises(ValueError): at.dispatch({**request, **changes})
+
+
+def test_discovery_source_change_invalidates_followup(discovery_case):
+    request, _ = discovery_case
+    result = at.dispatch(request)
+    source = Path(request['save'])
+    source.write_bytes(source.read_bytes()+b'changed')
+    with pytest.raises(ValueError, match='识别沿途站后改变'):
+        at.dispatch({**request, 'operation': 'preview', 'discovery_source_sha256': result['source_sha256']})
+
+
+def test_discovery_source_change_during_read_refused(discovery_case, monkeypatch):
+    import toolkit_autoroute as ar
+    request, _ = discovery_case
+    route = ar.automatic_route
+    def changing(*args):
+        path = Path(request['save']); path.write_bytes(path.read_bytes()+b'changed')
+        return route(*args)
+    monkeypatch.setattr(ar, 'automatic_route', changing)
+    with pytest.raises(ValueError, match='识别期间存档改变'): at.dispatch(request)
+
+
+def test_discovery_loop_reports_ambiguous_mileage(discovery_case, monkeypatch):
+    import toolkit_autoroute as ar
+    request, _ = discovery_case
+    monkeypatch.setattr(ar, 'automatic_route', lambda *args: (
+        {'type': 'LineString', 'coordinates': [[30, 20], [30.01, 20], [30.01, 20.0001], [30, 20.0001]]}, {}))
+    result = at.dispatch(request)
+    assert next(s for s in result['candidates'] if s['id'] == 'built')['ambiguous']
+
+
+def test_discovery_empty_candidates_do_not_invent_stations(discovery_case):
+    request, stations = discovery_case
+    stations[:] = [s for s in stations if s['id'] in ('start', 'end')]
+    assert at.dispatch(request)['candidates'] == []
+
+
+def test_worker_preserves_discovery_binding_and_partial_consent(tmp_path, monkeypatch):
+    import toolkit_webapp as web
+    monkeypatch.setattr(web, 'SAVE_DIR', tmp_path)
+    monkeypatch.setattr(web, 'TASK_DIR', tmp_path/'tasks')
+    source = save_fixture(tmp_path)
+    request = {'save': str(source), 'preset': 'auto', 'operation': 'discover',
+               'discovery_source_sha256': 'snapshot', 'allow_partial': True}
+    args = web.TaskManager()._build_args('autotrack', request)
+    forwarded = json.loads(Path(args[-1]).read_text('utf-8'))
+    assert forwarded['operation'] == 'discover' and forwarded['apply'] is False
+    assert forwarded['discovery_source_sha256'] == 'snapshot' and forwarded['allow_partial'] is True

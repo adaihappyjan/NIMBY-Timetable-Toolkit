@@ -27,3 +27,14 @@
 .map-branch-controls p {line-height:1.7;color:var(--muted);}
 .map-branch-controls input {padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);max-width:100%;}
 .map-branch-controls .button-row {display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+#at-discovery { margin-top: 12px; padding: 14px; border: 1px solid #35566b; border-radius: 10px; }
+#at-discovery[hidden] { display: none; }
+#at-discovery-list { max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
+#view-autotrack #at-discovery label { display: flex; flex-direction: row; gap: 10px; align-items: center; padding: 8px; line-height: 1.6; }
+#view-autotrack #at-discovery input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; padding: 0; margin: 0; flex: 0 0 18px; accent-color: #2dd4bf; }
+.cleanup-extra { display:grid; gap:12px; margin-bottom:18px; line-height:1.6; }
+.cleanup-extra label { display:flex; align-items:center; gap:10px; }
+.cleanup-extra input,.cleanup-select { width:18px; height:18px; flex:0 0 18px; accent-color:var(--aqua); }
+#cleanup-list .cleanup-item { gap:12px; }
+#cleanup-list .cleanup-item>div { flex:1; min-width:0; overflow-wrap:anywhere; }
+#view-cleanup .phase-badge { flex-shrink:0; white-space:nowrap; }

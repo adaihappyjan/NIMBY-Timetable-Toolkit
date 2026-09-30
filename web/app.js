@@ -466,12 +466,24 @@ function renderSchedules(schedules) {
 }
 function renderCleanup() {
   const c = state.cleanup; if (!c) return;
-  $('#cleanup-summary').innerHTML = `<div class="clean-stat"><small>工具副本</small><b>${c.completed_copy_count}</b></div><div class="clean-stat"><small>保护最新</small><b>${c.protected_copy_count}</b></div><div class="clean-stat"><small>可清理组</small><b>${c.candidate_count}</b></div><div class="clean-stat"><small>预计释放</small><b>${formatBytes(c.candidate_bytes)}</b></div>`;
-  $('#cleanup-list').innerHTML = c.targets.length ? c.targets.map(x => `<div class="cleanup-item"><div><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.reason)}</small></div><span>${formatBytes(x.bytes)}</span></div>`).join('') : '<div class="placeholder">没有符合当前规则的文件。缺少记录、已改写或永久保留的副本不会被清理。</div>';
+  $('#cleanup-summary').innerHTML = `<div class="clean-stat"><small>已核验工具副本</small><b>${c.completed_copy_count}</b></div><div class="clean-stat"><small>按数量保留的副本</small><b>${c.protected_copy_count}</b></div><div class="clean-stat"><small>可清理组</small><b>${c.candidate_count}</b></div><div class="clean-stat"><small>候选文件大小（回收站仍占空间）</small><b>${formatBytes(c.candidate_bytes)}</b></div>`;
+  $('#cleanup-list').innerHTML = c.targets.length ? c.targets.map((x,i) => `<label class="cleanup-item"><input type="checkbox" class="cleanup-select" data-clean-index="${i}"><div><strong>${escapeHtml(x.name)}</strong><small>${escapeHtml(x.reason)}</small><small>${escapeHtml(x.path)}</small></div><span>${formatBytes(x.bytes)}</span></label>`).join('') : '<div class="placeholder">没有符合当前规则的文件。缺少记录、已改写、当前选中或永久保留的文件会跳过；至少保留每组最新文件。</div>';
   $('#cleanup-protection').innerHTML = (c.copies || []).map(x => `<label class="cleanup-item"><input type="checkbox" data-protect-copy="${escapeHtml(x.name)}" ${x.pinned ? 'checked' : ''}><span><strong>${escapeHtml(x.name)}</strong><small>${x.pinned ? '永久保留' : x.eligible ? '内容与生成记录一致，可按规则清理' : '记录缺失或内容已改变，自动跳过'}</small></span></label>`).join('') || '<p>没有识别到工具副本。</p>';
-  $('#cleanup-explanation').textContent = state.cleanMode === 'compact' ? `立即瘦身会保留最新 ${c.keep} 份，其余工具副本移入回收站。` : `自动规则：保留最新 ${c.keep} 份，只清理超过 ${c.days} 天的额外副本。`;
-  $('#execute-cleanup').disabled = c.candidate_count === 0;
+  $('#cleanup-explanation').textContent = (state.cleanMode === 'compact' ? `立即瘦身：每组保留最新 ${c.keep} 份，其余不按天数过滤。` : `按天数：每组保留最新 ${c.keep} 份，只列出超过 ${c.days} 天的额外文件。`) + ' 超过 1 小时的工具临时文件单独列出；只移走勾选项，导出 JSON 不参与启动自动清理。';
+  syncCleanupSelection();
 }
+
+function cleanupOptions(){
+  return {days:+$('#cleanup-days').value,keep:+$('#cleanup-keep').value,compact:state.cleanMode==='compact',
+    include_maps:$('#cleanup-maps').checked,include_timetables:$('#cleanup-timetables').checked,
+    protected_paths:[...new Set(['#save-select','#export-select','#compare-before','#compare-after','#netdiff-before','#netdiff-after'].map(id=>$(id)?.value).filter(Boolean))].sort()};
+}
+function cleanupChosen(){return $$('.cleanup-select:checked').map(box=>state.cleanup?.targets[Number(box.dataset.cleanIndex)]).filter(Boolean);}
+function syncCleanupSelection(){
+  $('#execute-cleanup').disabled=!!state.cleanupBusy||!!state.taskActive||!cleanupChosen().length||state.cleanupSignature!==JSON.stringify(cleanupOptions());
+}
+function invalidateCleanup(){state.cleanupSignature=null;$('#execute-cleanup').disabled=true;$('#cleanup-explanation').textContent='清理选项或当前选中文件改变，请刷新清理预览。';}
+document.addEventListener('change',event=>{if(event.target.classList?.contains('cleanup-select'))syncCleanupSelection();});
 document.addEventListener('change', async event => {
   const name = event.target.dataset?.protectCopy;
   if (!name) return;
@@ -1630,6 +1642,7 @@ function finishTask() {
 }
 const WRITE_ACTIONS = new Set(['batch-migrate', 'fix-tasks', 'extension', 'recover-template', 'align-coords', 'timetable-write', 'station-name-write', 'operating-rule-write']);
 async function startTask(action, payload, context = null) {
+  if(state.cleanupBusy){toast('正在核对或清理文件，请稍后再启动任务。',true);return false;}
   // Reserve the single task slot before any await; a second click must not
   // reset the first task's polling state or its preview context.
   if (state.taskActive) { toast('已有后台任务，请等待完成或先取消。', true); return false; }
@@ -1701,9 +1714,15 @@ async function refreshFileLists() {
   if ([...$('#export-select').options].some(x=>x.value===exportValue)) $('#export-select').value=exportValue;
 }
 async function updateCleanupPreview() {
+  const options=cleanupOptions(),signature=JSON.stringify(options),sequence=(state.cleanupSequence||0)+1;
+  state.cleanupSequence=sequence;invalidateCleanup();state.cleanupBusy=true;
+  $('#cleanup-explanation').textContent='正在核对文件与保留规则；预览不会移走任何文件…';
   try {
-    const data = await api('/api/cleanup/preview', { method:'POST', body:JSON.stringify({ days:+$('#cleanup-days').value, keep:+$('#cleanup-keep').value, compact:state.cleanMode==='compact' }) }); state.cleanup=data.cleanup; renderCleanup();
+    const data = await api('/api/cleanup/preview', { method:'POST', body:signature });
+    if(sequence!==state.cleanupSequence||signature!==JSON.stringify(cleanupOptions()))return;
+    state.cleanup=data.cleanup;state.cleanupSignature=signature;renderCleanup();
   } catch(e) { toast(e.message,true); }
+  finally{if(sequence===state.cleanupSequence){state.cleanupBusy=false;syncCleanupSelection();}}
 }
 // ---- #10 批量扩展绑定器 ----
 function renderBinderLines() {
@@ -1994,7 +2013,22 @@ $('#binder-fleets-none')?.addEventListener('click',()=>$$('.binder-fleet-check')
 $('#binder-write-garage')?.addEventListener('click',binderWriteGarage);
 $('#save-cleanup-settings').addEventListener('click',async()=>{try{await api('/api/settings',{method:'POST',body:JSON.stringify({enabled:$('#cleanup-enabled').checked,days:+$('#cleanup-days').value,keep:+$('#cleanup-keep').value})}); await updateCleanupPreview(); toast('自动清理规则已保存');}catch(e){toast(e.message,true);}});
 $$('[data-clean-mode]').forEach(b=>b.addEventListener('click',()=>{$$('[data-clean-mode]').forEach(x=>x.classList.toggle('active',x===b));state.cleanMode=b.dataset.cleanMode;updateCleanupPreview();}));
-$('#execute-cleanup').addEventListener('click',async()=>{const c=state.cleanup;if(!c?.candidate_count)return;if(!confirm(`将 ${c.candidate_count} 组文件移入 Windows 回收站，预计释放 ${formatBytes(c.candidate_bytes)}。继续吗？`))return;try{const d=await api('/api/cleanup/execute',{method:'POST',body:JSON.stringify({days:+$('#cleanup-days').value,keep:+$('#cleanup-keep').value,compact:state.cleanMode==='compact',token:c.token})});toast(`已将 ${d.result.moved_group_count} 组文件移入回收站`);await updateCleanupPreview();await refreshFileLists();}catch(e){toast(e.message,true);}});
+$('#refresh-cleanup').addEventListener('click',updateCleanupPreview);
+['#cleanup-days','#cleanup-keep','#cleanup-maps','#cleanup-timetables','#save-select','#export-select','#compare-before','#compare-after','#netdiff-before','#netdiff-after'].forEach(id=>$(id).addEventListener('change',invalidateCleanup));
+$('#execute-cleanup').addEventListener('click',async()=>{
+  const c=state.cleanup,chosen=cleanupChosen(),options=cleanupOptions();
+  if(state.cleanupBusy||state.taskActive)return toast('请等待当前任务完成后再清理',true);
+  if(state.cleanupSignature!==JSON.stringify(options))return toast('请刷新清理预览',true);
+  if(!chosen.length)return;
+  if(!confirm(`仅将勾选的 ${chosen.length} 组文件移入 Windows 回收站，共 ${formatBytes(chosen.reduce((sum,x)=>sum+x.bytes,0))}。旧导出可能仍有用途，确定不再需要吗？`))return;
+  state.cleanupBusy=true;syncCleanupSelection();
+  try{
+    const d=await api('/api/cleanup/execute',{method:'POST',body:JSON.stringify({...options,token:c.token,selected:chosen.map(x=>x.path)})});
+    toast(`已将 ${d.result.moved_group_count} 组文件移入回收站，可从回收站恢复`);
+    await refreshFileLists();await updateCleanupPreview();
+  }catch(e){invalidateCleanup();toast(e.message,true);}
+  finally{state.cleanupBusy=false;syncCleanupSelection();}
+});
 $('#find-reference-btn').addEventListener('click',()=>{
   const target=$('#recover-target').value;
   if(!target)return toast('没有可恢复的空白模板',true);

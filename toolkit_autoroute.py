@@ -67,7 +67,8 @@ def bounds_for(a,b,padding_m):
     scale=40075016.686/N*math.cos(math.radians((a[1]+b[1])/2))
     p,q=tile_point(a),tile_point(b)
     distance=math.dist(p,q)*scale
-    if not 100<=distance<=100000:raise ValueError('两站直线距离须在 0.1–100 公里；长线请分段，不支持跨日期线')
+    if abs(a[0]-b[0])>180:raise ValueError('不支持跨日期线，请选择不跨日期线的区间')
+    if distance<100:raise ValueError('两站直线距离须至少 0.1 公里')
     pad=padding_m/scale
     return [max(0,int((min(p[0],q[0])-pad)//4096)),max(0,int((min(p[1],q[1])-pad)//4096)),
             min(16383,int((max(p[0],q[0])+pad)//4096)),min(16383,int((max(p[1],q[1])+pad)//4096))]

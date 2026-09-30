@@ -418,6 +418,31 @@ def validate_input_path(value: str, suffix: str) -> Path:
     return path
 
 
+def manual_cleanup_preview(payload: dict) -> dict:
+    protected = payload.get('protected_paths', [])
+    if not isinstance(protected, list) or len(protected) > 20 or any(not isinstance(p, str) for p in protected):
+        raise RuntimeError('清理保护列表无效')
+    return cleanup_preview(SAVE_DIR, days=int(payload.get('days', 14)), keep=int(payload.get('keep', 5)),
+                           compact=payload.get('compact') is True,
+                           include_maps=payload.get('include_maps') is True,
+                           include_timetables=payload.get('include_timetables') is True,
+                           export_directory=map_export_directory(), protected_paths=protected)
+
+
+def manual_cleanup_execute(payload: dict) -> dict:
+    # Hold the task slot throughout verification/recycling so another request
+    # cannot start a save-reading/writing worker between the checks.
+    with TASKS.lock:
+        if TASKS.task and TASKS.task['process'].poll() is None:
+            raise RuntimeError('后台任务正在使用文件，请等待完成后再清理')
+        preview = manual_cleanup_preview(payload)
+        if payload.get('token') != preview['token']:
+            raise RuntimeError('清理列表或选项已变化，请重新预览并确认')
+        if not isinstance(payload.get('selected'), list):
+            raise RuntimeError('请勾选需要清理的文件')
+        return execute_cleanup(SAVE_DIR, preview, export_directory=map_export_directory(), selected=payload['selected'])
+
+
 def ensure_directory_writable(directory: Path) -> None:
     """Verify that this server instance can create output in the save folder."""
     probe: Path | None = None
@@ -466,7 +491,7 @@ class TaskManager:
 
     def _build_args(self, action: str, payload: dict) -> list[str]:
         if action == 'autotrack':
-            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'via', 'map_path', 'route_path', 'rail_type') if k in payload}
+            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'via', 'map_path', 'route_path', 'rail_type', 'allow_partial', 'discovery_source_sha256') if k in payload}
             request['save'] = str(validate_input_path(payload.get('save', ''), '.nimbyrails5'))
             request['apply'] = payload.get('apply') is True
             if request['apply']:
@@ -1289,24 +1314,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "save_status": status, "files": recent_files()})
                 return
             if route == "/api/cleanup/preview":
-                result = cleanup_preview(
-                    SAVE_DIR,
-                    days=int(payload.get("days", 14)),
-                    keep=int(payload.get("keep", 5)),
-                    compact=bool(payload.get("compact", False)),
-                )
+                result = manual_cleanup_preview(payload)
                 self.send_json({"ok": True, "cleanup": result})
                 return
             if route == "/api/cleanup/execute":
-                preview = cleanup_preview(
-                    SAVE_DIR,
-                    days=int(payload.get("days", 14)),
-                    keep=int(payload.get("keep", 5)),
-                    compact=bool(payload.get("compact", False)),
-                )
-                if payload.get('token') != preview['token']:
-                    raise RuntimeError('清理列表已变化，未执行清理。请重新预览并确认。')
-                result = execute_cleanup(SAVE_DIR, preview)
+                result = manual_cleanup_execute(payload)
                 self.send_json({"ok": True, "result": result, "files": recent_files()})
                 return
             if route == "/api/cleanup/protect":
