@@ -299,7 +299,11 @@ class Cache:
 
     def _download(self, key, row, generation):
         with self.network:
-            time.sleep(max(0, self.next_request - time.monotonic()))
+            # Older Windows/Python monotonic clocks can tick more coarsely than
+            # sleep(). Recheck the deadline after waking instead of assuming a
+            # single sleep advanced the clock far enough to admit the request.
+            while (remaining := self.next_request - time.monotonic()) > 0:
+                time.sleep(remaining)
             with self.lock:
                 if self.closed or generation != self.generation or self.config['offline'] or self.blocked_until > time.time():
                     return (200, row[0], 'stale') if row else (503, b'', 'offline-or-paused')

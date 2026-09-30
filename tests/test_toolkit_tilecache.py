@@ -5,6 +5,8 @@ import concurrent.futures
 import json
 import threading
 import time
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -185,6 +187,25 @@ def test_upstream_rate_is_global_across_workers(cache):
         results = list(pool.map(cache.get, [f'standard/3/{x}/1.png' for x in range(4)]))
     assert all(r[0] == 200 for r in results)
     assert all(b - a >= .05 for a, b in zip(starts, starts[1:]))
+
+
+def test_rate_limiter_rechecks_deadline_after_early_clock_tick(cache):
+    clock = [0.0]
+    waits = []
+    starts = []
+    cache.next_request = .06
+    def sleep(delay):
+        waits.append(delay)
+        clock[0] += .04 if len(waits) == 1 else delay
+    def fetch(*_):
+        starts.append(clock[0])
+        return 200, HEADERS, IMAGE
+    cache.fetch = fetch
+    fake_time = SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep, time=time.time)
+    with patch.object(tc, 'time', fake_time):
+        assert cache._download(KEY, None, cache.generation)[0] == 200
+    assert len(waits) == 2
+    assert starts[0] >= .06
 
 
 def test_clear_during_download_does_not_repopulate_cache(cache):
