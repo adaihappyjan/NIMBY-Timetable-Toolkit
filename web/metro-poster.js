@@ -293,6 +293,105 @@ function metroGridLayout(graph,raw,gap) {
   });
   return {anchors,parts:graph.edges.map(e=>({ids:[e.a,e.b],lines:[...e.lines].sort((a,b)=>a-b)})),gridStep:step};
 }
+// Separate geometrically coincident corridors without changing the graph.
+// A corridor may include several bend anchors. Move those anchors together;
+// only actual junctions stay pinned and get a short fan-out connection.
+function metroSeparateCorridors(parts,routes,positions,gap) {
+  const ports=new Map(),parent=parts.map((_,i)=>i);
+  const root=i=>parent[i]===i?i:(parent[i]=root(parent[i]));
+  parts.forEach((part,index)=>[part.ids[0],part.ids.at(-1)].forEach(id=>{
+    if(!ports.has(id))ports.set(id,[]);ports.get(id).push(index);
+  }));
+  const movable=new Set();
+  ports.forEach((list,id)=>{
+    if(list.length===2&&list[0]!==list[1]&&JSON.stringify(parts[list[0]].lines)===JSON.stringify(parts[list[1]].lines)){
+      parent[root(list[1])]=root(list[0]);movable.add(id);
+    }
+    if(list.length===1)movable.add(id);
+  });
+  const groups=new Map();
+  parts.forEach((_,i)=>{const key=root(i);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(i);});
+  const clean=points=>points.filter((p,i)=>!i||Math.hypot(p.x-points[i-1].x,p.y-points[i-1].y)>1e-6);
+  const candidates=[...groups.values()].map(indices=>{
+    const pts=indices.flatMap(i=>routes[i]),bounds=metroBounds(pts);
+    const normal=bounds.h>=bounds.w?{x:1,y:0}:{x:0,y:1};
+    return [0,-1,1,-2,2,-3,3,-4,4].map(lane=>{
+      const shift={x:normal.x*lane*gap,y:normal.y*lane*gap},paths=[],nodes=new Map();
+      indices.forEach(index=>{
+        const part=parts[index],original=routes[index].map(p=>({...p}));
+        let points=original.map(p=>({x:p.x+shift.x,y:p.y+shift.y}));
+        if(lane){
+          // At a real shared node, fan out once instead of overlaying a whole
+          // independent route. Do not relocate that node per colour.
+          for(const end of [0,1]){
+            const id=end?part.ids.at(-1):part.ids[0];if(movable.has(id))continue;
+            if(end){points.reverse();original.reverse();}
+            const a=original[0],b=original[1],len=Math.hypot(b.x-a.x,b.y-a.y)||1;
+            const run=Math.min(Math.abs(lane)*gap,len*0.4);
+            points[0]={x:points[0].x+(b.x-a.x)/len*run,y:points[0].y+(b.y-a.y)/len*run};
+            points.unshift({...a});
+            if(end){points.reverse();original.reverse();}
+          }
+        }
+        points=clean(points);
+        const samples=metroRounded(points,gap*0.4).samples;
+        part.ids.forEach((id,i)=>{
+          const p=metroSampleAt(samples,i/(part.ids.length-1));
+          // Anchor markers belong at the exact meeting point of their parts.
+          if(i===0||i===part.ids.length-1){const original=positions[id];nodes.set(id,{x:original.x+(movable.has(id)?shift.x:0),y:original.y+(movable.has(id)?shift.y:0)});}
+          else nodes.set(id,p);
+        });
+        paths.push({index,points});
+      });
+      const segments=paths.flatMap(path=>path.points.slice(1).map((b,i)=>({a:path.points[i],b})));
+      return {paths,nodes,segments,lane,shift,indices};
+    });
+  });
+  const clearance=gap*0.62;
+  const distance=(p,a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,l=dx*dx+dy*dy,t=l?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/l)):0;return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);};
+  function conflict(a,b){
+    let cost=0;
+    for(const s of a.segments)for(const t of b.segments){
+      const dx=s.b.x-s.a.x,dy=s.b.y-s.a.y,len=Math.hypot(dx,dy),ex=t.b.x-t.a.x,ey=t.b.y-t.a.y,other=Math.hypot(ex,ey);
+      if(!len||!other||Math.abs(dx*ey-dy*ex)/(len*other)>0.08)continue;
+      const ux=dx/len,uy=dy/len,sep=Math.abs((t.a.x-s.a.x)*uy-(t.a.y-s.a.y)*ux);
+      if(sep>=clearance)continue;
+      const q1=(t.a.x-s.a.x)*ux+(t.a.y-s.a.y)*uy,q2=(t.b.x-s.a.x)*ux+(t.b.y-s.a.y)*uy;
+      const overlap=Math.min(len,Math.max(q1,q2))-Math.max(0,Math.min(q1,q2));
+      if(overlap>gap*0.2)cost+=overlap/gap*(1-sep/clearance)**2*100;
+    }
+    for(const [first,second] of [[a,b],[b,a]])for(const [id,p] of first.nodes){
+      if(second.nodes.has(id))continue;
+      const d=Math.min(...second.segments.map(s=>distance(p,s.a,s.b)));
+      if(d<clearance*0.5)cost+=80*(1-d/(clearance*0.5))**2;
+    }
+    return cost;
+  }
+  const chosen=candidates.map(()=>0),cache=new Map();
+  const pairCost=(i,a,j,b)=>{
+    if(i>j)return pairCost(j,b,i,a);
+    const key=`${i}:${a}:${j}:${b}`;
+    if(!cache.has(key))cache.set(key,conflict(candidates[i][a],candidates[j][b]));
+    return cache.get(key);
+  };
+  for(let pass=0;pass<4;pass++){
+    let changed=false;
+    candidates.forEach((options,i)=>{
+      const score=k=>Math.abs(options[k].lane)*0.6+chosen.reduce((sum,other,j)=>sum+(i===j?0:pairCost(i,k,j,other)),0);
+      let best=chosen[i],cost=score(best);
+      for(let k=0;k<options.length;k++){const next=score(k);if(next<cost-1e-7){best=k;cost=next;}}
+      changed ||= best!==chosen[i];chosen[i]=best;
+    });
+    if(!changed)break;
+  }
+  const result=routes.slice();
+  candidates.forEach((options,i)=>{
+    const selected=options[chosen[i]];
+    selected.paths.forEach(path=>result[path.index]=path.points);
+    selected.nodes.forEach((p,id)=>{if(positions[id]&&movable.has(id))positions[id]={...positions[id],x:p.x,y:p.y};});
+  });
+  return result;
+}
 function metroCubicJoin(a,ta,p,b,tb) {
   const al=Math.hypot(p.x-a.x,p.y-a.y),bl=Math.hypot(b.x-p.x,b.y-p.y);
   const span=Math.hypot(b.x-a.x,b.y-a.y)||1,t={x:(b.x-a.x)/span,y:(b.y-a.y)/span};
@@ -419,7 +518,7 @@ function metroPlaceLabels(graph,positions,paths,style,wanted,maxRing=3) {
   const sorted=[...wanted].sort((a,b)=>graph.nodes.get(b).lines.size-graph.nodes.get(a).lines.size||a.localeCompare(b));
   sorted.forEach(id=>{
     const p=positions[id],name=graph.nodes.get(id).name,w=metroMeasure(name,fs),off=p.r+7;
-    let chosen=null;
+    let chosen=null,fallback=null;
     for(let ring=0;ring<maxRing&&!chosen;ring++){
       const dist=off+ring*(fs+8);
       const horizontal=Math.abs(p.tx)>0.85,tilt=horizontal&&w>style.gap*1.2;
@@ -431,12 +530,25 @@ function metroPlaceLabels(graph,positions,paths,style,wanted,maxRing=3) {
         const x=p.x+dx,y=p.y+dy,rad=angle*Math.PI/180,co=Math.cos(rad),si=Math.sin(rad);
         const poly=metroBox(-2,-fs*0.87,w+4,fs*1.15).map(q=>({x:x+q.x*co-q.y*si,y:y+q.x*si+q.y*co}));
         if(index.collides(poly))continue;
-        chosen={id,name,x,y,angle,poly,leader:ring>0};index.add(poly);break;
+        let leaderPoly=null,leaderBlocked=false;
+        if(ring>0){
+          const box=metroBounds(poly),end={x:Math.max(box.x,Math.min(box.x+box.w,p.x)),y:Math.max(box.y,Math.min(box.y+box.h,p.y))};
+          const dx=end.x-p.x,dy=end.y-p.y,len=Math.hypot(dx,dy),skip=p.r+style.line+5;
+          if(len>skip){
+            const start={x:p.x+dx/len*skip,y:p.y+dy/len*skip},nx=-dy/len,ny=dx/len;
+            leaderPoly=[{x:start.x+nx,y:start.y+ny},{x:end.x+nx,y:end.y+ny},{x:end.x-nx,y:end.y-ny},{x:start.x-nx,y:start.y-ny}];
+            leaderBlocked=index.collides(leaderPoly);
+          }
+        }
+        const candidate={id,name,x,y,angle,poly,leader:ring>0,leaderBlocked};
+        if(leaderBlocked){fallback ||= candidate;continue;}
+        chosen=candidate;index.add(poly);if(leaderPoly)index.add(leaderPoly);break;
       }
     }
+    if(!chosen&&fallback){chosen=fallback;index.add(chosen.poly);}
     if(chosen)labels.push(chosen);else unplaced.push(id);
   });
-  return {labels,unplaced};
+  return {labels,unplaced,leaderCrossings:labels.filter(l=>l.leaderBlocked).length};
 }
 function drawMetroDiagram(lines,stations) {
   const sourceLines=lines,mergeBranches=$('#map-merge-branches')?.checked!==false;
@@ -463,6 +575,11 @@ function drawMetroDiagram(lines,stations) {
   const orientation=$('#map-metro-orientation')?.value || 'h',anchorBounds=metroBounds(Object.values(layout.anchors));
   const rotate=(orientation==='h'&&anchorBounds.h>anchorBounds.w)||(orientation==='v'&&anchorBounds.w>anchorBounds.h);
   if(rotate)Object.values(layout.anchors).forEach(p=>{const x=p.x;p.x=-p.y;p.y=x;});
+  let baseRoutes;
+  if(!grid){
+    baseRoutes=metroRouteParts(layout.parts,layout.anchors,style.gap);
+    baseRoutes=metroSeparateCorridors(layout.parts,baseRoutes,layout.anchors,style.gap);
+  }
   const termini=new Set(sourceLines.flatMap(l=>[String(l.stops[0]),String(l.stops.at(-1))]));
   const wanted=ids.filter(id=>$('#map-all-labels').checked||termini.has(id)||graph.nodes.get(id).lines.size>1);
   let positions,paths,placement,expansion=1;
@@ -470,7 +587,7 @@ function drawMetroDiagram(lines,stations) {
     expansion=1.4**attempt;positions={};paths=[];
     const routes=[];
     Object.entries(layout.anchors).forEach(([id,p])=>positions[id]={x:p.x*expansion,y:p.y*expansion,tx:0,ty:1,r:style.radius});
-    const routedParts=metroRouteParts(layout.parts,positions,style.gap,grid?layout.gridStep*expansion:0);
+    const routedParts=grid?metroRouteParts(layout.parts,positions,style.gap,layout.gridStep*expansion):baseRoutes.map(points=>points.map(p=>({x:p.x*expansion,y:p.y*expansion})));
     layout.parts.forEach((c,partIndex)=>{
       const points=routedParts[partIndex];
       const central=metroRounded(points,grid?0:style.gap*0.4);
@@ -488,8 +605,9 @@ function drawMetroDiagram(lines,stations) {
       });
     });
     paths=grid?routes.map(r=>({...metroRounded(r.points,0),line:r.line})):metroJoinCorridors(routes,positions,graph,style);
-    placement=metroPlaceLabels(graph,positions,paths,style,wanted,attempt===4?32:10);
-    if(!placement.unplaced.length)break;
+    // Expand the network before resorting to long, hard-to-follow leaders.
+    placement=metroPlaceLabels(graph,positions,paths,style,wanted,attempt===4?32:6);
+    if(!placement.unplaced.length&&(!placement.labels.some(l=>l.leaderBlocked)||attempt>=1))break;
   }
   placement.unplaced.forEach(id=>{
     const p=positions[id],name=graph.nodes.get(id).name,x=p.x+p.r+10,y=p.y-style.font;
@@ -544,5 +662,5 @@ function drawMetroDiagram(lines,stations) {
   canvas.innerHTML='';canvas.appendChild(svg);state.mapSvg=svg;
   const absolute=Object.fromEntries(Object.entries(positions).map(([id,p])=>[id,{x:p.x+dx,y:p.y+dy}]));
   state.metroLayout={coordinate_space:'display-only',theme,layout:grid?'grid':'regular',merge_branches:mergeBranches,display_lines:lines.map(l=>({name:l.name,source_ids:l.source_ids,group_method:l.group_method})),grid_step:grid?layout.gridStep*expansion:null,grid_origin:grid?{x:dx,y:dy}:null,transfer_style:transferStyle,orientation,rotated:rotate,width:W,height:H,positions:absolute,
-    label_count:placement.labels.length,label_conflicts:placement.unplaced.length,expansion,missing_references:graph.missing};
+    label_count:placement.labels.length,label_conflicts:placement.unplaced.length,label_leader_crossings:placement.leaderCrossings,expansion,missing_references:graph.missing};
 }

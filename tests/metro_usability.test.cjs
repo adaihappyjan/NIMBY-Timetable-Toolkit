@@ -18,6 +18,25 @@ function harness(options={}){
 }
 const stations={a:{name:'起点',lon:-73.6,lat:45.5},b:{name:'换乘',lon:-73.58,lat:45.51},c:{name:'终点',lon:-73.55,lat:45.52},d:{name:'支线',lon:-73.57,lat:45.48}};
 const lines=[{id:'1',name:'红线',color:'ff3333ee',stops:['a','b','c']},{id:'2',name:'蓝线',color:'ffee8833',stops:['d','b','c']}];
+
+test('independent corridors sharing a hub separate their tracks and bend anchors',()=>{
+  const c=harness(),parts=[{ids:['hub','a','bend'],lines:[0]},{ids:['bend','b','end'],lines:[0]},{ids:['hub','x','tip'],lines:[1]}];
+  const p={hub:{x:0,y:0},bend:{x:0,y:-180},end:{x:0,y:-360},tip:{x:0,y:-300}};
+  const routes=parts.map(s=>[p[s.ids[0]],p[s.ids.at(-1)]]),before=JSON.stringify(routes);
+  const separated=c.metroSeparateCorridors(parts,routes,p,60);
+  assert.equal(JSON.stringify(routes),before,'do not mutate input route arrays or points');
+  assert.equal(p.hub.x,0);assert.equal(p.hub.y,0);
+  assert.ok(Math.abs(p.bend.x-p.tip.x)>=36);
+  assert.deepEqual(separated[0].at(-1),separated[1][0],'bend anchor moves consistently');
+});
+test('alternative same-line paths between two junctions stay visibly distinct',()=>{
+  const c=harness(),parts=[{ids:['start','a'],lines:[0]},{ids:['a','via','b'],lines:[0]},{ids:['a','b'],lines:[0]},{ids:['b','end'],lines:[0]}];
+  const p={start:{x:0,y:-100},a:{x:0,y:0},b:{x:0,y:180},end:{x:0,y:280}};
+  const paths=c.metroSeparateCorridors(parts,parts.map(s=>[p[s.ids[0]],p[s.ids.at(-1)]]),p,60);
+  const a=c.metroSampleAt(c.metroRounded(paths[1],24).samples,0.5),b=c.metroSampleAt(c.metroRounded(paths[2],24).samples,0.5);
+  assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>35);
+  for(const index of [1,2])for(const axis of ['x','y']){assert.equal(paths[index][0][axis],p.a[axis]);assert.equal(paths[index].at(-1)[axis],p.b[axis]);}
+});
 test('REM branches are one display network, without linking branch tips or false transfers',()=>{
   const c=harness(),source=[{...lines[0],name:'REMA1/A4',code:'REM'},{...lines[1],name:'REM A1-A3',code:'REM'}],before=JSON.stringify(source);
   const grouped=c.metroDisplayLines(source),g=c.metroTopology(grouped,stations);

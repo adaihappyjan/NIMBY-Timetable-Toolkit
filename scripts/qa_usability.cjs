@@ -148,12 +148,13 @@ const server=http.createServer(async(req,res)=>{
       await page.selectOption('#map-zoom','fit');
       await page.fill('#map-line-search','STM');
       await page.locator('.map-list-tools').screenshot({path:path.join(output,'line-search-sort.png')});
-      for(const region of ['TTC','Montreal']){
+      for(const region of ['TTC','Montreal','GO']){
         if(process.env.QA_DETAILS)await page.evaluate(()=>{
           if(window.qaOriginalJoin)return;window.qaOriginalJoin=metroJoinCorridors;
           metroJoinCorridors=(...args)=>{window.qaRoutes=args[0];const result=window.qaOriginalJoin(...args);window.qaPaths=result;return result;};
         });
-        const regionLines=objects.filter(o=>o.class==='Line'&&o.stops?.length>1&&(region==='TTC'?o.name.includes('TTC'):/STM|REM/.test(o.name))).map(o=>({id:o.id,name:o.name,code:o.code,color:o.color,stops:o.stops.map(s=>s.station_id),stop_count:o.stops.length}));
+        const regionLines=objects.filter(o=>o.class==='Line'&&o.stops?.length>1&&(region==='TTC'?o.name.includes('TTC'):region==='GO'?/^GO /i.test(o.name):/STM|REM/.test(o.name))).map(o=>({id:o.id,name:o.name,code:o.code,color:o.color,stops:o.stops.map(s=>s.station_id),stop_count:o.stops.length}));
+        if(region==='GO')await page.selectOption('#map-metro-orientation','geo');
         await page.fill('#map-line-search','');
         await page.evaluate(data=>renderMapData(data),{lines:regionLines,stations,station_count:Object.keys(stations).length});
         if(region==='TTC')assert.ok(await page.evaluate(()=>{
@@ -166,6 +167,24 @@ const server=http.createServer(async(req,res)=>{
           assert.doesNotMatch(unionPath,/ C/);
         }
         if(process.env.QA_DETAILS)console.log(JSON.stringify(await page.evaluate(()=>({debugRoutes:window.qaRoutes.filter(r=>r.ids.some(id=>/^(Union)$/.test(state.network.stations[id]?.name))).map(r=>({...r,name:selectedMapLines()[r.line]?.name})),debugPaths:window.qaPaths.filter(r=>/0x2000000700001/.test(r.join)).map(r=>({line:r.line,d:r.d}))}))));
+        if(region==='GO'){
+          const intrusion=await page.evaluate(()=>{
+            const lines=selectedMapLines(),positions=state.metroLayout.positions;
+            const failures=[];
+            for(const dot of document.querySelectorAll('#map-canvas [data-station]')){
+              const id=dot.dataset.station,p={x:+dot.dataset.x,y:+dot.dataset.y};
+              if(dot.dataset.transfer==='true')continue;
+              for(const path of document.querySelectorAll('#map-canvas path[data-line]')){
+                const sources=JSON.parse(path.dataset.sourceLines);
+                if(lines.some(l=>sources.includes(String(l.id))&&l.stops.includes(id)))continue;
+                const length=path.getTotalLength();
+                for(let d=0;d<=length;d+=2){const q=path.getPointAtLength(d);if(Math.hypot(q.x-p.x,q.y-p.y)<8){failures.push(state.network.stations[id].name);break;}}
+              }
+            }
+            return failures;
+          });
+          assert.deepEqual(intrusion,[],'an ordinary GO station must not sit on an unrelated line');
+        }
         for(const marker of ['circle','capsule']){
           await page.selectOption('#map-transfer-style',marker);
           await page.evaluate(()=>{document.querySelector('#toast').hidden=true;});
@@ -190,7 +209,7 @@ const server=http.createServer(async(req,res)=>{
           }
           await page.locator('#map-canvas').screenshot({path:path.join(output,`${region}-${marker}.png`)});
           const clips=await page.evaluate(()=>{
-            const match=/^(Union|King|Queen|TMU|Summerhill|St\. Clair|Avenue|Spadina|Museum|Bay|Canora|Ville-de-Mont-Royal)$/;
+            const match=/^(Toronto Union Station|Aldershot GO|Weston GO|Union|King|Queen|TMU|Summerhill|St\. Clair|Avenue|Spadina|Museum|Bay|Canora|Ville-de-Mont-Royal)$/;
             return Object.entries(state.network.stations).filter(([,s])=>match.test(s.name)).map(([id,s])=>{
               const p=state.metroLayout.positions[id];if(!p)return '';
               const svg=state.mapSvg.cloneNode(true);svg.removeAttribute('style');svg.setAttribute('viewBox',`${p.x-70} ${p.y-55} 140 110`);

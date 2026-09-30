@@ -1,4 +1,4 @@
-const APP_BUILD = '2026-09-30-universal-branches-smooth-corners';
+const APP_BUILD = '2026-09-30-independent-corridor-clearance';
 console.log('[NIMBY toolkit] app.js build', APP_BUILD, document.querySelector('script[src*="app.js"]')?.src || '');
 const state = { bootstrap: null, analysis: null, cleanup: null, cleanMode: 'automatic', taskAction: null, plan: null, vehicleCatalog: null, vehicleMod: null, binderBinding: null, update: null };
 const $ = (selector) => document.querySelector(selector);
@@ -680,6 +680,7 @@ function drawTransitMap() {
     drawTransitMapContent();
     const status=$('#map-render-status');
     if(status)status.textContent=state.mapSvg?`已绘制 ${selectedMapLines().filter(l=>l.stops.length>=2).length} 条运营线路${state.metroLayout?`，显示为 ${state.metroLayout.display_lines.length} 组线路`:''} · ${state.metroLayout?(state.metroLayout.layout==='grid'?'网格布局':state.metroLayout.theme==='atlas'?'铁路总览':'都市地铁'):'线路示意'}。可切换查看比例或导出 SVG。`:$('#map-canvas').textContent;
+    if(status&&state.metroLayout?.label_leader_crossings)status.textContent+=` ${state.metroLayout.label_leader_crossings} 条站名引线附近仍有障碍，请放大核对或调整站间距。`;
   } catch(error) {
     state.mapSvg=null;state.metroLayout=null;
     $('#map-canvas').textContent='这次绘图未完成。请减少所选线路后重试，或将下方错误信息反馈给开发者。';
