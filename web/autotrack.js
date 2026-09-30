@@ -4,14 +4,14 @@
   viewMeta.autotrack = ['TRACK BLUEPRINT LAB', '自动铺轨 · 实验'];
   let imported = null, preview = null, revision = 0, catalog = null;
   let viaValues=[];
-  const tutorialKey='nimby.autotrack.tutorial.v3';
+  const tutorialKey='nimby.autotrack.tutorial.v4';
   let tutorialSeen=false,tutorialTouched=false;
   const tutorialReady=api('/api/workspace/state',{method:'POST',body:JSON.stringify({key:tutorialKey})}).then(r=>{if(!tutorialTouched)tutorialSeen=r.value?.seen===true;}).catch(()=>{});
   const lessons=[
     ['先选存档，再自动读取','在总览选择刚保存的文件。打开本页会自动读取站名、Steam 底图和本地路线。自动寻路需要 Node.js 22+；缺少时会提示，不会静默安装。'],
     ['按顺序添加起点、途经站和终点','选择含 ID 的完整站名，同名站不会混淆；也可输入 经度,纬度。用“添加途经站”和上下移动调整站序，最多 20 站。逐段检查，不会跳过失败站点或用直线顶替断路。'],
     ['地面、桥梁、隧道分别设置','自动模式默认中速地面，并保留底图桥隧标记。三种结构可分别选中速、高速、电车；也可强制全程地面、高架或隧道。速度是类型上限，桥隧层级不是地形高程。'],
-    ['处理失败区间后，生成一个新副本','检查每个区间的结果。失败时可删除相关站点或修改线路类型，重新预览；全部通过才允许写入。各站附近留接轨空隙，生成后在游戏里手动接站和设置信号，不要覆盖正式档。']
+    ['可只生成通过的区间','检查每段结果。有失败区间时，可勾选“仅生成通过区间”保留其余蓝图，失败段留空、不自动补连；全部失败则不能生成。也可删除相关站点或修改类型后重新预览。蓝图写入新测试存档；游戏内需手动接站、处理缺口和设置信号，不覆盖正式档。']
   ];
   let lesson=0;
   function showLesson(){
@@ -84,11 +84,17 @@
     revision++; preview = null;
     $('#at-apply').disabled = $('#at-download').disabled = true;
     $('#at-accept').checked = false;
+    $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
+    $('#at-apply').textContent='生成新的测试存档';
     $('#at-state').textContent = '参数已变化，请重新预览';
     $('#at-save-name').textContent = $('#save-select').value.split(/[\\/]/).pop() || '尚未选择';
     $('#at-map').replaceChildren(); $('#at-summary').textContent = '等待当前存档与参数的预览';
     $('#at-warnings').replaceChildren(); $('#at-output').textContent = '';
     $('#at-leg-results').replaceChildren();
+  }
+  function syncApply(){
+    $('#at-apply').disabled=!!state.taskActive||!preview||preview.result.can_apply===false||!$('#at-accept').checked||
+      (!!preview.result.requires_partial_confirmation&&!$('#at-partial-accept').checked);
   }
   function request() {
     const save = $('#save-select').value;
@@ -147,7 +153,7 @@
   }
   function renderLegs(result){
     const root=$('#at-leg-results');root.replaceChildren();if(!result.multi_station)return;
-    const intro=document.createElement('p');intro.textContent='按站序逐段检查；区间失败不一定由某一站造成。删除站点会重新连接它前后的站，须再次预览。';root.append(intro);
+    const intro=document.createElement('p');intro.textContent='按站序逐段检查。选择部分生成时，未通过区间整段跳过、不会补连；不是删除站点。删除站点则会重新连接它前后的站，须再次预览。';root.append(intro);
     for(const leg of result.legs){
       const row=document.createElement('div');row.className=`at-leg ${leg.status==='ok'?'':'at-leg-error'}`;
       const title=document.createElement('strong');title.textContent=`${leg.status==='ok'?'✓ 通过':'✕ 未通过'} · ${leg.index+1}：${leg.from_name} → ${leg.to_name}`;
@@ -175,24 +181,30 @@
     }
     if (result.output_save) {
       preview = null; $('#at-apply').disabled = $('#at-download').disabled = true;
-      $('#at-state').textContent = '新副本已生成 · 等待游戏验收';
-      $('#at-output').textContent = `游戏加载此文件：${result.output_save}。原存档没有修改。`;
-      toast('自动铺轨副本已生成，请先在游戏中暂停检查。');
+      $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
+      $('#at-state').textContent = result.partial_output?'部分蓝图已生成 · 存在缺口，等待游戏验收':'新副本已生成 · 等待游戏验收';
+      const skipped=result.partial_output?` 已生成 ${result.successful_legs} 个区间，跳过 ${result.failed_legs} 个区间：${result.skipped_legs.map(l=>`${l.index+1}：${l.from_name} → ${l.to_name}`).join('；')}。缺口未补连，详细原因已记录在同名清单中。`:'';
+      $('#at-output').textContent = `游戏加载此文件：${result.output_save}。原存档没有修改。${skipped}`;
+      toast(result.partial_output?'通过区间的蓝图已生成；请在游戏内检查断开处。':'自动铺轨副本已生成，请先在游戏中暂停检查。');
       return;
     }
     if (context?.revision !== revision || context?.signature !== JSON.stringify(request())) {
       invalidate(); toast('预览期间参数或存档选择改变，请重新预览。',true); return;
     }
     preview = {result, request:request()}; draw(result);renderLegs(result);
-    $('#at-state').textContent = result.can_apply===false?'部分区间未通过 · 已禁止写入':'预览完成 · 尚未写入';
+    $('#at-partial-accept').checked=false;
+    $('#at-partial-wrap').hidden=!result.requires_partial_confirmation;
+    $('#at-apply').textContent=result.requires_partial_confirmation?`仅生成 ${result.successful_legs} 个通过区间的新测试存档`:'生成新的测试存档';
+    $('#at-state').textContent = result.can_apply===false?'没有可生成区间 · 已禁止写入':result.requires_partial_confirmation?'部分区间未通过 · 可确认仅生成通过区间':'预览完成 · 尚未写入';
     $('#at-summary').textContent = result.multi_station?
       `${result.waypoints.length} 站 / ${result.legs.length} 个区间 · 通过 ${result.successful_legs} / 失败 ${result.failed_legs} · 可用区间 ${(result.length_m/1000).toFixed(2)} 公里 · ${result.nodes} 个双轨节点`:
       `${(result.length_m/1000).toFixed(2)} 公里 · ${result.nodes} 个双轨节点 · 桥梁 ${result.bridge_nodes} / 隧道 ${result.tunnel_nodes||0} 节点 · 区间 ${result.start_m}–${result.end_m} 米 · 避让记录 ${result.avoided_intervals}`+(result.routing?.snap_m?` · 两站到底图的吸附距离 ${result.routing.snap_m.join(' / ')} 米 · 读取 ${result.routing.tiles} 瓦片 · 底图类型 ${result.routing.rail_types.join(' / ')}`:'');
     $('#at-warnings').replaceChildren(...result.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
-    $('#at-apply').disabled = result.can_apply===false||!$('#at-accept').checked; $('#at-download').disabled = false;
+    syncApply(); $('#at-download').disabled = false;
   };
   window.autotrackFailure = message => {
     preview=null; $('#at-apply').disabled=$('#at-download').disabled=true;
+    $('#at-partial-accept').checked=false;$('#at-partial-wrap').hidden=true;
     $('#at-state').textContent='已停止 · 未完成生成';
     $('#at-output').textContent=message;
     if(!catalog)$('#at-catalog-state').textContent=`自动读取未就绪：${message}`;
@@ -204,11 +216,12 @@
   $('#at-apply').addEventListener('click',async()=>{
     try {
       if(!preview||!$('#at-accept').checked)throw new Error('请先预览并确认验收提示');
-      if(preview.result.can_apply===false)throw new Error('仍有失败区间，请删除或调整站点后重新预览');
+      if(preview.result.can_apply===false)throw new Error('没有可生成区间，请调整站点后重新预览');
+      if(preview.result.requires_partial_confirmation&&!$('#at-partial-accept').checked)throw new Error('请确认仅生成通过区间，未通过区间会留空');
       if(JSON.stringify(request())!==JSON.stringify(preview.request)){invalidate();throw new Error('参数改变，请重新预览');}
       // The explicit acknowledgement checkbox above is the confirmation; avoid
       // a second blocking browser dialog in the native desktop webview.
-      const started=await startTask('autotrack',{...preview.request,apply:true,fingerprint:preview.result.fingerprint,output:outputPath('Autotrack')});
+      const started=await startTask('autotrack',{...preview.request,apply:true,allow_partial:!!preview.result.requires_partial_confirmation&&$('#at-partial-accept').checked,fingerprint:preview.result.fingerprint,output:outputPath('Autotrack')});
       if(started)$('#at-apply').disabled=true;
     }catch(e){toast(e.message,true);}
   });
@@ -217,7 +230,8 @@
     const url=URL.createObjectURL(new Blob([JSON.stringify(preview.result,null,2)],{type:'application/json'}));
     const link=document.createElement('a');link.href=url;link.download='autotrack-preview.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   });
-  $('#at-accept').addEventListener('change',()=>{$('#at-apply').disabled=!!state.taskActive||!preview||preview.result.can_apply===false||!$('#at-accept').checked;});
+  $('#at-accept').addEventListener('change',syncApply);
+  $('#at-partial-accept').addEventListener('change',syncApply);
   ['#at-variant','#at-bridge-variant','#at-tunnel-variant','#at-structure','#at-from','#at-to','#at-map-path','#at-route-path','#at-rail-type','#at-start','#at-end','#at-gap','#save-select'].forEach(id=>$(id).addEventListener('change',invalidate));
   $('#at-preset').addEventListener('change',()=>{invalidate();updateMode();});
   $('#at-file').addEventListener('change',async()=>{

@@ -106,8 +106,9 @@
           <p id="at-summary">将显示长度、节点数、桥梁与避让结果。</p>
           <div id="at-leg-results" aria-live="polite"></div>
           <svg id="at-map" viewBox="0 0 900 320" role="img" aria-label="离线路线预览；青色为地面，橙色为桥梁" style="width:100%;height:320px;background:#0b1e2c;border-radius:12px"></svg>
-          <p>青色：地面　橙色：桥梁 +1 层　紫色：隧道 -1 层。红色站点关联未通过的区间；图上不会连接失败区间。此图无地形底图，不能代替游戏内净空和坡度检查。</p>
+          <p>青色：地面　橙色：桥梁 +1 层　紫色：隧道 -1 层。红色站点关联未通过的区间；确认部分生成后，这些失败区间仍留空、不补连。蓝图生成到新测试存档；“导出预览方案”仅保存 JSON 报告。此图无地形底图，不能代替游戏内净空和坡度检查。</p>
           <ul id="at-warnings"></ul>
+          <label id="at-partial-wrap" hidden><input id="at-partial-accept" type="checkbox">仅生成通过区间，跳过未通过区间；我知道缺口需要在游戏内手动处理，不会自动补连。</label>
           <label><input id="at-accept" type="checkbox">我会先保存游戏进度，在新副本内暂停检查，不覆盖正式存档。</label>
           <div class="button-row"><button class="primary-button" id="at-apply" disabled>生成新的测试存档</button><button class="secondary-button" id="at-download" disabled>导出预览方案</button></div>
           <p id="at-output" role="status"></p>

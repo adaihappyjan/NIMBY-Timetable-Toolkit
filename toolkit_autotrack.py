@@ -384,7 +384,10 @@ def waypoint_plan(raw, request, stations, progress=None):
             single.update(from_coord=a['coord'], to_coord=b['coord'])
             geojson, info = automatic_route(single, stations)
             signature = tuple(info.get(k) for k in ('map_path', 'map_size', 'map_mtime_ns'))
-            check(map_signature is None or signature == map_signature, '底图在分段读取期间改变，请重新预览全部区间')
+            # A changed input invalidates the entire plan, not just one leg.
+            # Partial output must never mix routes from different map snapshots.
+            if map_signature is not None and signature != map_signature:
+                raise RuntimeError('底图在分段读取期间改变，请重新预览全部区间')
             map_signature = signature
             single['geojson'] = geojson
             prepared = prepare(candidate, single)
@@ -407,8 +410,13 @@ def waypoint_plan(raw, request, stations, progress=None):
     failed = len(legs)-len(good)
     warnings = list(dict.fromkeys(message for detail in good for message in detail['warnings'])) or list(WARNINGS)
     warnings.append('逐段生成待建双轨；各站附近可能保留接轨空隙，不会自动连接站台。')
-    if failed: warnings.append(f'{failed} 个区间未通过；成功区间仅供预览。删除或调整站点后重新检查，全部通过才可写入。')
-    result = {'multi_station': True, 'waypoints': waypoints, 'legs': legs, 'can_apply': failed == 0,
+    if failed:
+        warnings.append(f'{failed} 个区间未通过；确认跳过后可仅生成 {len(good)} 个通过区间，缺口不会自动补连。' if good else '没有通过检查的区间，不能生成蓝图。请调整站点或路线后重新预览。')
+    skipped = [{k: leg[k] for k in ('index', 'from_index', 'to_index', 'from_name', 'to_name', 'error')}
+               for leg in legs if leg['status'] != 'ok']
+    result = {'multi_station': True, 'waypoints': waypoints, 'legs': legs, 'can_apply': bool(good),
+              'requires_partial_confirmation': bool(failed and good),
+              'included_legs': [leg['index'] for leg in legs if leg['status'] == 'ok'], 'skipped_legs': skipped,
               'successful_legs': len(good), 'failed_legs': failed, 'length_m': round(total_length, 1),
               'nodes': total_nodes, 'warnings': warnings, 'coordinates': [], 'levels': [], 'routing': {}}
     for key in ('bridge_nodes', 'tunnel_nodes', 'avoided_intervals', 'full_length_m'):
@@ -417,6 +425,7 @@ def waypoint_plan(raw, request, stations, progress=None):
 
 
 def dispatch(request, progress=None):
+    check(type(request.get('allow_partial', False)) is bool, '跳过失败区间的确认值无效')
     source=Path(request['save']).resolve()
     original=source.read_bytes(); source_hash=digest(original)
     header,frame,_=split_save(source)
@@ -436,6 +445,7 @@ def dispatch(request, progress=None):
     batch = 'via' in request
     check(not batch or request.get('preset') == 'auto', '途经站只适用于自动寻路模式')
     if batch:
+        layout(raw)  # Global binary-format failures cannot become skippable leg errors.
         result, batch_raw = waypoint_plan(raw, request, stations, progress)
     elif request.get('preset')=='auto':
         from toolkit_autoroute import automatic_route
@@ -452,12 +462,16 @@ def dispatch(request, progress=None):
         result['routing']=route_info
     if route_info.get('auto_family_fallback'):
         result['warnings']=result['warnings']+['最近轨道不在同一网络；已回退选择两端均可接入的 '+', '.join(route_info['rail_types'])+'。请核对是否为你要建的线路。']
-    settings={k:v for k,v in request.items() if k not in ('apply','output','fingerprint','save')}
+    # Approval is not a geometry setting: it is given after inspecting the
+    # fingerprinted success/skip list and is rechecked on every write.
+    settings={k:v for k,v in request.items() if k not in ('apply','output','fingerprint','save','allow_partial')}
     token=digest(json.dumps({'save':source_hash,'settings':settings,'preview':result},sort_keys=True,allow_nan=False).encode())
     result.update(action='autotrack',fingerprint=token,source_sha256=source_hash)
     if not request.get('apply'): return result
-    check(result.get('can_apply', True), '仍有失败区间，未写入任何存档。请删除或调整相关站点后重新预览')
     check(request.get('fingerprint')==token,'存档或参数已变化，请重新预览后再生成')
+    check(result.get('can_apply', True), '没有通过检查的区间，未写入任何存档。请调整站点或路线后重新预览')
+    check(not result.get('requires_partial_confirmation') or request.get('allow_partial') is True,
+          '仍有失败区间，未写入任何存档。请确认“仅生成通过区间，保留缺口”后再生成')
     output=Path(request['output']).resolve()
     check(output!=source and output.suffix.lower()=='.nimbyrails5','输出须为不同的新存档')
     manifest=output.with_suffix('.manifest.json')
@@ -469,7 +483,8 @@ def dispatch(request, progress=None):
     check(digest(source.read_bytes())==source_hash,'生成期间原存档改变，请重新预览')
     data=header+packed
     result.update(output_save=str(output),output_sha256=digest(data),game_validated=False,
-                  operation='autotrack',source=str(source),appended_nodes=result['nodes'])
+                  operation='autotrack',source=str(source),appended_nodes=result['nodes'],
+                  partial_output=bool(result.get('requires_partial_confirmation')))
     # Stage bytes then publish with an exclusive hard link; no overwrite race.
     # Failed staging remains a recognizable .partial, never a loadable broken save.
     with partial.open('xb') as stream:

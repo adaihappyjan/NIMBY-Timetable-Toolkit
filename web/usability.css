@@ -9,6 +9,9 @@
 #cleanup-protection .cleanup-item {justify-content:flex-start;gap:12px;}
 .transit-svg text {user-select:text;}
 #map-metro-theme-wrap[hidden],#map-orient-wrap[hidden],#map-transfer-wrap[hidden],#map-layout-wrap[hidden],#map-merge-wrap[hidden] {display:none;}
+#at-partial-wrap[hidden] {display:none;}
+#at-partial-wrap {display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid #bb8b48;border-radius:8px;margin:12px 0;line-height:1.6;}
+#at-partial-accept {flex-shrink:0;margin-top:5px;}
 #map-canvas {max-height:82vh;}
 #map-canvas .transit-svg {margin-inline:auto;}
 #map-render-status {font-size:13px;color:var(--muted);line-height:1.6;}

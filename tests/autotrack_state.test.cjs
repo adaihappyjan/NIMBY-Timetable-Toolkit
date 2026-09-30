@@ -73,7 +73,7 @@ test('via entries are ordered, movable, removable and use whole-leg mileage',asy
   await h.$('#at-via-list').children[0].children[3].click(); // remove first
   await h.$('#at-preview').click();assert.equal(h.calls[1].payload.via.length,1);
 });
-test('partial preview cannot write even when acknowledged; deleting station invalidates it',async()=>{
+test('all-failed preview cannot write even when acknowledged; deleting station invalidates it',async()=>{
   const h=await autoHarness();await h.$('#at-add-via').click();h.$('#at-via-0').value='bad input';
   await h.$('#at-preview').click();
   const result={...h.result,multi_station:true,can_apply:false,successful_legs:0,failed_legs:2,
@@ -85,6 +85,37 @@ test('partial preview cannot write even when acknowledged; deleting station inva
   await h.$('#at-leg-results').children[1].children[3].click(); // delete B
   assert.equal(h.$('#at-download').disabled,true);
   await h.$('#at-preview').click();assert.equal(h.calls[1].payload.via.length,0);
+});
+
+test('mixed preview needs separate consent and writes only the fingerprinted plan',async()=>{
+  const h=await autoHarness();await h.$('#at-preview').click();
+  const result={...h.result,multi_station:true,can_apply:true,requires_partial_confirmation:true,successful_legs:1,failed_legs:1,
+    waypoints:[{index:0,label:'A',coord:[30,20]},{index:1,label:'B',coord:[30.01,20]},{index:2,label:'C',coord:[30.02,20]}],
+    legs:[{index:0,from_index:0,to_index:1,from_name:'A',to_name:'B',status:'ok',preview:{...h.result,routing:{}}},
+      {index:1,from_index:1,to_index:2,from_name:'B',to_name:'C',status:'error',error:'断线'}],
+    skipped_legs:[{index:1,from_name:'B',to_name:'C',error:'断线'}]};
+  await h.context.window.autotrackResult(result,h.calls[0].ctx);
+  assert.equal(h.$('#at-partial-wrap').hidden,false);
+  h.$('#at-accept').checked=true;h.$('#at-accept').events.change();
+  assert.equal(h.$('#at-apply').disabled,true);
+  await h.$('#at-apply').click();assert.equal(h.calls.length,1);
+  h.$('#at-partial-accept').checked=true;h.$('#at-partial-accept').events.change();
+  assert.equal(h.$('#at-apply').disabled,false);
+  await h.$('#at-apply').click();assert.equal(h.calls[1].payload.allow_partial,true);
+  assert.equal(h.calls[1].payload.fingerprint,'token');
+  await h.context.window.autotrackResult({...result,partial_output:true,output_save:'new.nimbyrails5'});
+  assert.match(h.$('#at-output').textContent,/跳过 1 个区间.*B → C/);
+  assert.equal(h.$('#at-partial-accept').checked,false);
+});
+
+test('editing geometry clears partial consent and output permission',async()=>{
+  const h=harness();await h.$('#at-preview').click();
+  await h.context.window.autotrackResult({...h.result,requires_partial_confirmation:true,successful_legs:1,can_apply:true},h.calls[0].ctx);
+  h.$('#at-partial-accept').checked=true;
+  h.$('#at-gap').value='80';h.$('#at-gap').events.change();
+  assert.equal(h.$('#at-partial-accept').checked,false);
+  assert.equal(h.$('#at-partial-wrap').hidden,true);
+  assert.equal(h.$('#at-apply').disabled,true);
 });
 test('late result after waypoint edit cannot restore write permission',async()=>{
   const h=await autoHarness();await h.$('#at-add-via').click();h.$('#at-via-0').value='30.005,20';

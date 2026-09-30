@@ -253,8 +253,88 @@ def test_multi_station_rejects_ambiguous_mileage_crop(tmp_path, multi_route):
     with pytest.raises(ValueError, match='里程'): at.dispatch(request)
 
 
-def test_later_leg_overlapping_earlier_leg_blocks_entire_write(tmp_path, multi_route):
+def test_later_leg_overlapping_earlier_leg_requires_partial_approval(tmp_path, multi_route):
     request = multi_request(tmp_path); request['to_coord'] = [30.001, 20]
     result = at.dispatch(request)
     assert result['successful_legs'] == 1 and result['failed_legs'] == 1
     assert '中部' in result['legs'][1]['error'] or '100 米' in result['legs'][1]['error']
+    assert result['requires_partial_confirmation']
+
+
+def test_partial_blueprint_writes_only_good_legs_and_preserves_gaps(tmp_path, multi_route, monkeypatch):
+    import toolkit_autoroute as ar
+    route = ar.automatic_route
+    def failing(request, stations):
+        if request['from_coord'] == [30.005, 20]: raise ValueError('中间区间底图断线')
+        return route(request, stations)
+    monkeypatch.setattr(ar, 'automatic_route', failing)
+    request = multi_request(tmp_path)
+    request.update(via=[{'coord': [30.005, 20]}, {'coord': [30.01, 20]}], to_coord=[30.015, 20])
+    before = Path(request['save']).read_bytes()
+    preview = at.dispatch(request)
+    assert preview['can_apply'] and preview['requires_partial_confirmation']
+    assert preview['included_legs'] == [0, 2]
+    assert [leg['index'] for leg in preview['skipped_legs']] == [1]
+    assert preview['skipped_legs'][0]['error'] == '中间区间底图断线'
+    output = tmp_path/'partial-good.nimbyrails5'
+    write = {**request, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)}
+    for consent in (False, None, 'true', 1):
+        with pytest.raises(ValueError): at.dispatch({**write, 'allow_partial': consent})
+        assert not output.exists()
+    result = at.dispatch({**write, 'allow_partial': True})
+    assert result['partial_output'] and result['appended_nodes'] == preview['nodes']
+    assert Path(request['save']).read_bytes() == before
+    manifest = json.loads(output.with_suffix('.manifest.json').read_text('utf-8'))
+    assert manifest['included_legs'] == [0, 2] and manifest['skipped_legs'] == preview['skipped_legs']
+    raw = at.Zstd().decompress(at.split_save(output)[1])
+    _, _, end, nodes = at.layout(raw)
+    old_ids, _, old_end, _ = at.layout(fixture_raw())
+    assert raw[end:] == fixture_raw()[old_end:]
+    added = {ident: node for ident, node in nodes.items() if ident not in old_ids}
+    assert len(added) == preview['nodes']
+    # No generated node or neighbor edge may bridge the deliberately absent leg.
+    for node in added.values():
+        assert node.lon <= 30.005001 or node.lon >= 30.009999
+        for other in node.connections:
+            if other in added:
+                assert (node.lon < 30.0075) == (added[other].lon < 30.0075)
+
+
+def test_all_failed_is_blocked_even_with_partial_consent(tmp_path, multi_route):
+    request = multi_request(tmp_path); request['via'] = [{'station': 'missing'}]
+    preview = at.dispatch(request)
+    assert not preview['can_apply'] and not preview['requires_partial_confirmation']
+    output = tmp_path/'no.nimbyrails5'
+    with pytest.raises(ValueError, match='没有通过'):
+        at.dispatch({**request, 'allow_partial': True, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)})
+    assert not output.exists()
+
+
+def test_partial_selection_cannot_change_after_preview(tmp_path, multi_route, monkeypatch):
+    import toolkit_autoroute as ar
+    route = ar.automatic_route
+    failing_index = [0]
+    def changing(request, stations):
+        if (request['from_coord'] == [30, 20]) == (failing_index[0] == 0): raise ValueError('局部失败')
+        return route(request, stations)
+    monkeypatch.setattr(ar, 'automatic_route', changing)
+    request = multi_request(tmp_path); preview = at.dispatch(request)
+    failing_index[0] = 1
+    output = tmp_path/'stale.nimbyrails5'
+    with pytest.raises(ValueError, match='重新预览'):
+        at.dispatch({**request, 'allow_partial': True, 'apply': True, 'fingerprint': preview['fingerprint'], 'output': str(output)})
+    assert not output.exists()
+
+
+def test_map_change_during_plan_is_global_failure_not_skippable(tmp_path, multi_route, monkeypatch):
+    import toolkit_autoroute as ar
+    route = ar.automatic_route
+    def changing(request, stations):
+        geojson, info = route(request, stations)
+        info['map_mtime_ns'] = len(multi_route)
+        return geojson, info
+    monkeypatch.setattr(ar, 'automatic_route', changing)
+    request = multi_request(tmp_path)
+    with pytest.raises(RuntimeError, match='底图.*改变'):
+        at.dispatch({**request, 'allow_partial': True})
+    assert not list(tmp_path.glob('*.partial')) and not list(tmp_path.glob('*.manifest.json'))

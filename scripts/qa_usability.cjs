@@ -273,6 +273,46 @@ const server=http.createServer(async(req,res)=>{
     await page.click('#error-help button');
     await page.evaluate(()=>switchView('learn'));
     assert.equal(await page.locator('[data-lesson]').count(),9);
+    // Partial blueprint UI acceptance: use fake task results, never game saves.
+    await page.evaluate(async()=>{
+      switchView('autotrack');
+      const select=document.querySelector('#save-select');
+      select.replaceChildren(new Option('QA source','QA-source.nimbyrails5'));select.value='QA-source.nimbyrails5';
+      document.querySelector('#at-preset').value='auto';
+      await window.autotrackResult({operation:'catalog',stations:[],maps:['QA-map'],routes:[],node_ready:true},{catalogSave:'QA-source.nimbyrails5'});
+      startTask=async(action,payload,context)=>{window.qaPartialTask={action,payload,context};return true;};
+    });
+    await page.fill('#at-from','30,20');await page.fill('#at-to','30.015,20');
+    await page.click('#at-add-via');await page.fill('#at-via-0','30.005,20');
+    await page.click('#at-add-via');await page.fill('#at-via-1','30.01,20');
+    await page.click('#at-preview');
+    await page.evaluate(async()=>{
+      const points=[[30,20],[30.005,20],[30.01,20],[30.015,20]];
+      const names=['A 起点','B 西站','C 东站','D 终点'];
+      const legs=[0,1,2].map(i=>({index:i,from_index:i,to_index:i+1,from_name:names[i],to_name:names[i+1],status:i===1?'error':'ok',
+        ...(i===1?{error:'测试：中间区间不满足要求'}:{preview:{coordinates:[points[i],points[i+1]],levels:[0,0],length_m:500,nodes:4,routing:{snap_m:[0,0]}}})}));
+      window.qaPartialResult={multi_station:true,can_apply:true,requires_partial_confirmation:true,successful_legs:2,failed_legs:1,
+        fingerprint:'qa-partial-token',length_m:1000,nodes:8,warnings:['跳过 B 西站 → C 东站，缺口不会补连。'],legs,
+        waypoints:points.map((coord,index)=>({coord,index,label:names[index],status:index===1||index===2?'warning':'ready'})),
+        included_legs:[0,2],skipped_legs:[legs[1]]};
+      await window.autotrackResult(window.qaPartialResult,window.qaPartialTask.context);
+    });
+    assert.ok(await page.locator('#at-partial-wrap').isVisible());
+    await page.check('#at-accept');assert.ok(await page.locator('#at-apply').isDisabled());
+    await page.check('#at-partial-accept');assert.ok(await page.locator('#at-apply').isEnabled());
+    assert.match(await page.locator('#at-apply').innerText(),/2 个通过区间/);
+    assert.equal(await page.locator('#at-map line').count(),2,'no line across the failed middle leg');
+    await page.locator('#at-partial-wrap').scrollIntoViewIfNeeded();
+    await page.locator('#at-partial-wrap').evaluate(e=>e.closest('article').setAttribute('data-qa-partial','true'));
+    // Clear the earlier intentional updater-failure toast before capturing this panel.
+    await page.evaluate(()=>{document.querySelector('#toast').hidden=true;});
+    await page.locator('[data-qa-partial]').screenshot({path:path.join(output,'partial-blueprint.png')});
+    await page.click('#at-apply');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.allow_partial),true);
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.fingerprint),'qa-partial-token');
+    await page.evaluate(()=>window.autotrackResult({...window.qaPartialResult,partial_output:true,output_save:'QA-only.nimbyrails5'}));
+    assert.match(await page.locator('#at-output').innerText(),/跳过 1 个区间.*B 西站 → C 东站/);
+    assert.ok(await page.locator('#at-partial-wrap').isHidden());
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({page_errors:errors,exports:exportsSeen,screenshots:output,tutorial_lessons:9},null,2));
   }finally{await browser.close();server.close();}
