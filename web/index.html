@@ -5,12 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#071827">
   <title>NIMBY Rails 运营工作台</title>
+  <script src="/startup.js"></script>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/studio.css">
   <link rel="stylesheet" href="/autotrack.css">
   <link rel="stylesheet" href="/usability.css">
 </head>
 <body>
+  <section id="startup-error" role="alert" hidden style="position:fixed;top:12px;left:260px;right:20px;z-index:10000;padding:16px;border:1px solid #efab64;border-radius:12px;background:#291f19;color:#fff;box-shadow:0 4px 20px #0008">
+    <strong>工具箱界面没有加载完整</strong>
+    <p id="startup-error-detail" style="white-space:pre-wrap;overflow-wrap:anywhere">正在检查启动状态…</p>
+    <button id="startup-reload" type="button">重新加载界面</button>
+    <small>只重新加载工具箱，不重启游戏、不重新执行启动清理。</small>
+  </section>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
@@ -107,7 +114,7 @@
             <label>终点里程（米；留空至路线末端）<input id="at-end" type="number" min="0" step="1" placeholder="整段"></label>
           </div>
           <button class="primary-button" id="at-preview">② 检查冲突并预览</button>
-          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。首尾距离和路线总长均不设公里数上限，两站须至少相距 0.1 公里。底图单次读取最多 1024 瓦片；最多 20 个站点，整条方案最多 8000 个双轨节点，超过时须分批生成。保留局部坐标范围检查，不支持跨日期线。无连续路径不会画直线替代。仅支持游戏三种内置轨道，不承诺任意工坊轨道。速度为类型上限，实际运行受曲线等限制。</p>
+          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。首尾距离和路线总长均不设公里数上限，两站须至少相距 0.1 公里。找不到路时会逐步向外扩大搜索（3 / 8 / 16 / 32 公里），只读取新增区域。每个区间最多搜索 4096 个地图小块（瓦片），分批后台读取；达到处理上限时，请在绕行处添加途经站，不代表铁路实际断开。最多 20 个站点、合计 8000 个双轨节点。保留局部坐标范围检查，不支持跨日期线，不用直线补断口。仅支持游戏三种内置轨道；速度为类型上限，实际运行受曲线等限制。</p>
         </article>
         <article class="panel">
           <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>

@@ -14,12 +14,19 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 N=16384*4096
 RAIL_TYPES={'rail','light_rail','subway','tram','narrow_gauge','monorail','funicular'}
+SEARCH_PADDINGS=(3000,8000,16000,32000)
+MAX_SEARCH_TILES=4096
+MAX_SEARCH_FEATURES=100000
+MAX_SEARCH_BYTES=256*1024*1024
+MAX_SEARCH_JSON=30_000_000
+SEARCH_SECONDS=120
 
 
 def game_maps():
@@ -74,15 +81,15 @@ def bounds_for(a,b,padding_m):
             min(16383,int((max(p[0],q[0])+pad)//4096)),min(16383,int((max(p[1],q[1])+pad)//4096))]
 
 
-def decode(path,bounds):
+def decode(path,bounds,*,timeout=90):
     runtime=node_runtime()
     if not runtime:raise ValueError('自动读取底图需要 Node.js 22 或更新版。安装后重开工具箱；本地 GeoJSON 路线仍可使用。')
     # Fixed bundled program, no shell, no user-supplied executable or script.
     options={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     try:
         proc=subprocess.run([runtime,'--max-old-space-size=512',str(ROOT/'third_party/autotrack/tiles.mjs')],
-            input=json.dumps({'path':str(path),'bounds':bounds}),capture_output=True,text=True,encoding='utf-8',timeout=90,**options)
-    except subprocess.TimeoutExpired as exc:raise ValueError('底图读取超过 90 秒，请缩小区间') from exc
+            input=json.dumps({'path':str(path),'bounds':bounds}),capture_output=True,text=True,encoding='utf-8',timeout=timeout,**options)
+    except subprocess.TimeoutExpired as exc:raise ValueError('底图读取超时，请增加中间站分段生成') from exc
     if proc.returncode:raise ValueError('底图解码失败：'+proc.stderr[-1600:])
     if len(proc.stdout)>30_000_000:raise ValueError('底图结果过大，请分段')
     return json.loads(proc.stdout)
@@ -215,6 +222,25 @@ def choose_route(features,start,end,rail_type='auto'):
         return data,info
 
 
+def unread_batches(bounds,previous=None):
+    """Disjoint border strips: reuse inner tiles, limit each decoder to 1024."""
+    west,north,east,south=bounds
+    if previous is None:
+        regions=[bounds]
+    else:
+        w,n,e,s=previous
+        if not (west<=w<=e<=east and north<=n<=s<=south):
+            raise ValueError('底图搜索范围必须逐步扩大')
+        regions=[(west,north,east,n-1),(west,s+1,east,south),
+                 (west,n,w-1,s),(e+1,n,east,s)]
+    for w,n,e,s in regions:
+        if w>e or n>s:continue
+        for x in range(w,e+1,1024):
+            right=min(e,x+1023);rows=max(1,1024//(right-x+1))
+            for y in range(n,s+1,rows):
+                yield [x,y,right,min(s,y+rows-1)]
+
+
 def automatic_route(request,stations):
     endpoints=[]
     for key in ('from','to'):
@@ -235,20 +261,35 @@ def automatic_route(request,stations):
     elif len(paths)==1:p=Path(paths[0])
     else:raise ValueError('未找到唯一游戏底图，请在底图路径栏指定 osm400.pmtiles')
     before=p.stat();signature=(before.st_size,before.st_mtime_ns)
-    last=None
-    for padding in (3000,8000):
+    last=None;previous=None;features=[];tiles=0;bytes_read=0;json_size=0;batches=0
+    deadline=time.monotonic()+SEARCH_SECONDS
+    def check_inputs():
+        after=p.stat()
+        if signature!=(after.st_size,after.st_mtime_ns):raise ValueError('游戏底图在读取期间改变，请重试')
+        if time.monotonic()>=deadline:raise ValueError('底图寻路超过 120 秒，请增加中间站分段生成')
+    for padding in SEARCH_PADDINGS:
         bounds=bounds_for(*endpoints,padding)
-        if (bounds[2]-bounds[0]+1)*(bounds[3]-bounds[1]+1)>1024:
-            if last:raise last
-            raise ValueError('两站范围超过 1024 瓦片，请增加中间站分段生成')
-        decoded=decode(p,bounds)
+        requested_tiles=(bounds[2]-bounds[0]+1)*(bounds[3]-bounds[1]+1)
+        if requested_tiles>MAX_SEARCH_TILES:
+            detail='扩大搜索后' if last else '两站搜索范围'
+            raise ValueError(f'{detail}超过 {MAX_SEARCH_TILES} 瓦片的处理上限，尚不能判断铁路是否连通；请在绕行处增加中间站分段生成')
+        for batch in unread_batches(bounds,previous):
+            check_inputs()
+            decoded=decode(p,batch,timeout=max(0.001,min(90,deadline-time.monotonic())))
+            check_inputs()
+            bytes_read+=decoded['bytesRead'];json_size+=len(json.dumps(decoded,ensure_ascii=False))
+            if bytes_read>MAX_SEARCH_BYTES or json_size>MAX_SEARCH_JSON or len(features)+len(decoded['features'])>MAX_SEARCH_FEATURES:
+                raise ValueError('累计底图数据过大，请增加中间站分段生成；尚不能判断铁路是否连通')
+            features.extend(decoded['features']);tiles+=decoded['tiles'];batches+=1
+        previous=bounds
         try:
-            data,info=choose_route(decoded['features'],*endpoints,request.get('rail_type','auto'))
-            after=p.stat()
-            if signature!=(after.st_size,after.st_mtime_ns):raise ValueError('游戏底图在读取期间改变，请重试')
-            info.update(map_path=str(p),map_size=before.st_size,map_mtime_ns=before.st_mtime_ns,tiles=decoded['tiles'],bytes_read=decoded['bytesRead'],search_padding_m=padding)
+            data,info=choose_route(features,*endpoints,request.get('rail_type','auto'))
+            check_inputs()
+            info.update(map_path=str(p),map_size=before.st_size,map_mtime_ns=before.st_mtime_ns,
+                        tiles=tiles,bytes_read=bytes_read,search_padding_m=padding,
+                        searched_tiles=requested_tiles,decode_batches=batches)
             return data,info
         except ValueError as exc:
             if '没有连续铁路路径' not in str(exc):raise
             last=exc
-    raise last
+    raise ValueError('已逐步扩大到两站外侧 32 公里，仍未找到连续铁路路径；可能绕出搜索范围或底图缺少连接。请在实际绕行处增加中间站；不会画直线代替') from last

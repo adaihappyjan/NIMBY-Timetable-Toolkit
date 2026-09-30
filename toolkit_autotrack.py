@@ -398,6 +398,8 @@ def waypoint_plan(raw, request, stations, progress=None):
             total_nodes += detail['nodes']; total_length += detail['length_m']
             if info.get('auto_family_fallback'):
                 detail['warnings'].append('本区间回退到共同铁路类型：'+', '.join(info['rail_types'])+'，请核对路线。')
+            if info.get('search_padding_m',0)>8000:
+                detail['warnings'].append(f"本区间已扩大底图搜索至两站外侧 {info['search_padding_m']//1000} 公里，找到绕行路径，请核对预览。")
             leg.update(status='ok', preview=detail)
         except (ValueError, OSError) as exc:
             leg['error'] = str(exc)
@@ -507,6 +509,8 @@ def dispatch(request, progress=None):
         result['routing']=route_info
     if route_info.get('auto_family_fallback'):
         result['warnings']=result['warnings']+['最近轨道不在同一网络；已回退选择两端均可接入的 '+', '.join(route_info['rail_types'])+'。请核对是否为你要建的线路。']
+    if route_info.get('search_padding_m',0)>8000:
+        result['warnings']=result['warnings']+[f"已扩大底图搜索至两站外侧 {route_info['search_padding_m']//1000} 公里，找到绕行路径，请核对预览。"]
     # Approval is not a geometry setting: it is given after inspecting the
     # fingerprinted success/skip list and is rechecked on every write.
     settings={k:v for k,v in request.items() if k not in ('apply','output','fingerprint','save','allow_partial')}

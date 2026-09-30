@@ -142,3 +142,138 @@ def test_single_character_station_name():
     raw=fixture_raw().replace(at.ident_bytes(station)+bytes(100),
         at.ident_bytes(station)+bytes.fromhex('84c00201')+struct.pack('<dd',*at.lonlat_to_mercator(10,-30))+b'\x01A'+bytes(78))
     assert at.station_catalog(raw)[0]['name']=='A'
+
+
+def tile_set(bounds):
+    w,n,e,s=bounds
+    return {(x,y) for x in range(w,e+1) for y in range(n,s+1)}
+
+
+@pytest.mark.parametrize('bounds,previous',[
+    ([0,0,2048,1],None),([0,0,80,80],[10,20,30,40]),
+    ([0,0,12,12],[0,0,10,10]),([10,10,20,20],[10,10,20,20]),
+])
+def test_unread_batches_cover_only_new_tiles_without_duplicates(bounds,previous):
+    seen=set()
+    for batch in route.unread_batches(bounds,previous):
+        cells=tile_set(batch)
+        assert len(cells)<=1024
+        assert not seen & cells
+        seen.update(cells)
+    assert seen==tile_set(bounds)-(tile_set(previous) if previous else set())
+
+
+def mock_local_map(tmp_path,monkeypatch):
+    path=tmp_path/'osm400.pmtiles';path.write_bytes(b'test map')
+    monkeypatch.setattr(route,'game_maps',lambda:[str(path)])
+    return path
+
+
+def test_automatic_route_follows_long_detour_beyond_eight_km(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch)
+    # Both ends are on the same longitude, but the continuous track bends
+    # 12 km east. The old 3/8 km rectangle clipped this into two components.
+    pixels=[(100,100),(20100,40100),(20100,240100),(100,280100)]
+    origin=8192*4096
+    world=[(origin+x,origin+y) for x,y in pixels]
+    seen=set();calls=[]
+    def decode(path,bounds,**kwargs):
+        cells=tile_set(bounds)
+        assert not cells & seen
+        assert len(cells)<=1024
+        assert 0<kwargs['timeout']<=90
+        seen.update(cells);calls.append(bounds)
+        features=[]
+        for x,y in sorted(cells):
+            box=(x*4096,y*4096,(x+1)*4096,(y+1)*4096)
+            if not any(route.clip(a,b,box) for a,b in zip(world,world[1:])):continue
+            f=feature([(px-x*4096,py-y*4096) for px,py in world])
+            f.update(x=x,y=y);features.append(f)
+        return {'features':features,'tiles':len(cells),'bytesRead':len(cells)*10}
+    monkeypatch.setattr(route,'decode',decode)
+    data,info=route.automatic_route({'from_coord':ll(*pixels[0]),'to_coord':ll(*pixels[-1])},[])
+    assert info['search_padding_m']==16000
+    assert 1024<info['searched_tiles']==len(seen)<=4096
+    assert info['decode_batches']==len(calls)
+    assert info['bytes_read']==len(seen)*10
+    assert info['snap_m']==[0,0]
+    assert info['route_length_m']>85000
+    # Still a real graph path, suitable for the blueprint geometry reader.
+    at.route_data({'geojson':data})
+
+
+def test_automatic_route_stops_after_first_success(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch);calls=[]
+    monkeypatch.setattr(route,'decode',lambda path,bounds,**kw: (
+        calls.append(bounds) or {'features':[feature([(0,100),(4000,100)])],'tiles':1,'bytesRead':10}))
+    _,info=route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+    assert len(calls)==1 and info['search_padding_m']==3000
+
+
+@pytest.mark.parametrize('limit,value,decoded',[
+    ('MAX_SEARCH_BYTES',5,{'features':[],'tiles':1,'bytesRead':10}),
+    ('MAX_SEARCH_JSON',5,{'features':[],'tiles':1,'bytesRead':1}),
+    ('MAX_SEARCH_FEATURES',0,{'features':[feature([(0,100),(4000,100)])],'tiles':1,'bytesRead':1}),
+])
+def test_automatic_route_enforces_aggregate_data_limits(tmp_path,monkeypatch,limit,value,decoded):
+    mock_local_map(tmp_path,monkeypatch)
+    monkeypatch.setattr(route,limit,value)
+    monkeypatch.setattr(route,'decode',lambda *a,**kw:decoded)
+    with pytest.raises(ValueError,match='累计底图数据过大'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+
+
+def test_expansion_limit_reports_incomplete_search_not_disconnected(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch)
+    first=route.bounds_for(ll(100,100),ll(3900,100),3000)
+    monkeypatch.setattr(route,'MAX_SEARCH_TILES',len(tile_set(first)))
+    monkeypatch.setattr(route,'decode',lambda *a,**kw:{'features':[],'tiles':1,'bytesRead':1})
+    def disconnected(*args):raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'choose_route',disconnected)
+    with pytest.raises(ValueError,match='尚不能判断铁路是否连通'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+
+
+def test_data_budget_is_shared_by_expansion_batches(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch);calls=[]
+    monkeypatch.setattr(route,'MAX_SEARCH_BYTES',10)
+    def decode(*args,**kwargs):
+        calls.append(args)
+        return {'features':[],'tiles':1,'bytesRead':6}
+    def disconnected(*args):raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'decode',decode)
+    monkeypatch.setattr(route,'choose_route',disconnected)
+    with pytest.raises(ValueError,match='累计底图数据过大'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+    assert len(calls)==2
+
+
+def test_search_deadline_stops_further_batches(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch);clock=[0];calls=[]
+    monkeypatch.setattr(route.time,'monotonic',lambda:clock[0])
+    def decode(*args,**kwargs):
+        calls.append(args);clock[0]=121
+        return {'features':[],'tiles':1,'bytesRead':1}
+    monkeypatch.setattr(route,'decode',decode)
+    with pytest.raises(ValueError,match='120 秒'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+    assert len(calls)==1
+
+
+def test_map_change_between_batches_rejects_mixed_snapshot(tmp_path,monkeypatch):
+    path=mock_local_map(tmp_path,monkeypatch)
+    def decode(*args,**kwargs):
+        path.write_bytes(b'changed map snapshot')
+        return {'features':[],'tiles':1,'bytesRead':1}
+    monkeypatch.setattr(route,'decode',decode)
+    with pytest.raises(ValueError,match='底图在读取期间改变'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+
+
+def test_unconnected_map_stops_at_final_search_margin(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch)
+    monkeypatch.setattr(route,'decode',lambda *a,**kw:{'features':[],'tiles':1,'bytesRead':1})
+    def disconnected(*args):raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'choose_route',disconnected)
+    with pytest.raises(ValueError,match='外侧 32 公里'):
+        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])

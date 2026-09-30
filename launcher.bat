@@ -53,7 +53,8 @@ if /i "%~1"=="--check" (
   echo launcher-ok using "%PYW%" %PYW_ARGS%
   exit /b 0
 )
-start "" "%PYW%" %PYW_ARGS% "%~dp0toolkit_webapp.py"
+rem Use the logged no-console entry point, same as the portable EXE.
+start "" "%PYW%" %PYW_ARGS% "%~dp0toolkit_start.py"
 exit /b
 
 :zstd_invalid

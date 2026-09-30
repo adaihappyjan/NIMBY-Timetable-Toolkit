@@ -12,6 +12,7 @@ def test_frontend_state_regressions():
     result = subprocess.run(
         [node, '--test', str(Path(__file__).with_name('frontend_state.test.cjs')),
          str(Path(__file__).with_name('autotrack_state.test.cjs')),
+         str(Path(__file__).with_name('startup_state.test.cjs')),
          str(Path(__file__).with_name('metro_usability.test.cjs'))],
         capture_output=True, text=True, encoding='utf-8', timeout=30,
     )

@@ -115,6 +115,7 @@ async function loadBootstrap() {
   else if (data.startup_cleanup?.result?.moved_file_count) toast(`启动清理已将 ${data.startup_cleanup.result.moved_group_count} 组过期副本移入回收站`);
   if (data.settings.auto_check_updates !== false) setTimeout(() => checkToolkitUpdate(false), 900);
   window.restoreWorkspaceSelection?.();
+  window.toolkitStartup?.ready();
 }
 
 function renderToolkitUpdate(update) {
@@ -2867,4 +2868,4 @@ $('#update-auto-check')?.addEventListener('change', async event => {
 });
 
 setInterval(()=>fetch(`/api/ping?_=${Date.now()}`,{cache:'no-store'}).catch(()=>{}),5000);
-loadBootstrap().catch(e=>toast(e.message,true));
+loadBootstrap().catch(e=>{window.toolkitStartup?.fail(e.name==='AbortError'?'读取启动数据超时，请重新加载界面。':e.message);toast(e.message,true);});
