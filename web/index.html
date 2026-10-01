@@ -31,7 +31,7 @@
         <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
         <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
         <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
-        <button class="nav-item" data-view="autotrack"><span>⇢</span>自动铺轨 · 实验</button>
+        <button class="nav-item" data-view="autotrack"><span>⇢</span>自动铺轨</button>
         <button class="nav-item" data-view="tilecache"><span>▧</span>ORM 地图缓存</button>
         <button class="nav-item" data-view="timetable" title="计算理论方案，或精细编辑停站与运营指令"><span>◫</span>时刻表配置</button>
         <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
@@ -76,7 +76,7 @@
       </aside>
 
       <section class="view" id="view-autotrack">
-        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINT LAB</p><h2>按站点顺序，沿游戏底图逐段铺轨。</h2><p>可添加多个途经站，逐段检查失败原因，调整后一次生成新副本。各站附近保留接轨空隙，不自动改站台、道岔或信号。</p></div><button class="text-button" id="at-help">使用教学</button></div>
+        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINTS</p><h2>按站点顺序，沿游戏底图逐段铺轨。</h2><p>可添加多个途经站，逐段检查失败原因，调整后一次生成新副本。各站附近保留接轨空隙，不自动改站台、道岔或信号。</p></div><button class="text-button" id="at-help">使用教学</button></div>
         <article class="panel" id="at-tutorial" hidden aria-label="自动铺轨首次使用教学"><h3 id="at-tutorial-title">第一次使用</h3><p id="at-tutorial-text"></p><div class="button-row"><button class="secondary-button" id="at-tutorial-back">上一步</button><button class="primary-button" id="at-tutorial-next">下一步</button><button class="text-button" id="at-tutorial-close">稍后再看</button></div></article>
         <article class="panel">
           <div class="panel-heading"><h3>① 选择存档与路线</h3><span class="local-chip">离线预览 · 无需时刻表 JSON</span></div>
@@ -87,7 +87,7 @@
             <label>起点站（可搜索；或输入 经度,纬度）<input id="at-from" list="at-stations" placeholder="输入站名筛选，选择完整结果"></label>
             <div id="at-via-panel" class="at-wide">
               <h3>途经站 · 按从上到下的顺序连接</h3>
-              <p>起点 → 途经站 1 → 途经站 2 → … → 终点。最多共 20 站；上下移动可调整站序。删除仅从铺轨方案移除，不会删除游戏内车站；删除后需重新预览。</p>
+              <p>起点 → 途经站 1 → 途经站 2 → … → 终点。最多共 40 站；上下移动可调整站序。删除仅从铺轨方案移除，不会删除游戏内车站；删除后需重新预览。</p>
               <div id="at-via-list"></div>
               <button type="button" class="secondary-button" id="at-add-via">＋ 添加途经站</button>
               <button type="button" class="secondary-button" id="at-discover">识别首尾之间的沿途站</button>
@@ -106,6 +106,9 @@
             <label>游戏矢量底图（自动发现；可修正路径）<input id="at-map-path" placeholder="游戏目录/resources/maps/osm400.pmtiles"></label>
             <label>自定义路线文件<input id="at-file" type="file" accept=".json,.geojson,application/json" disabled></label>
             <label>结构模式<select id="at-structure"><option value="auto">自动 · 默认地面，保留底图桥隧</option><option value="ground">全部地面（忽略底图桥隧）</option><option value="bridge">全部高架 +1 层</option><option value="tunnel">全部隧道 -1 层</option></select></label>
+            <label>水域 / 道路预避让<select id="at-obstacles"><option value="bridge">冲突候选路段升高一格 +1</option><option value="tunnel">冲突候选路段降低一格 -1</option><option value="off">关闭 · 仅保留底图原有桥隧</option></select><small>只用于自动结构。按底图近似保守处理，可能多建桥隧；不是游戏内冲突验收。</small></label>
+            <label>玩家轨道 / 车站预避让<select id="at-player-obstacles"><option value="off">关闭 · 中途遇到玩家轨道时停止</option><option value="bridge">冲突候选路段向上 · +1 层</option><option value="tunnel">冲突候选路段向下 · -1 层</option></select><small>包含已建和蓝图轨道、站台；只调整新蓝图。已分层交叉保持不变，首尾接站仍留缺口。目标层被占用则停止，不会继续升降。</small></label>
+            <label>车站中心保护半径（米）<input id="at-player-radius" type="number" value="60" min="10" max="200" disabled><small>启用玩家设施避让后生效。以车站中心的地面保护圈近似站区，不是站房实际轮廓；不含本区间首尾站。桥隧净空和坡度仍须游戏内验收。</small></label>
             <label>地面速度类型<select id="at-variant"><option value="6">中速 · 160 km/h（默认）</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
             <label>桥梁速度类型<select id="at-bridge-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
             <label>隧道速度类型<select id="at-tunnel-variant"><option value="6">中速 · 160 km/h</option><option value="2">高速 · 350 km/h</option><option value="4">有轨电车 · 60 km/h</option></select></label>
@@ -114,7 +117,7 @@
             <label>终点里程（米；留空至路线末端）<input id="at-end" type="number" min="0" step="1" placeholder="整段"></label>
           </div>
           <button class="primary-button" id="at-preview">② 检查冲突并预览</button>
-          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。首尾距离和路线总长均不设公里数上限，两站须至少相距 0.1 公里。找不到路时会逐步向外扩大搜索（3 / 8 / 16 / 32 公里），只读取新增区域。每个区间最多搜索 4096 个地图小块（瓦片），分批后台读取；达到处理上限时，请在绕行处添加途经站，不代表铁路实际断开。最多 20 个站点、合计 8000 个双轨节点。保留局部坐标范围检查，不支持跨日期线，不用直线补断口。仅支持游戏三种内置轨道；速度为类型上限，实际运行受曲线等限制。</p>
+          <p class="repair-note">站名读取当前存档；地图上的未建站可输入经纬度。首尾距离和路线总长均不设公里数上限，两站须至少相距 0.1 公里。短区间逐步扩大附近范围；长距离或大绕行改为从两端沿铁路分块搜索，不会因两站矩形超过 4096 块直接拒绝。后台显示实际已检查的地图块数，仍保留数据量、时间及最多 16384 个实际地图块的保护上限；达到上限不代表铁路断开。可先“识别首尾之间的沿途站”，勾选存档内的中间站后分段预览。最多 40 站、合计 8000 个双轨节点，保留坐标和冲突检查，不跨日期线、不用直线补断口。仅支持游戏三种内置轨道。</p>
         </article>
         <article class="panel">
           <div class="panel-heading"><h3>③ 检查线形，再生成</h3><span id="at-state" role="status" aria-live="polite">等待预览</span></div>
@@ -203,6 +206,9 @@
             <button class="primary-button scan-button" id="scan-button"><span>开始体检 · 免 JSON</span><small>只读检查 · 大存档可能需要较久</small></button>
           </div>
           <div class="safety-strip"><span>✓</span>体检不修改游戏存档；检查结果与任务记录可能保存到工具箱目录。修改游戏数据时创建新存档副本。</div>
+          <label class="checkbox-label"><input type="checkbox" id="follow-latest" checked>自动跟进同一项目的最新游戏存档与时刻表导出</label>
+          <p id="live-files-status" class="save-dir-hint" role="status">每 5 秒检查文件；等待写入稳定，不自动生成游戏导出，也不把最新文件当成已匹配。</p>
+          <button id="live-files-apply" class="secondary-button" hidden>应用最新文件并重新读取</button>
           <details class="adv-json" id="adv-json-box">
             <summary><span class="sd-label">需要时刻表数据？先在游戏内导出</span><span class="sd-path">选择游戏生成的 JSON，再与存档核对</span></summary>
             <div class="adv-json-body">
@@ -210,7 +216,7 @@
               <ol class="save-dir-hint">
                 <li>在 NIMBY Rails 中打开要处理的存档，<b>暂停游戏并保存</b>。</li>
                 <li>保持暂停、不修改线路或车辆，在<b>游戏内执行时刻表数据导出</b>，等待生成名称含 <code>Timetable Export</code> 的 <code>.json</code> 文件。</li>
-                <li>回到工具箱，点击右上角<b>“刷新文件”</b>，选择刚保存的存档和下方对应文件，再点<b>“核对存档与游戏导出”</b>。</li>
+                <li>回到工具箱，等待自动发现新文件（关闭自动跟进时可点“刷新文件”），确认所选存档与导出，再点<b>“核对存档与游戏导出”</b>。</li>
               </ol>
               <p class="save-dir-hint">列表为空？确认游戏导出已完成，并检查下方“存档目录”是否包含该文件。以后修改时刻表、线路或车辆后，需要重新保存并导出。<b>工具箱导出的线路图 JSON、运营报告或方案 JSON 不能代替这个文件。</b></p>
               <div class="file-grid">
@@ -238,12 +244,14 @@
             <div><p class="step">写入 · 只建新存档</p><h3>真实站名写入</h3></div>
             <span class="pill" id="stationname-count">未命名车站：—</span>
           </div>
-          <p class="save-dir-hint">把游戏导出里每个车站的<b>真实名称（模组名称）</b>一键写回存档，让游戏内显示<b>真正站台名</b>而不是编号。默认只补写当前显示为编号的车站，永不改动原存档（生成新存档 + 反向解压校验）。</p>
+          <p class="save-dir-hint">从游戏时刻表导出读取站名，按车站 ID 与位置核对；不会凭位置猜名。先预览可补写和仍缺名的车站，默认保留已有自定义名称。<b>只写入新副本：必须在游戏中加载新副本，之后保存才会继承名称。</b>重新导出可补齐新建站；导出也没有名字时，可在下面手动填写。</p>
           <div class="file-grid">
             <label>名称来源（游戏导出的时刻表数据）<select id="stationname-export" aria-label="站名来源：游戏时刻表数据"></select></label>
             <label class="checkbox-label"><input type="checkbox" id="stationname-all"> 连已命名车站一并覆盖</label>
-            <button class="primary-button" id="stationname-write"><span>一键写入真实站名</span><small>生成新存档 · 校验后落盘</small></button>
+            <button class="secondary-button" id="stationname-preview">检查可补写的站名</button>
+            <button class="primary-button" id="stationname-write" disabled><span>确认写入新副本</span><small>先检查站名，再写入</small></button>
           </div>
+          <label>手动补名（可选，每行一站：ID=站名）<textarea id="stationname-pairs" rows="3" placeholder="0x20000020f0001=Gogama"></textarea></label>
           <div id="stationname-result" class="mini-summary" hidden></div>
         </article>
 
@@ -1018,5 +1026,7 @@
   <script src="/autotrack.js"></script>
   <script src="/workspace.js"></script>
   <script src="/tutorial.js"></script>
+  <script src="/livefiles.js"></script>
+  <script src="/stationnames.js"></script>
 </body>
 </html>

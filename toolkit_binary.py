@@ -130,7 +130,9 @@ class Zstd:
         return code
 
     def decompress(self, frame: bytes) -> bytes:
-        source = ctypes.create_string_buffer(frame)
+        # ctypes keeps this immutable bytes owner alive for the native call;
+        # explicit lengths preserve embedded NULs without copying the input.
+        source = ctypes.c_char_p(frame)
         size = int(self.lib.ZSTD_getFrameContentSize(source, len(frame)))
         if size in (ZSTD_CONTENTSIZE_UNKNOWN, ZSTD_CONTENTSIZE_ERROR):
             raise RuntimeError(f"zstd frame content size unavailable: {size}")
@@ -138,20 +140,25 @@ class Zstd:
         actual = self._check(
             self.lib.ZSTD_decompress(target, size, source, len(frame))
         )
-        return target.raw[:actual]
+        return ctypes.string_at(target, actual)
 
     def compress(self, data: bytes, level: int = 3) -> bytes:
-        source = ctypes.create_string_buffer(data)
+        source = ctypes.c_char_p(data)
         capacity = int(self.lib.ZSTD_compressBound(len(data)))
         target = ctypes.create_string_buffer(capacity)
         actual = self._check(
             self.lib.ZSTD_compress(target, capacity, source, len(data), level)
         )
-        return target.raw[:actual]
+        # Copy the result only, not the full worst-case compression capacity.
+        return ctypes.string_at(target, actual)
 
 
 def split_save(path: Path) -> tuple[bytes, bytes, int]:
-    data = path.read_bytes()
+    return split_save_bytes(path.read_bytes())
+
+
+def split_save_bytes(data: bytes) -> tuple[bytes, bytes, int]:
+    """Split an already-read immutable snapshot, avoiding a second file read."""
     offset = data.find(ZSTD_MAGIC)
     if offset < 0:
         raise RuntimeError("zstd frame magic not found")

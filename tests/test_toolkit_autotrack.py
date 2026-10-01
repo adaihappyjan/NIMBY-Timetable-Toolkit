@@ -161,7 +161,7 @@ def test_unknown_save_version(tmp_path):
 def multi_route(monkeypatch):
     import toolkit_autoroute as ar
     calls = []
-    def route(request, stations):
+    def route(request, stations, progress=None):
         a, b = request['from_coord'], request['to_coord']
         calls.append((a, b))
         return {'type': 'LineString', 'coordinates': [a, b]}, {
@@ -242,10 +242,10 @@ def test_duplicate_waypoint_and_all_failed_plan(tmp_path, multi_route):
     assert result['nodes'] == 0
 
 
-@pytest.mark.parametrize('via', [None, {}, [None]*19])
+@pytest.mark.parametrize('via', [None, {}, [None]*39])
 def test_multi_station_count_and_schema_bound(tmp_path, via):
     request = multi_request(tmp_path); request['via'] = via
-    with pytest.raises(ValueError, match='20 站'): at.dispatch(request)
+    with pytest.raises(ValueError, match='40 站'): at.dispatch(request)
 
 
 def test_multi_station_rejects_ambiguous_mileage_crop(tmp_path, multi_route):
@@ -485,8 +485,11 @@ def test_worker_preserves_discovery_binding_and_partial_consent(tmp_path, monkey
     monkeypatch.setattr(web, 'TASK_DIR', tmp_path/'tasks')
     source = save_fixture(tmp_path)
     request = {'save': str(source), 'preset': 'auto', 'operation': 'discover',
-               'discovery_source_sha256': 'snapshot', 'allow_partial': True}
+               'discovery_source_sha256': 'snapshot', 'allow_partial': True,
+               'obstacle_mode': 'tunnel', 'player_obstacle_mode': 'bridge', 'player_station_radius_m': 80}
     args = web.TaskManager()._build_args('autotrack', request)
     forwarded = json.loads(Path(args[-1]).read_text('utf-8'))
     assert forwarded['operation'] == 'discover' and forwarded['apply'] is False
     assert forwarded['discovery_source_sha256'] == 'snapshot' and forwarded['allow_partial'] is True
+    assert forwarded['obstacle_mode'] == 'tunnel'
+    assert forwarded['player_obstacle_mode'] == 'bridge' and forwarded['player_station_radius_m'] == 80

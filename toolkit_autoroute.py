@@ -27,6 +27,8 @@ MAX_SEARCH_FEATURES=100000
 MAX_SEARCH_BYTES=256*1024*1024
 MAX_SEARCH_JSON=30_000_000
 SEARCH_SECONDS=120
+MAX_NETWORK_TILES=16384
+NETWORK_SEARCH_SECONDS=240
 
 
 def game_maps():
@@ -82,17 +84,81 @@ def bounds_for(a,b,padding_m):
 
 
 def decode(path,bounds,*,timeout=90):
+    return decode_request({'path':str(path),'bounds':bounds},timeout=timeout)
+
+
+def decode_request(request,*,timeout=90):
     runtime=node_runtime()
     if not runtime:raise ValueError('自动读取底图需要 Node.js 22 或更新版。安装后重开工具箱；本地 GeoJSON 路线仍可使用。')
     # Fixed bundled program, no shell, no user-supplied executable or script.
     options={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
     try:
         proc=subprocess.run([runtime,'--max-old-space-size=512',str(ROOT/'third_party/autotrack/tiles.mjs')],
-            input=json.dumps({'path':str(path),'bounds':bounds}),capture_output=True,text=True,encoding='utf-8',timeout=timeout,**options)
+            input=json.dumps(request),capture_output=True,text=True,encoding='utf-8',timeout=timeout,**options)
     except subprocess.TimeoutExpired as exc:raise ValueError('底图读取超时，请增加中间站分段生成') from exc
     if proc.returncode:raise ValueError('底图解码失败：'+proc.stderr[-1600:])
     if len(proc.stdout)>30_000_000:raise ValueError('底图结果过大，请分段')
     return json.loads(proc.stdout)
+
+
+def network_route(path,endpoints,rail_type='auto',progress=None):
+    """Explore railway-bearing tile borders, then verify the actual track graph.
+
+    Coarse tile adjacency is only a read hint: neither geometric crossings nor
+    missing map links are joined. Work is bounded by actual inspected tiles.
+    """
+    if rail_type!='auto' and rail_type not in RAIL_TYPES:raise ValueError('未知铁路线路类型')
+    before=path.stat();signature=(before.st_size,before.st_mtime_ns)
+    anchors=[tuple(int(v//4096) for v in tile_point(p)) for p in endpoints]
+    seeds=set()
+    for point in endpoints:
+        p=tile_point(point);scale=40075016.686/N*math.cos(math.radians(point[1]))
+        # Include the whole 500 m endpoint snap neighbourhood and seam halo.
+        radius=500/scale+2
+        for x in range(max(0,int((p[0]-radius)//4096)),min(16383,int((p[0]+radius)//4096))+1):
+            for y in range(max(0,int((p[1]-radius)//4096)),min(16383,int((p[1]+radius)//4096))+1):seeds.add((x,y))
+    frontier=sorted(seeds);visited=set();features=[];tiles=0;bytes_read=0;json_size=0;batches=0
+    deadline=time.monotonic()+NETWORK_SEARCH_SECONDS
+    def check_inputs():
+        current=path.stat()
+        if signature!=(current.st_size,current.st_mtime_ns):raise ValueError('游戏底图在读取期间改变，请重试')
+        if time.monotonic()>=deadline:raise ValueError('沿铁路分块寻路超过 240 秒；尚不能判断铁路是否连通，请增加途经站分段生成')
+    last=None;next_graph_at=256;graph_attempts=0
+    while frontier:
+        check_inputs()
+        remaining=MAX_NETWORK_TILES-len(visited)
+        if remaining<=0:raise ValueError('沿铁路搜索已达到实际地图块处理上限；尚不能判断铁路是否连通，请增加途经站分段生成')
+        if progress:progress(len(visited),MAX_NETWORK_TILES,f'沿铁路分块寻路：已检查 {len(visited)} 个地图块，待探索 {len(frontier)} 处；此为处理量，不是完成百分比…')
+        decoded=decode_request({'path':str(path),'follow':True,'tiles':frontier,'visited':sorted(visited),
+                                'anchors':anchors,'railType':rail_type,'limit':min(256,remaining)},
+                               timeout=max(0.001,min(90,deadline-time.monotonic())))
+        check_inputs()
+        inspected={tuple(p) for p in decoded['inspected']}
+        if not inspected or inspected & visited:raise ValueError('底图分块读取未推进或重复，请重试')
+        visited.update(inspected);frontier=decoded['frontier']
+        bytes_read+=decoded['bytesRead'];json_size+=len(json.dumps(decoded,ensure_ascii=False))
+        if bytes_read>MAX_SEARCH_BYTES or json_size>MAX_SEARCH_JSON or len(features)+len(decoded['features'])>MAX_SEARCH_FEATURES:
+            raise ValueError('累计底图数据过大，请增加中间站分段生成；尚不能判断铁路是否连通')
+        features.extend(decoded['features']);tiles+=decoded['tiles'];batches+=1
+        # Both endpoint neighbourhoods must have been read before trying snap.
+        if not seeds<=visited:continue
+        # Check frequently near the endpoints, then back off rebuilds as the
+        # search grows. Always check the last batch, even below the threshold.
+        if frontier and len(visited)<next_graph_at and len(visited)<MAX_NETWORK_TILES:continue
+        graph_attempts+=1
+        next_graph_at=len(visited)+max(256,len(visited)//2)
+        try:
+            data,info=choose_route(features,*endpoints,rail_type)
+            check_inputs()
+            info.update(map_path=str(path),map_size=before.st_size,map_mtime_ns=before.st_mtime_ns,
+                        tiles=tiles,bytes_read=bytes_read,searched_tiles=len(visited),decode_batches=batches,
+                        graph_attempts=graph_attempts,
+                        search_method='railway-frontier')
+            return data,info
+        except ValueError as exc:
+            if '没有连续铁路路径' not in str(exc):raise
+            last=exc
+    raise ValueError('已沿可见铁路探索，仍未找到连续铁路路径；底图可能缺少连接或站点贴合了不同支线，不会画直线补连') from last
 
 
 def clip(a,b,box):
@@ -112,9 +178,102 @@ def projection(p,a,b):
     return t,(a[0]+dx*t,a[1]+dy*t)
 
 
+def stitch_tile_seams(nodes,edges,seams):
+    """Correct quantisation seams, not real-world railway gaps.
+
+    Require opposing adjacent tile sides, identical type/layer/structure,
+    near-collinear tangents and a unique, reciprocal continuation. For shallow
+    border crossings, <=8 units along the border are allowed ONLY when lateral
+    error against BOTH tangents is <=1 unit and heading differs by <=3 degrees.
+    Normal feature endpoints retain the stricter 2-unit rule.
+    """
+    groups=defaultdict(list);matches=defaultdict(set)
+    for node,axis,border,side,tile,tangent in seams:
+        p=nodes[node][0];cell=math.floor(p[1-axis]/8)
+        for offset in (-1,0,1):
+            for other,other_side,other_tile,other_tangent in groups[(axis,border,cell+offset)]:
+                if node==other or side==other_side or abs(tile[0]-other_tile[0])+abs(tile[1]-other_tile[1])!=1:continue
+                q=nodes[other][0]
+                distance=math.dist(p,q)
+                if nodes[node][1]!=nodes[other][1] or distance>8:continue
+                dot=sum(a*b for a,b in zip(tangent,other_tangent))
+                if dot>-math.cos(math.radians(15)):continue
+                if distance>3:
+                    delta=(q[0]-p[0],q[1]-p[1])
+                    lateral=max(abs(delta[0]*t[1]-delta[1]*t[0]) for t in (tangent,other_tangent))
+                    if lateral>1 or dot>-math.cos(math.radians(3)):continue
+                matches[node].add(other);matches[other].add(node)
+        groups[(axis,border,cell)].append((node,side,tile,tangent))
+    parent={};joined=0
+    def root(n):
+        while n in parent:n=parent[n]
+        return n
+    for node,others in sorted(matches.items()):
+        if len(others)!=1:continue
+        other=next(iter(others))
+        if matches[other]!={node}:continue
+        a,b=root(node),root(other)
+        if a!=b:parent[max(a,b)]=min(a,b);joined+=1
+    return [(root(a),root(b),props) for a,b,props in edges if root(a)!=root(b)],joined
+
+
+def compact_alignment(coords,structures,scale):
+    """Drop numerically collinear points (<=0.01 mm); keep structures.
+
+    No curve straightening to meet a point quota: every removal must satisfy
+    the same small geometric tolerance and 1500 m maximum edge independently.
+    """
+    protected={tuple(p) for f in structures for p in f['geometry']['coordinates']}
+    # Exact collinearity avoids accumulating lateral drift along curved track.
+    points=[tile_point(p) for p in coords];keep=[]
+    for i,p in enumerate(points):
+        while len(keep)>=2 and tuple(coords[keep[-1]]) not in protected:
+            a,b=points[keep[-2]],points[keep[-1]]
+            if math.dist(a,p)*scale>1500 or math.dist(a,p)<1e-9:break
+            t,q=projection(b,a,p)
+            if not 0<t<1 or math.dist(q,b)*scale>1e-5:break
+            keep.pop()
+        keep.append(i)
+    return [coords[i] for i in keep]
+
+
+def stitch_structure_tips(nodes,edges):
+    """Join an explicit bridge/tunnel end to an exact ground turnaround vertex.
+
+    Cartographic lines may fold two parallel approaches into one polyline at
+    a bridge head, so the shared vertex is not a feature endpoint. Require a
+    unique compatible ground vertex and ALL incident directions to oppose the
+    structure by <=15 degrees. A through line/crossing necessarily fails this
+    test. Never project onto an edge or stretch a gap to invent a junction.
+    """
+    adjacent=defaultdict(set);ground=defaultdict(list)
+    for a,b,_ in edges:adjacent[a].add(b);adjacent[b].add(a)
+    for i in adjacent:
+        if not nodes[i][1][2]:ground[nodes[i][0]].append(i)
+    parent={};joined=0;threshold=-math.cos(math.radians(15))
+    def directions(i):
+        p=nodes[i][0];result=[]
+        for j in adjacent[i]:
+            q=nodes[j][0];length=math.dist(p,q)
+            if length<=1e-6:return []
+            result.append(((q[0]-p[0])/length,(q[1]-p[1])/length))
+        return result
+    for i in adjacent:
+        p,sig,terminal=nodes[i]
+        if not sig[2] or not terminal:continue
+        choices=[j for j in ground[p] if nodes[j][1][0]==sig[0]
+                 and abs(float(nodes[j][1][1])-float(sig[1]))<=1]
+        if len(choices)!=1:continue
+        j=choices[0];left,right=directions(i),directions(j)
+        if left and right and all(a[0]*b[0]+a[1]*b[1]<=threshold for a in left for b in right):
+            parent[i]=j;joined+=1
+    return [(parent.get(a,a),parent.get(b,b),p) for a,b,p in edges
+            if parent.get(a,a)!=parent.get(b,b)],joined
+
+
 def route_graph(features,start,end,rail_type='auto'):
     if rail_type!='auto' and rail_type not in RAIL_TYPES:raise ValueError('未知铁路线路类型')
-    nodes=[];buckets=defaultdict(list);edges=[];seen=set()
+    nodes=[];buckets=defaultdict(list);edges=[];seen=set();seams=[]
     # Endpoint snapping <= 2 z14 tile units, under 1.2 m even at equator.
     def vertex(p,props,terminal):
         layer=props.get('layer') or 0
@@ -143,10 +302,18 @@ def route_graph(features,start,end,rail_type='auto'):
                 p,q=pair
                 u=vertex(p,props,j==0 or math.dist(p,a)>1e-6)
                 v=vertex(q,props,j==len(points)-2 or math.dist(q,b)>1e-6)
+                for node,tip,inside in ((u,p,q),(v,q,p)):
+                    length=math.dist(tip,inside)
+                    tangent=tuple((inside[k]-tip[k])/length for k in (0,1))
+                    for axis in (0,1):
+                        for side,border in ((1,box[axis]),(-1,box[axis+2])):
+                            if abs(tip[axis]-border)<1e-6:seams.append((node,axis,int(border//4096),side,(x,y),tangent))
                 key=(min(u,v),max(u,v),props.get('brunnel') or '')
                 if u!=v and key not in seen:
                     edges.append((u,v,props));seen.add(key)
     if not edges:raise ValueError('此范围没有所选类型的铁路底图；不会以直线代替')
+    edges,seam_joins=stitch_tile_seams(nodes,edges,seams)
+    edges,structure_joins=stitch_structure_tips(nodes,edges)
     scale=40075016.686/N*math.cos(math.radians((start[1]+end[1])/2))
     splits=defaultdict(list);snap=[];terminals=[]
     for endpoint in (start,end):
@@ -199,8 +366,10 @@ def route_graph(features,start,end,rail_type='auto'):
             if structures and structures[-1]['properties']['brunnel']==brunnel and structures[-1]['geometry']['coordinates'][-1]==first:
                 structures[-1]['geometry']['coordinates'].append(coords[-1])
             else:structures.append({'type':'Feature','properties':{'kind':'structure','brunnel':brunnel},'geometry':{'type':'LineString','coordinates':[first,coords[-1]]}})
+    coords=compact_alignment(coords,structures,scale)
     data={'type':'FeatureCollection','features':[{'type':'Feature','properties':{'kind':'reference_alignment'},'geometry':{'type':'LineString','coordinates':coords}}]+structures}
-    return data,{'snap_m':snap,'rail_types':sorted(classes),'route_length_m':round(cost[target]*scale,1)}
+    return data,{'snap_m':snap,'rail_types':sorted(classes),'route_length_m':round(cost[target]*scale,1),
+                'tile_seam_joins':seam_joins,'structure_tip_joins':structure_joins}
 
 
 def choose_route(features,start,end,rail_type='auto'):
@@ -210,7 +379,9 @@ def choose_route(features,start,end,rail_type='auto'):
         # A metro and an adjacent regional line may be closer at opposite ends.
         # Retry a common family, never fabricate a link between those networks.
         candidates=[]
-        for kind in sorted({f.get('properties',{}).get('subclass') for f in features} & RAIL_TYPES):
+        families=sorted({f.get('properties',{}).get('subclass') for f in features} & RAIL_TYPES)
+        if len(families)<2:raise original  # The sole-family graph is identical.
+        for kind in families:
             try:
                 data,info=route_graph(features,start,end,kind)
                 score=(max(info['snap_m']),sum(info['snap_m']),info['route_length_m'],kind)
@@ -241,7 +412,7 @@ def unread_batches(bounds,previous=None):
                 yield [x,y,right,min(s,y+rows-1)]
 
 
-def automatic_route(request,stations):
+def automatic_route(request,stations,progress=None):
     endpoints=[]
     for key in ('from','to'):
         ident=request.get(key+'_station')
@@ -271,8 +442,7 @@ def automatic_route(request,stations):
         bounds=bounds_for(*endpoints,padding)
         requested_tiles=(bounds[2]-bounds[0]+1)*(bounds[3]-bounds[1]+1)
         if requested_tiles>MAX_SEARCH_TILES:
-            detail='扩大搜索后' if last else '两站搜索范围'
-            raise ValueError(f'{detail}超过 {MAX_SEARCH_TILES} 瓦片的处理上限，尚不能判断铁路是否连通；请在绕行处增加中间站分段生成')
+            return network_route(p,endpoints,request.get('rail_type','auto'),progress)
         for batch in unread_batches(bounds,previous):
             check_inputs()
             decoded=decode(p,batch,timeout=max(0.001,min(90,deadline-time.monotonic())))
@@ -292,4 +462,4 @@ def automatic_route(request,stations):
         except ValueError as exc:
             if '没有连续铁路路径' not in str(exc):raise
             last=exc
-    raise ValueError('已逐步扩大到两站外侧 32 公里，仍未找到连续铁路路径；可能绕出搜索范围或底图缺少连接。请在实际绕行处增加中间站；不会画直线代替') from last
+    return network_route(p,endpoints,request.get('rail_type','auto'),progress)

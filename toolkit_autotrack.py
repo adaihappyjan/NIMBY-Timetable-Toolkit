@@ -10,15 +10,47 @@ import hashlib
 import json
 import math
 import os
+import re
 import struct
+from contextvars import ContextVar
 from pathlib import Path
 
-from toolkit_binary import Zstd, split_save, read_uvarint, uvarint, require_verified_save
+from toolkit_binary import Zstd, split_save, split_save_bytes, read_uvarint, uvarint, require_verified_save
 from toolkit_coordedit import lonlat_to_mercator, mercator_to_lonlat
 from toolkit_savereader import read_track_nodes
 
 ROOT = Path(__file__).resolve().parent
 MAX_POINTS = 4000
+MAX_WAYPOINTS = 40
+_SNAPSHOT_CACHE = ContextVar('autotrack_snapshot_cache', default=None)
+# Zero-width lookahead retains overlapping candidates. Station IDs are exact
+# eight-byte canonical varints ending in 0x02; metadata's fourth byte is 0x01.
+_STATION_CANDIDATE = re.compile(rb'(?=[\x80-\xff]{7}\x02[\s\S]{3}\x01)')
+
+
+def _snapshot(raw):
+    """One immutable payload per dispatch, never a cross-request file cache.
+
+    A patch produces a new bytes object and invalidates the old parsed layout.
+    Its independent readback may then be reused by the next leg. ContextVar
+    isolates concurrent/nested tasks; no save-derived cache survives dispatch.
+    """
+    cache = _SNAPSHOT_CACHE.get()
+    if cache is None or not isinstance(raw, bytes):
+        return {}
+    if cache.get('raw') is not raw:
+        cache.clear()
+        cache['raw'] = raw
+    return cache
+
+
+def _track_nodes(raw):
+    cache = _snapshot(raw)
+    if 'nodes' not in cache:
+        cache['nodes'] = read_track_nodes(raw, include_planned=True)
+    return cache['nodes']
+
+
 WARNINGS = [
     '仅生成待建双轨，不自动接站、不添加信号或安排列车。',
     '冲突检查基于轨道节点与直线近似，不代表曲线、地形、坡度或净空验收。',
@@ -65,7 +97,7 @@ def route_data(request):
     for point in points:
         check(isinstance(point, (list, tuple)) and len(point) == 2, '坐标须为 [经度, 纬度]，不支持高度维度')
         coords.append((number(point[0], -180, 180, '经度'), number(point[1], -80, 80, '纬度')))
-    check(max(p[0] for p in coords)-min(p[0] for p in coords) < 6, '仅支持局部路线，不支持跨日期线')
+    check(max(p[0] for p in coords)-min(p[0] for p in coords) < 180, '不支持跨日期线，请分段并选择不跨日期线的区间')
     lat = sum(p[1] for p in coords)/len(coords)
     scale = math.cos(math.radians(lat))
     xy = [tuple(v*scale for v in lonlat_to_mercator(*p)) for p in coords]
@@ -125,10 +157,13 @@ def registry(raw, offset, kind):
 
 
 def layout(raw):
+    cache = _snapshot(raw)
+    if 'layout' in cache:
+        return cache['layout']
     ids, start = registry(raw, 0, 1)
     check([x>>16 & 0xffffffff for x in ids] == list(range(len(ids))),
-          '轨道槽位不连续，当前实验版不能安全扩展此存档')
-    nodes = read_track_nodes(raw, include_planned=True)
+          '轨道槽位不连续，当前写入器不能安全扩展此存档')
+    nodes = _track_nodes(raw)
     check(set(nodes) == set(ids), '存在尚未识别的轨道类型或记录，已禁止写入')
     check(len({n.position for n in nodes.values()}) == len(ids), '轨道记录重复')
     last = max(n.position for n in nodes.values())
@@ -149,7 +184,9 @@ def layout(raw):
             continue
     check(candidates, '未找到通过校验的车站表，无法确定轨道表结束位置；存档结构可能尚未兼容，已禁止写入')
     check(len(candidates) == 1, '找到多个候选车站表，不能唯一确定轨道表结束位置，已禁止写入')
-    return ids, start, candidates[0], nodes
+    result = ids, start, candidates[0], nodes
+    cache['layout'] = result
+    return result
 
 
 def clip_interval(a, b, p, q, width=15):
@@ -185,7 +222,28 @@ def crop(xy, chain, start, end):
     return result
 
 
-def prepare(raw, request):
+def safe_structure_crop(low,high,start,end,structures,margin):
+    """Retreat automatic existing-track clearance outside whole structures.
+
+    Never extend into occupied track, and never reinterpret a user's explicit
+    cut inside a bridge/tunnel. Additional station-side gaps are reported.
+    """
+    original_start,original_end=start,end
+    for _ in range(len(structures)*2+1):
+        previous=start,end
+        for a,b,_ in structures:
+            if a<start<b:
+                check(original_start>low and not a<low<b,'裁剪端点落在桥梁中，请调整里程范围')
+                start=b+margin
+            if a<end<b:
+                check(original_end<high and not a<high<b,'裁剪端点落在桥梁中，请调整里程范围')
+                end=a-margin
+        check(end-start>=100,'避让既有轨道和完整桥隧后区间不足 100 米')
+        if (start,end)==previous:break
+    return start,end,{'start_extra_m':round(start-original_start,1),'end_extra_m':round(original_end-end,1)}
+
+
+def prepare(raw, request, *, stations=None):
     xy,chain,scale,bridges = route_data(request)
     ids,start,end,nodes = layout(raw)
     low = number(request.get('start_m',0), 0, chain[-1], '起点里程')
@@ -201,6 +259,9 @@ def prepare(raw, request):
         check(raw.count(signature)==1,'存档内置轨道定义不唯一或类型编号不同，不能安全套用模板')
     mode=request.get('structure_mode','auto')
     check(mode in ('auto','ground','bridge','tunnel'), '结构模式无效')
+    player_mode=request.get('player_obstacle_mode','off')
+    check(player_mode in ('off','bridge','tunnel'),'玩家设施避让请选择关闭、向上或向下')
+    check(player_mode=='off' or mode=='auto','玩家设施避让仅用于自动结构；强制结构时请关闭避让')
     # Existing built AND planned tracks, including edges whose endpoints are outside.
     projected = {ident:tuple(v*scale for v in lonlat_to_mercator(n.lon,n.lat)) for ident,n in nodes.items()}
     box=(min(p[0] for p in xy)-20,min(p[1] for p in xy)-20,max(p[0] for p in xy)+20,max(p[1] for p in xy)+20)
@@ -219,17 +280,31 @@ def prepare(raw, request):
                     hits.append((max(low,chain[i]+hit[0]),min(high,chain[i]+hit[1])))
     zone=min(1500,(high-low)*0.25)
     for a,b in hits:
-        check(b<=low+zone or a>=high-zone,
+        check(player_mode!='off' or b<=low+zone or a>=high-zone,
               '区间中部已有轨道或待建蓝图；可能重复铺设或存在交叉。请缩小区间，不会强行覆盖。')
     trim_low=max([low]+[b+margin for a,b in hits if b<=low+zone])
     trim_high=min([high]+[a-margin for a,b in hits if a>=high-zone])
     check(trim_high-trim_low>=100, '避让既有轨道后区间不足 100 米')
-    for a,b,level in bridges:
-        check(not (a<trim_low<b or a<trim_high<b), '裁剪端点落在桥梁中，请调整里程范围')
+    trim_low,trim_high,structure_trim=safe_structure_crop(low,high,trim_low,trim_high,bridges,margin)
     selected=crop(xy,chain,trim_low,trim_high)
     levels=[next((level for a,b,level in bridges if a-0.01<=s<=b+0.01),0) if mode=='auto' else {'ground':0,'bridge':2,'tunnel':1}[mode] for s,p in selected]
+    from toolkit_obstacles import avoid
+    coords=[mercator_to_lonlat(p[0]/scale,p[1]/scale) for s,p in selected]
+    base_levels=list(levels)
+    levels,obstacle_report=avoid(coords,levels,request)
+    player_report=None
+    if player_mode!='off':
+        from toolkit_player_obstacles import avoid as avoid_players
+        levels,player_report=avoid_players(selected,levels,base_levels,nodes,projected,
+            station_catalog(raw) if stations is None else stations,scale,request,xy)
     node_variants=[variants[level] for level in levels]
     warnings=list(WARNINGS)
+    if any(structure_trim.values()):
+        warnings.append(f"接轨预留落在桥隧中，已回退至完整结构外：起点额外预留 {structure_trim['start_extra_m']} 米、终点额外预留 {structure_trim['end_extra_m']} 米。增加的空隙未自动补连，请在游戏内接轨。")
+    if obstacle_report:
+        warnings.append(f"水域道路预避让：{obstacle_report['water_segments']} 段涉及水域，{obstacle_report['road_segments']} 段涉及道路；调整 {obstacle_report['changed_nodes']} 个双轨节点。按整段两端控制点处理，可能比实际冲突范围更长。底图近似不是游戏冲突验收。")
+    if player_report:
+        warnings.append(f"玩家设施预避让：{player_report['track_segments']} 段接近已建/蓝图轨道（其中 {player_report['planned_track_segments']} 段涉及蓝图），{player_report['station_segments']} 段接近车站中心保护圈；调整 {player_report['changed_nodes']} 个双轨节点。已分层路段可保持不变。车站按地面中心 {player_report['station_radius_m']} 米近似，不包含完整站房轮廓；须游戏内检查坡度和净空。原有设施未改动。")
     radii=[]
     for (_,a),(_,b),(_,c) in zip(selected,selected[1:],selected[2:]):
         cross=abs((b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]))
@@ -241,8 +316,11 @@ def prepare(raw, request):
              'start_m':round(trim_low,1),'end_m':round(trim_high,1),'nodes':len(selected)*2,
              'avoided_intervals':len(hits),'planned_existing_nodes':sum(n.state_code==1 for n in nodes.values()),
              'bridge_nodes':sum(level==2 for level in levels)*2,'tunnel_nodes':sum(level==1 for level in levels)*2,'warnings':warnings,
-             'coordinates':[mercator_to_lonlat(p[0]/scale,p[1]/scale) for s,p in selected],
+             'coordinates':coords,
              'levels':levels,'variants':node_variants,'variant':variant,'spacing_m':5}
+    if obstacle_report:preview['obstacle_avoidance']=obstacle_report
+    if player_report:preview['player_obstacle_avoidance']=player_report
+    if any(structure_trim.values()):preview['structure_trim']=structure_trim
     return preview,(ids,start,end,nodes),selected,scale
 
 
@@ -279,7 +357,7 @@ def patch(raw, prepared):
     registry_ids=ids+new_ids
     prefix=uvarint(len(registry_ids))+b''.join(map(ident_bytes,registry_ids))+uvarint(len(registry_ids))
     result=prefix+raw[start:end]+b''.join(output)+raw[end:]
-    found=read_track_nodes(result,include_planned=True)
+    found=_track_nodes(result)
     check(set(found)==set(registry_ids),'写后回读节点不一致')
     for ident,(neighbors,point,level,variant) in expected.items():
         node=found[ident]
@@ -291,7 +369,7 @@ def patch(raw, prepared):
     return result
 
 
-def station_catalog(raw):
+def station_catalog(raw, *, include_offsets=False):
     """Registry-filtered stations, including southern/equatorial coordinates.
 
     The older analytic reader intentionally restricted coordinate magnitudes.
@@ -301,22 +379,24 @@ def station_catalog(raw):
     from toolkit_coordedit import _read_name
     _,_,end,_=layout(raw)
     station_ids,records=registry(raw,end,2)
-    result=[]
-    for ident in station_ids:
-        encoded=ident_bytes(ident);position=records;found=[]
-        while True:
-            position=raw.find(encoded,position)
-            if position<0:break
-            offset=position+len(encoded)+4;position+=len(encoded)
-            if offset+17>len(raw) or raw[offset-1]!=1:continue
-            x,y=struct.unpack_from('<dd',raw,offset)
-            if not all(math.isfinite(v) and abs(v)<20_100_000 for v in (x,y)):continue
-            name=_read_name(raw,offset+16,min_len=1,max_len=512)
-            # A name or the empty-name length byte must follow the coordinates.
-            if not name and raw[offset+16]!=0:continue
-            lon,lat=mercator_to_lonlat(x,y)
-            found.append({'id':hex(ident),'name':name[0] if name else f'未命名站 {hex(ident)}','lon':lon,'lat':lat})
-        if len(found)==1:result.append(found[0])
+    allowed={ident_bytes(ident):ident for ident in station_ids}
+    found={}
+    for match in _STATION_CANDIDATE.finditer(raw,records):
+        position=match.start();ident=allowed.get(raw[position:position+8])
+        if ident is None:continue
+        offset=position+12
+        if offset+17>len(raw):continue
+        x,y=struct.unpack_from('<dd',raw,offset)
+        if not all(math.isfinite(v) and abs(v)<20_100_000 for v in (x,y)):continue
+        name=_read_name(raw,offset+16,min_len=1,max_len=512)
+        # A name or the empty-name length byte must follow the coordinates.
+        if not name and raw[offset+16]!=0:continue
+        lon,lat=mercator_to_lonlat(x,y)
+        row={'id':hex(ident),'name':name[0] if name else f'未命名站 {hex(ident)}','lon':lon,'lat':lat}
+        if include_offsets:row['coord_off']=offset
+        # More than one validated location stays ambiguous, never last-wins.
+        found[ident]=None if ident in found else row
+    result=[row for row in found.values() if row is not None]
     return sorted(result,key=lambda s:(s['name'].casefold(),s['id']))
 
 
@@ -342,7 +422,7 @@ def waypoint_plan(raw, request, stations, progress=None):
     """Stage independent legs in memory; never silently skip failed sections."""
     from toolkit_autoroute import automatic_route, tile_point
     via = request.get('via')
-    check(isinstance(via, list) and len(via) <= 18, '最多添加 18 个途经站（共 20 站）')
+    check(isinstance(via, list) and len(via) <= MAX_WAYPOINTS-2, f'最多添加 {MAX_WAYPOINTS-2} 个途经站（共 {MAX_WAYPOINTS} 站）')
     check(not via or (request.get('start_m', 0) == 0 and request.get('end_m') is None),
           '多站模式按各区间全长生成，不支持起终里程裁剪；请清空里程设置')
     entries = [{'station': request.get('from_station'), 'coord': request.get('from_coord')},
@@ -382,7 +462,7 @@ def waypoint_plan(raw, request, stations, progress=None):
             check(not invalid, '；'.join(f"第 {p['index']+1} 站：{p['validation_error']}" for p in invalid))
             single = {k: v for k, v in request.items() if k not in ('via', 'from_station', 'to_station', 'from_coord', 'to_coord')}
             single.update(from_coord=a['coord'], to_coord=b['coord'])
-            geojson, info = automatic_route(single, stations)
+            geojson, info = automatic_route(single, stations, progress=progress) if progress else automatic_route(single, stations)
             signature = tuple(info.get(k) for k in ('map_path', 'map_size', 'map_mtime_ns'))
             # A changed input invalidates the entire plan, not just one leg.
             # Partial output must never mix routes from different map snapshots.
@@ -390,8 +470,11 @@ def waypoint_plan(raw, request, stations, progress=None):
                 raise RuntimeError('底图在分段读取期间改变，请重新预览全部区间')
             map_signature = signature
             single['geojson'] = geojson
-            prepared = prepare(candidate, single)
+            prepared = prepare(candidate, single, stations=stations)
             detail = dict(prepared[0]); detail['routing'] = info
+            obstacle_info=detail.get('obstacle_avoidance')
+            if obstacle_info and tuple(obstacle_info.get(k) for k in ('map_path','map_size','map_mtime_ns'))!=signature:
+                raise RuntimeError('寻路与障碍检查使用的底图不同或已变化，请重新预览全部区间')
             check(total_nodes + detail['nodes'] <= MAX_POINTS*2, '整条方案超过 8000 个双轨节点，请减少站点、分批生成')
             updated = patch(candidate, prepared)
             candidate = updated
@@ -400,6 +483,8 @@ def waypoint_plan(raw, request, stations, progress=None):
                 detail['warnings'].append('本区间回退到共同铁路类型：'+', '.join(info['rail_types'])+'，请核对路线。')
             if info.get('search_padding_m',0)>8000:
                 detail['warnings'].append(f"本区间已扩大底图搜索至两站外侧 {info['search_padding_m']//1000} 公里，找到绕行路径，请核对预览。")
+            if info.get('search_method')=='railway-frontier':
+                detail['warnings'].append(f"本区间沿铁路分块搜索，实际检查 {info['searched_tiles']} 个地图块；未扫描整个两站矩形。请核对路线。")
             leg.update(status='ok', preview=detail)
         except (ValueError, OSError) as exc:
             leg['error'] = str(exc)
@@ -434,7 +519,7 @@ def discover_stations(request, stations, progress=None):
           '识别沿途站前，请选择存档中的完整起点站和终点站，不使用坐标或未建站')
     check(endpoints[0] != endpoints[1], '起点和终点不能是同一站')
     if progress: progress(0, 1, '沿首尾站寻找铁路路径，再识别存档中的沿途站…')
-    geojson, routing = automatic_route(request, stations)
+    geojson, routing = automatic_route(request, stations, progress=progress) if progress else automatic_route(request, stations)
     xy, chain, scale, _ = route_data({'geojson': geojson})
     radius = 200
     bounds = (min(p[0] for p in xy)-radius, min(p[1] for p in xy)-radius,
@@ -466,12 +551,20 @@ def discover_stations(request, stations, progress=None):
 
 
 def dispatch(request, progress=None):
+    token = _SNAPSHOT_CACHE.set({})
+    try:
+        return _dispatch(request, progress)
+    finally:
+        _SNAPSHOT_CACHE.reset(token)
+
+
+def _dispatch(request, progress=None):
     check(type(request.get('allow_partial', False)) is bool, '跳过失败区间的确认值无效')
     source=Path(request['save']).resolve()
     original=source.read_bytes(); source_hash=digest(original)
     check(not request.get('discovery_source_sha256') or request['discovery_source_sha256'] == source_hash,
           '存档在识别沿途站后改变，请重新自动读取并识别')
-    header,frame,_=split_save(source)
+    header,frame,_=split_save_bytes(original)
     check(digest(source.read_bytes())==source_hash,'读取期间存档改变，请重试')
     require_verified_save(header)
     raw=Zstd().decompress(frame)
@@ -496,7 +589,7 @@ def dispatch(request, progress=None):
         result, batch_raw = waypoint_plan(raw, request, stations, progress)
     elif request.get('preset')=='auto':
         from toolkit_autoroute import automatic_route
-        resolved['geojson'],route_info=automatic_route(request,stations)
+        resolved['geojson'],route_info=automatic_route(request,stations,progress=progress) if progress else automatic_route(request,stations)
     elif request.get('preset')=='file':
         selected=Path(request.get('route_path','')).resolve()
         check(str(selected) in {r['path'] for r in route_files(source.parent)}, '路线文件已移动或不在自动发现的目录中，请重新读取')
@@ -507,10 +600,15 @@ def dispatch(request, progress=None):
         prepared=prepare(raw,resolved)
         result=dict(prepared[0])
         result['routing']=route_info
+        obstacle_info=result.get('obstacle_avoidance')
+        if obstacle_info and request.get('preset')=='auto' and any(obstacle_info.get(k)!=route_info.get(k) for k in ('map_path','map_size','map_mtime_ns')):
+            raise RuntimeError('寻路与障碍检查使用的底图不同或已变化，请重新预览')
     if route_info.get('auto_family_fallback'):
         result['warnings']=result['warnings']+['最近轨道不在同一网络；已回退选择两端均可接入的 '+', '.join(route_info['rail_types'])+'。请核对是否为你要建的线路。']
     if route_info.get('search_padding_m',0)>8000:
         result['warnings']=result['warnings']+[f"已扩大底图搜索至两站外侧 {route_info['search_padding_m']//1000} 公里，找到绕行路径，请核对预览。"]
+    if route_info.get('search_method')=='railway-frontier':
+        result['warnings']=result['warnings']+[f"沿铁路分块搜索，实际检查 {route_info['searched_tiles']} 个地图块；未扫描整个两站矩形。请核对路线。"]
     # Approval is not a geometry setting: it is given after inspecting the
     # fingerprinted success/skip list and is rechecked on every write.
     settings={k:v for k,v in request.items() if k not in ('apply','output','fingerprint','save','allow_partial')}

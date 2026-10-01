@@ -55,7 +55,7 @@ def _try_uvarint(raw: bytes, off: int, max_bytes: int = 10):
     return None
 
 
-def _read_name(raw: bytes, off: int, min_len: int = 2, max_len: int = 80):
+def _read_name(raw: bytes, off: int, min_len: int = 1, max_len: int = 200):
     r = _try_uvarint(raw, off)
     if not r:
         return None
@@ -106,6 +106,12 @@ def read_stations_from_raw(raw: bytes) -> list[StationRecord]:
     keep only id + coords + platform tracks (their display name lives in the mod, not
     the save), so we fall back to a stable id-based label for those.
     """
+    # Prefer the independently verified registry. Legacy read-only formats may
+    # fall back to heuristics, but station-name writes never use that fallback.
+    try:
+        return verified_name_stations(raw)
+    except (ValueError, RuntimeError, IndexError, struct.error):
+        pass
     out: dict[int, StationRecord] = {}
     n = len(raw)
     i = 0
@@ -290,6 +296,8 @@ def set_station_names(
     names: dict[str, str],
     only_unnamed: bool = True,
     level: int = 3,
+    preview: bool = False,
+    expected_fingerprint: str | None = None,
 ) -> dict:
     """Write real station names into a NEW save (JSON-free binary edit).
 
@@ -304,9 +312,16 @@ def set_station_names(
     if output_save.exists():
         raise RuntimeError(f"output already exists: {output_save}")
 
+    import hashlib
+    import json
+    import os
+    source_hash = hashlib.sha256(input_save.read_bytes()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps([source_hash, names, only_unnamed], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if expected_fingerprint and expected_fingerprint != fingerprint:
+        raise RuntimeError('存档或站名来源已变化，请重新预览站名')
     header, frame, frame_offset = split_save(input_save)
     raw = Zstd().decompress(frame)
-    stations = read_stations_from_raw(raw)
+    stations = verified_name_stations(raw)
     by_id = {s.id: s for s in stations}
     by_name: dict[str, list[StationRecord]] = {}
     for s in stations:
@@ -325,7 +340,8 @@ def set_station_names(
             if len(matches) == 1:
                 target = matches[0]
             elif not matches:
-                continue  # id not present in this save; silently skip
+                errors.append(f'存档没有找到这个车站，请核对手动填写的 ID: {key}')
+                continue
             else:
                 errors.append(f"车站名不唯一（{len(matches)} 个同名），请用 id: {key}")
                 continue
@@ -341,7 +357,10 @@ def set_station_names(
         if raw[span_off:span_end] != original:
             errors.append(f"站名槽位回环校验失败: {target.id}")
             continue
-        if only_unnamed and flag == 0x00:
+        if not valid_station_name(new_name):
+            errors.append(f"名称为空、为占位编号或含无效字符: {target.id}")
+            continue
+        if only_unnamed and flag == 0x00 and valid_station_name(target.name):
             skipped.append({"id": target.id, "reason": "already named",
                             "name": target.name})
             continue
@@ -365,12 +384,22 @@ def set_station_names(
 
     if errors:
         raise RuntimeError("站名写入被拒绝：" + "；".join(errors))
-    if not edits:
-        raise RuntimeError("没有可写入的站名（可能都已命名或存档中不存在对应 id）")
+    changed_ids = {c['id'] for c in changes}
+    unresolved = [{'id':s.id,'name':s.name,'reason':'所选导出没有可用名称；请从当前游戏重新导出，或手动填写 ID=站名'}
+                  for s in stations if s.id not in changed_ids and not valid_station_name(s.name)]
+    report = {'input_save':str(input_save),'changed_count':len(changes),'skipped_count':len(skipped),
+              'changes':changes,'skipped':skipped,'unresolved':unresolved,'unresolved_count':len(unresolved),
+              'station_count':len(stations),'fingerprint':fingerprint,'source_sha256':source_hash,'preview':preview}
+    if hashlib.sha256(input_save.read_bytes()).hexdigest()!=source_hash:
+        raise RuntimeError('读取期间存档发生变化，请等待保存完成后重新预览')
+    if preview or not edits:
+        return {**report,'no_changes':not edits}
 
     raw_after = _apply_spans(raw, edits)
     # Re-parse and confirm the intended names now read back from the new stream.
-    reparsed = {s.id: s for s in read_stations_from_raw(raw_after)}
+    reparsed = {s.id: s for s in verified_name_stations(raw_after)}
+    if set(reparsed) != set(by_id):
+        raise RuntimeError('站名写入后车站索引变化，拒绝写入')
     for ch in changes:
         got = reparsed.get(ch["id"])
         if got is None or got.name != ch["new_name"]:
@@ -388,10 +417,17 @@ def set_station_names(
     partial = output_save.with_name(output_save.name + ".partial")
     if partial.exists():
         raise RuntimeError(f"发现残留临时文件: {partial}")
-    partial.write_bytes(output)
-    partial.replace(output_save)
+    if hashlib.sha256(input_save.read_bytes()).hexdigest()!=source_hash:
+        raise RuntimeError('存档在校验期间变化，请重新预览')
+    with partial.open('xb') as stream:
+        stream.write(output)
+    try:
+        os.link(partial, output_save)  # Exclusive publication: never replace a racing output.
+    finally:
+        partial.unlink()
 
     return {
+        **report,
         "input_save": str(input_save),
         "output_save": str(output_save),
         "changed_count": len(changes),
@@ -401,6 +437,7 @@ def set_station_names(
         "output_file_size": len(output),
         "size_delta": len(raw_after) - len(raw),
         "reverse_decompress_verified": True,
+        "output_file_sha256": hashlib.sha256(output).hexdigest(),
     }
 
 
@@ -410,26 +447,62 @@ _STATION_RE = re.compile(
 )
 
 
-def station_names_from_export(export_path: Path) -> dict[str, str]:
-    """Extract ``{station_id_hex: name}`` from a game Timetable Export JSON.
+def valid_station_name(name):
+    if not isinstance(name,str) or not name.strip() or len(name.encode('utf-8'))>_MAX_NAME_BYTES:return False
+    if any(ord(c)<32 for c in name):return False
+    return not re.fullmatch(r'(?:(?:未命名站|车站|Station|Unnamed station)\s*)?(?:0x[0-9a-f]+|\d+)',name.strip(),re.I) and name.strip().casefold() not in {'未命名站','未命名车站','unnamed','unnamed station'}
 
-    Streams the (potentially huge) export line by line; no full JSON parse.
+
+def verified_name_stations(raw):
+    from toolkit_autotrack import station_catalog
+    records=[]
+    for row in station_catalog(raw,include_offsets=True):
+        if row['name']==f"未命名站 {row['id']}":row['name']=f"车站 {row['id']}"
+        records.append(StationRecord(**row))
+    return records
+
+
+def station_names_from_export(export_path: Path, stations=None, diagnostics=None) -> dict[str, str]:
+    """Parse actual JSON, independent of whitespace/key order. No guessed names.
+
+    With a save catalogue, require ID and location agreement (within 250 m),
+    protecting against a different project's reused IDs. Conflicts fail closed.
     """
-    import json as _json
-
-    out: dict[str, str] = {}
-    with open(export_path, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if '"class":"Station"' not in line and '"class" : "Station"' not in line:
-                continue
-            for m in _STATION_RE.finditer(line):
-                sid = m.group(1)
-                try:
-                    name = _json.loads(m.group(2))
-                except ValueError:
+    import json
+    path=Path(export_path)
+    with path.open('rb') as stream:
+        payload=stream.read(256*1024*1024+1)
+    if len(payload)>256*1024*1024:raise ValueError('站名来源超过 256 MB，请使用较小的导出')
+    try:data=json.loads(payload.decode('utf-8-sig'))
+    except (ValueError,UnicodeError) as exc:raise ValueError('时刻表 JSON 未完整写入或格式损坏，请等待导出完成') from exc
+    if not isinstance(data,list) or any(not isinstance(o,dict) for o in data):raise ValueError('需要游戏生成的 Timetable Export JSON 对象列表')
+    out={}; conflicts=set(); known={s.id:s for s in stations} if stations is not None else None
+    reasons=diagnostics if diagnostics is not None else {}
+    if known is not None:reasons.update({sid:'所选导出没有这个车站 ID；请从当前游戏重新导出，或手动补名' for sid in known})
+    for obj in data:
+        if obj.get('class')!='Station':continue
+        sid=obj.get('id');name=obj.get('name')
+        if not isinstance(sid,str) or not re.fullmatch(r'0x[0-9a-fA-F]+',sid):continue
+        sid=hex(int(sid,16))
+        if not valid_station_name(name):
+            reasons[sid]='导出中的名称为空、为占位编号或含无效字符；请手动补名'
+            continue
+        if known is not None:
+            if sid not in known:continue
+            coord=obj.get('lonlat');st=known[sid]
+            try:
+                x,y=lonlat_to_mercator(*coord);a,b=lonlat_to_mercator(st.lon,st.lat)
+                if not all(math.isfinite(v) for v in (x,y)) or math.hypot(x-a,y-b)*math.cos(math.radians(st.lat))>250:
+                    reasons[sid]='导出位置与存档相差超过 250 米，可能来自其他项目或车站已移动；请重新导出'
                     continue
-                if name:
-                    out[sid] = name
+            except (TypeError,ValueError,OverflowError):
+                reasons[sid]='导出缺少有效车站位置，无法核对；请重新导出或手动补名'
+                continue
+        if sid in out and out[sid]!=name:conflicts.add(sid)
+        out[sid]=name
+    for sid in conflicts:
+        out.pop(sid,None);reasons[sid]='同一导出内这个 ID 对应多个名称，请核对后手动填写'
+    for sid in out:reasons.pop(sid,None)
     return out
 
 

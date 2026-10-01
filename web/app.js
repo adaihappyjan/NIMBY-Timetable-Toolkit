@@ -114,7 +114,9 @@ async function loadBootstrap() {
   if (data.startup_cleanup?.error) toast(`启动清理未完成：${data.startup_cleanup.error}`, true);
   else if (data.startup_cleanup?.result?.moved_file_count) toast(`启动清理已将 ${data.startup_cleanup.result.moved_group_count} 组过期副本移入回收站`);
   if (data.settings.auto_check_updates !== false) setTimeout(() => checkToolkitUpdate(false), 900);
-  window.restoreWorkspaceSelection?.();
+  await window.restoreWorkspaceSelection?.();
+  state.bootstrapReady=true;
+  window.startLiveFiles?.(data);
   window.toolkitStartup?.ready();
 }
 
@@ -211,6 +213,7 @@ async function applySaveDir(path) {
     const res = await api('/api/config/save-dir', { method: 'POST', body: JSON.stringify({ path: path.trim() }) });
     setOptions($('#save-select'), res.files.saves); setOptions($('#export-select'), res.files.exports); setCompareOptions(res.files.exports); refreshOutputNames();
     renderSaveDir(res.save_status);
+    window.resetLiveFiles?.(res.files);
     toast(res.save_status.has_saves ? `已切换存档目录，找到 ${res.save_status.save_count} 份存档` : '已切换目录，但该目录暂无存档', !res.save_status.has_saves);
   } catch (e) { toast(e.message, true); }
 }
@@ -1283,6 +1286,7 @@ function renderSaveHealth(r) {
   toast(`存档直读体检完成：${c.routes ?? 0} 线 / ${c.trains ?? 0} 车 · 健康 ${sc}`);
 }
 function onStationNamesDone(result) {
+  if(window.stationNamesResult)return window.stationNamesResult(result);
   const box = $('#stationname-result');
   if (!box) return;
   const changed = result.changed_count || 0;
@@ -1297,9 +1301,9 @@ function onStationNamesDone(result) {
     + `<p class="save-dir-hint">请在游戏中读取该新存档，确认站点显示真实名称而非编号。</p>`;
   toast(`真实站名写入完成：${changed} 个车站`);
 }
-function syncStationNameExport() {
+function syncStationNameExport(followSource=false) {
   const src = $('#export-select'), dst = $('#stationname-export');
-  if (src && dst) dst.innerHTML = src.innerHTML;
+  if (src && dst) { const old=dst.value; dst.innerHTML = src.innerHTML; dst.value = !followSource&&[...dst.options].some(o=>o.value===old)?old:src.value; }
 }
 function onNetworkRead(result) {
   state.network = { lines: result.lines || [], stations: result.stations || {} };
@@ -1652,6 +1656,7 @@ async function startTask(action, payload, context = null) {
   }
   try {
     state.taskAction = action; state.taskContext = context; state.pollFailures = 0; state.pollBusy = false; state.taskActive = true;
+    if(['operating-rules','line-timetable','station-name-write','workspace'].includes(action)||(action==='autotrack'&&payload.operation!=='catalog'))window.holdLiveInputs?.();
     await api('/api/task/start', { method:'POST', body:JSON.stringify({ action, ...payload }) });
     $('#task-dock').hidden = false; $('#task-progress').style.width = '2%'; $('#task-message').textContent = '正在准备任务…';
     const worker = ensureTicker();
@@ -1855,13 +1860,11 @@ document.addEventListener('keydown', e => {
     if (target) { e.preventDefault(); switchView(target); }
   }
 });
-$('#refresh-files').addEventListener('click', async()=>{await refreshFileLists(); toast('文件列表已刷新');});
-$('#select-latest').addEventListener('click',()=>{ $('#save-select').selectedIndex=0; $('#export-select').selectedIndex=0; refreshOutputNames(); toast('已选择列表中最新的文件；不代表两者匹配，也不会替你在游戏内导出'); });
+$('#refresh-files').addEventListener('click', async()=>{if(window.checkLiveFiles)await window.checkLiveFiles();else await refreshFileLists(); toast('文件列表已刷新');});
+$('#select-latest').addEventListener('click',()=>window.followLatestNow?.());
 $('#overview-read')?.addEventListener('click',()=>{ const save=$('#save-select')?.value; if(!save)return toast('请先选择存档',true); startTask('save-overview',{save}); });
 $('#stationname-write')?.addEventListener('click',()=>{
-  const save=$('#save-select')?.value; if(!save) return toast('请先选择存档',true);
-  const exp=$('#stationname-export')?.value; if(!exp) return toast('请先在游戏内导出时刻表数据，刷新文件后将该 JSON 选为站名来源',true);
-  startTask('station-name-write',{ save, export: exp, output: outputPath('Names'), all: $('#stationname-all')?.checked });
+  window.writeStationNames?.();
 });
 $('#timetable-read')?.addEventListener('click', () => { const save = $('#save-select')?.value; if (!save) return toast('请先选择存档', true); startTask('line-timetable', { save }); });
 $('#ops-read')?.addEventListener('click', () => {
@@ -1884,6 +1887,7 @@ $('#save-dir-detect')?.addEventListener('click', async () => {
     setOptions($('#save-select'), res.files.saves); setOptions($('#export-select'), res.files.exports); setCompareOptions(res.files.exports); refreshOutputNames();
     renderSaveDir(res.save_status);
     toast(res.save_status.has_saves ? `已重新检测，找到 ${res.save_status.save_count} 份存档` : '已重新检测，但未找到存档目录', !res.save_status.has_saves);
+    window.resetLiveFiles?.(res.files);
   } catch (e) { toast(e.message, true); }
 });
 $('#scan-button').addEventListener('click',()=>{

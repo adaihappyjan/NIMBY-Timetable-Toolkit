@@ -1906,23 +1906,35 @@ def command_station_names(args: argparse.Namespace) -> dict:
     import toolkit_coordedit as coordedit
 
     names: dict[str, str] = {}
+    name_diagnostics = {}
+    name_source_hash = hashlib.sha256(args.save.read_bytes()).hexdigest()
     if args.export:
         emit_progress("stnname", 10, 100, "正在从导出读取真实站名…")
-        names.update(coordedit.station_names_from_export(args.export))
+        raw = coordedit.Zstd().decompress(coordedit.split_save(args.save)[1])
+        names.update(coordedit.station_names_from_export(args.export, coordedit.verified_name_stations(raw), name_diagnostics))
     for item in args.pair or []:
         if "=" not in item:
             raise RuntimeError(f"名称项格式错误（缺少 =）：{item}")
         key, val = item.split("=", 1)
-        names[key.strip()] = val
-    if not names:
-        raise RuntimeError("没有可用的站名来源（请提供导出 JSON 或 id=名称）")
-    emit_progress("stnname", 45, 100, "正在写入站名并做字节级校验…")
+        key=key.strip()
+        if re.fullmatch(r'0[xX][0-9a-fA-F]+',key):key=hex(int(key,16))
+        names[key] = val.strip()
+    emit_progress("stnname", 45, 100, "正在核对站名槽位…" if getattr(args,'preview',False) else "正在写入站名并做字节级校验…")
+    if hashlib.sha256(args.save.read_bytes()).hexdigest()!=name_source_hash:
+        raise RuntimeError('核对名称期间存档发生变化，请等待保存完成后重试')
     manifest = coordedit.set_station_names(
         args.save, args.output, names,
         only_unnamed=not args.all, level=args.level,
+        preview=getattr(args,'preview',False), expected_fingerprint=getattr(args,'fingerprint',None),
     )
+    for row in manifest.get('unresolved',[]):
+        row['reason']=name_diagnostics.get(row['id'],row['reason'])
+    if manifest.get('output_save'):
+        manifest_path=Path(manifest['output_save']).with_suffix('.manifest.json')
+        atomic_json(manifest_path,manifest)
+        manifest['manifest_path']=str(manifest_path)
     emit_progress("stnname", 100, 100,
-                  f"站名写入完成：{manifest['changed_count']} 个车站")
+                  f"站名{'预览' if manifest['preview'] else '处理'}完成：{manifest['changed_count']} 个车站，仍缺名称 {manifest['unresolved_count']} 个")
     return {"action": "station-name-write", **manifest}
 
 
@@ -3654,6 +3666,8 @@ def build_parser() -> argparse.ArgumentParser:
     station_names.add_argument("--all", action="store_true",
                               help="连已命名车站一起覆盖(默认只补写未命名)")
     station_names.add_argument("--level", type=int, default=3)
+    station_names.add_argument("--preview", action="store_true")
+    station_names.add_argument("--fingerprint")
     timetable_write = sub.add_parser("timetable-write")
     timetable_write.add_argument("--save", type=Path, required=True)
     timetable_write.add_argument("--output", type=Path, required=True)

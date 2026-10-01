@@ -16,7 +16,7 @@ def test_game_export_instructions_are_actionable_and_distinct_from_map_json():
         assert text in html
     for old in ['导出 JSON 深度核对','深度核对（需导出）','从当前导出载入线路']:
         assert old not in html and old not in script
-    assert '不代表两者匹配，也不会替你在游戏内导出' in script
+    assert '不代表两者匹配，也不会替你在游戏内导出' in script+(root/'web/livefiles.js').read_text('utf-8')
 
 
 def station_table(free_slots=(), count=3, objects=None):

@@ -1,17 +1,17 @@
 /* Experimental blueprint UI; computation/writing uses the existing hidden worker. */
 (() => {
   'use strict';
-  viewMeta.autotrack = ['TRACK BLUEPRINT LAB', '自动铺轨 · 实验'];
+  viewMeta.autotrack = ['TRACK BLUEPRINTS', '自动铺轨'];
   let imported = null, preview = null, revision = 0, catalog = null;
   let viaValues=[];
   let discovery=null, discoveredSource=null;
-  const tutorialKey='nimby.autotrack.tutorial.v5';
+  const tutorialKey='nimby.autotrack.tutorial.v6';
   let tutorialSeen=false,tutorialTouched=false;
   const tutorialReady=api('/api/workspace/state',{method:'POST',body:JSON.stringify({key:tutorialKey})}).then(r=>{if(!tutorialTouched)tutorialSeen=r.value?.seen===true;}).catch(()=>{});
   const lessons=[
     ['先选存档，再自动读取','在总览选择刚保存的文件。打开本页会自动读取站名、Steam 底图和本地路线。自动寻路需要 Node.js 22+；缺少时会提示，不会静默安装。'],
-    ['手动添加或识别沿途站','选好存档中的完整首尾站名，可点“识别首尾之间的沿途站”，勾选路径附近的已建站 / 蓝图站并确认替换途经站。不会创建现实车站；平行线须手动核对，最多共 20 站。首尾不设公里数上限，底图范围过大时仍须分批。也可手动添加途经站、输入坐标和调整站序。'],
-    ['地面、桥梁、隧道分别设置','自动模式默认中速地面，并保留底图桥隧标记。三种结构可分别选中速、高速、电车；也可强制全程地面、高架或隧道。速度是类型上限，桥隧层级不是地形高程。'],
+    ['手动添加或识别沿途站','选好存档中的完整首尾站名，可点“识别首尾之间的沿途站”，勾选路径附近的已建站 / 蓝图站并确认替换途经站。不会创建现实车站；平行线须手动核对，最多共 40 站。首尾不设公里数上限，底图范围过大时仍须分批。也可手动添加途经站、输入坐标和调整站序。'],
+    ['结构和预避让分别设置','自动模式保留底图桥隧，可分别选择水域/道路、玩家轨道/车站避让向上或向下。玩家设施包括已建和蓝图；车站另按可调的地面中心保护圈近似，不代表建筑轮廓。只改新蓝图，目标层占用则停止。首尾仍须手动接站；三种结构可分别选速度类型，层级不是地形高程。'],
     ['可只生成通过的区间','检查每段结果。有失败区间时，可勾选“仅生成通过区间”保留其余蓝图，失败段留空、不自动补连；全部失败则不能生成。也可删除相关站点或修改类型后重新预览。蓝图写入新测试存档；游戏内需手动接站、处理缺口和设置信号，不覆盖正式档。']
   ];
   let lesson=0;
@@ -56,7 +56,7 @@
         });row.append(button);
       });return row;
     });
-    $('#at-via-list').replaceChildren(...rows);$('#at-add-via').disabled=viaValues.length>=18;
+    $('#at-via-list').replaceChildren(...rows);$('#at-add-via').disabled=viaValues.length>=38;
   }
   function removeStation(index){
     syncVia();const all=[$('#at-from').value,...viaValues,$('#at-to').value];
@@ -65,7 +65,7 @@
     invalidate();renderVia();updateMode();toast('已删除该站，请重新预览新的相邻区间。');
   }
   $('#at-add-via').addEventListener('click',()=>{
-    syncVia();if(viaValues.length>=18)return;viaValues.push('');invalidate();renderVia();updateMode();
+    syncVia();if(viaValues.length>=38)return;viaValues.push('');invalidate();renderVia();updateMode();
   });
   async function readCatalog(){
     const save=$('#save-select').value;if(!save)return;
@@ -119,6 +119,9 @@
     if(preset==='file')extra.route_path=$('#at-route-path').value;
     return {save, preset, ...extra, ...(discoveredSource?{discovery_source_sha256:discoveredSource}:{}),geojson:preset === 'custom' ? imported : null,
       bridge_variant:Number($('#at-bridge-variant').value||6),tunnel_variant:Number($('#at-tunnel-variant').value||6),structure_mode:$('#at-structure').value||'auto',
+      obstacle_mode:$('#at-structure').value==='auto'?($('#at-obstacles')?.value||'off'):'off',
+      player_obstacle_mode:($('#at-structure').value||'auto')==='auto'?($('#at-player-obstacles').value||'off'):'off',
+      player_station_radius_m:Number($('#at-player-radius').value||60),
       variant:Number($('#at-variant').value), start_m:preset==='auto'&&viaValues.length?0:Number($('#at-start').value),
       end_m:preset==='auto'&&viaValues.length?null:($('#at-end').value === '' ? null : Number($('#at-end').value)), gap_m:Number($('#at-gap').value)};
   }
@@ -137,11 +140,19 @@
     const position=coord=>{const p=project(coord);return [40+(p[0]-minX)*scale,40+(p[1]-minY)*scale];};
     parts.forEach(part=>{
       const positions=part.coordinates.map(position);
+      const repairs=new Map();
+      for(const s of [...(part.obstacle_avoidance?.segments||[]),...(part.player_obstacle_avoidance?.segments||[])]){
+        repairs.set(s.segment,[...new Set([...(repairs.get(s.segment)||[]),...s.reasons])]);
+      }
       positions.slice(1).forEach((p,i)=>{
-      const segment=document.createElementNS(SVG_NS,'line');
-      const level=part.levels[i]===part.levels[i+1]?part.levels[i]:0;
-      for (const [key,value] of Object.entries({x1:positions[i][0],y1:positions[i][1],x2:p[0],y2:p[1],stroke:level===2?'#ffbc66':level===1?'#b59aff':'#53decc','stroke-width':4})) segment.setAttribute(key,value);
-      svg.append(segment);
+      const a=positions[i],mid=[(a[0]+p[0])/2,(a[1]+p[1])/2];
+      const halves=part.levels[i]===part.levels[i+1]?[[a,p,part.levels[i]]]:[[a,mid,part.levels[i]],[mid,p,part.levels[i+1]]];
+      halves.forEach(([start,end,level])=>{
+        const segment=document.createElementNS(SVG_NS,'line');
+        for (const [key,value] of Object.entries({x1:start[0],y1:start[1],x2:end[0],y2:end[1],stroke:level===2?'#ffbc66':level===1?'#b59aff':'#53decc','stroke-width':4}))segment.setAttribute(key,value);
+        if(repairs.has(i)){const title=document.createElementNS(SVG_NS,'title');title.textContent='预避让检查：'+repairs.get(i).map(r=>({water:'水域',road:'道路',player_track:'玩家轨道（含蓝图）',player_station:'车站中心保护圈'}[r]||r)).join('、')+'；已分层可保持不变，尚需游戏验收';segment.append(title);}
+        svg.append(segment);
+      });
       });
     });
     const markers=result.multi_station?stations.map(s=>[s.coord,`${s.index+1} · ${s.label}`,s.status]):
@@ -217,6 +228,8 @@
       `${result.waypoints.length} 站 / ${result.legs.length} 个区间 · 通过 ${result.successful_legs} / 失败 ${result.failed_legs} · 可用区间 ${(result.length_m/1000).toFixed(2)} 公里 · ${result.nodes} 个双轨节点`:
       `${(result.length_m/1000).toFixed(2)} 公里 · ${result.nodes} 个双轨节点 · 桥梁 ${result.bridge_nodes} / 隧道 ${result.tunnel_nodes||0} 节点 · 区间 ${result.start_m}–${result.end_m} 米 · 避让记录 ${result.avoided_intervals}`+(result.routing?.snap_m?` · 两站到底图的吸附距离 ${result.routing.snap_m.join(' / ')} 米 · 读取 ${result.routing.tiles} 瓦片 · 底图类型 ${result.routing.rail_types.join(' / ')}`:'');
     $('#at-warnings').replaceChildren(...result.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
+    const reports=(result.multi_station?result.legs.filter(l=>l.status==='ok').map(l=>l.preview):[result]).map(p=>p.obstacle_avoidance).filter(Boolean);
+    if(reports.length)$('#at-summary').textContent+=` · 水域候选 ${reports.reduce((s,r)=>s+r.water_segments,0)} 段 / 道路候选 ${reports.reduce((s,r)=>s+r.road_segments,0)} 段 · 升降 ${reports.reduce((s,r)=>s+r.changed_nodes,0)} 个节点（非游戏验收）`;
     syncApply(); $('#at-download').disabled = false;
   };
   window.autotrackFailure = message => {
@@ -230,8 +243,8 @@
   function syncDiscovery(){
     if(!discovery)return;
     const count=discovery.rows.filter(r=>r.box.checked).length;
-    $('#at-discovery-summary').textContent=`找到 ${discovery.rows.length} 个候选站，已选 ${count}/18。${discovery.result.warnings.join(' ')}`;
-    $('#at-use-discovery').disabled=!!state.taskActive||count===0||count>18||!$('#at-discovery-replace').checked;
+    $('#at-discovery-summary').textContent=`找到 ${discovery.rows.length} 个候选站，已选 ${count}/38。${discovery.result.warnings.join(' ')}`;
+    $('#at-use-discovery').disabled=!!state.taskActive||count===0||count>38||!$('#at-discovery-replace').checked;
   }
   $('#at-discover').addEventListener('click',async()=>{
     try{
@@ -248,7 +261,7 @@
       if(state.taskActive)throw new Error('请等待当前后台任务完成');
       if(!discovery||discovery.signature!==JSON.stringify(request()))throw new Error('参数改变，请重新识别沿途站');
       const chosen=discovery.rows.filter(r=>r.box.checked);
-      if(!chosen.length||chosen.length>18||!$('#at-discovery-replace').checked)throw new Error('请选择 1–18 个候选站，并确认替换途经站');
+      if(!chosen.length||chosen.length>38||!$('#at-discovery-replace').checked)throw new Error('请选择 1–38 个候选站，并确认替换途经站');
       viaValues=chosen.map(r=>stationLabel(r.station));discoveredSource=discovery.result.source_sha256;
       invalidate();renderVia();updateMode();toast(`已填入 ${viaValues.length} 个途经站，请检查站序并重新预览。`);
     }catch(e){toast(e.message,true);}
@@ -286,6 +299,18 @@
   });
   $('#at-choose-save').addEventListener('click',()=>document.querySelector('[data-view="dashboard"]').click());
   $('#at-refresh').addEventListener('click',readCatalog);
+  $('#at-obstacles')?.addEventListener('change',invalidate);
+  function syncAvoidance(){
+    const forced=($('#at-structure').value||'auto')!=='auto';
+    $('#at-obstacles').disabled=forced;$('#at-player-obstacles').disabled=forced;
+    $('#at-player-radius').disabled=forced||($('#at-player-obstacles').value||'off')==='off';
+  }
+  $('#at-player-obstacles').addEventListener('change',()=>{invalidate();syncAvoidance();});
+  $('#at-player-radius').addEventListener('input',invalidate);
+  $('#at-player-radius').addEventListener('change',invalidate);
+  $('#at-structure').addEventListener('change',()=>{invalidate();syncAvoidance();});
+  syncAvoidance();
+  $('#save-select').addEventListener('change',()=>{catalog=null;discoveredSource=null;});
   document.querySelector('[data-view="autotrack"]').addEventListener('click',async()=>{
     $('#at-save-name').textContent=$('#save-select').value.split(/[\\/]/).pop()||'尚未选择';
     if(!catalog||catalog.save!==$('#save-select').value)readCatalog();

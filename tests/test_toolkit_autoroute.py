@@ -42,6 +42,36 @@ def test_no_join_across_layers():
         route.route_graph([feature([(0,100),(1000,100)],layer=0),feature([(1000,100),(4000,100)],layer=1)],ll(100,100),ll(3900,100))
 
 
+def test_bridge_head_can_meet_exact_ground_turnaround_vertex():
+    ground=feature([(100,100),(2000,100),(100,120)])
+    bridge=feature([(2000,100),(3000,100)],brunnel='bridge',layer=1)
+    data,info=route.route_graph([ground,bridge],ll(200,100),ll(2900,100))
+    assert info['structure_tip_joins']==1
+    at.route_data({'geojson':data})
+
+
+@pytest.mark.parametrize('change',['through','crossing','gap','layer','family','ambiguous'])
+def test_structure_tip_stitch_does_not_invent_crossings(change):
+    ground=feature([(100,100),(2000,100),(100,120)])
+    bridge=feature([(2000,100),(3000,100)],brunnel='bridge',layer=1)
+    if change=='through':ground=feature([(100,100),(2000,100),(4000,100)])
+    if change=='crossing':ground=feature([(2000,-1000),(2000,100),(2000,1200)])
+    if change=='gap':bridge=feature([(2000,100.1),(3000,100.1)],brunnel='bridge',layer=1)
+    if change=='layer':bridge['properties']['layer']=2
+    if change=='family':bridge['properties']['subclass']='tram'
+    features=[ground,bridge]
+    if change=='ambiguous':features.insert(1,feature([(100,80),(2000,100),(100,90)],layer=1))
+    # Direct helper verification avoids coincident projection choosing a nearer
+    # parallel edge and falsely reporting a successful end-to-end route.
+    signature=lambda f:(f['properties']['subclass'],f['properties']['layer'],f['properties']['brunnel'] or '')
+    nodes=[];edges=[]
+    for f in features:
+        offset=len(nodes);pts=f['geometry']['coordinates'][0]
+        nodes.extend([((p['x'],p['y']),signature(f),i in (0,len(pts)-1)) for i,p in enumerate(pts)])
+        edges.extend((offset+i,offset+i+1,f['properties']) for i in range(len(pts)-1))
+    assert route.stitch_structure_tips(nodes,edges)[1]==0
+
+
 def test_bridge_tunnel_and_all_rail_families():
     for family in sorted(route.RAIL_TYPES):
         features=[feature([(0,100),(1000,100)],family),feature([(1000,100),(2000,100)],family,'bridge',1),
@@ -223,15 +253,17 @@ def test_automatic_route_enforces_aggregate_data_limits(tmp_path,monkeypatch,lim
         route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
 
 
-def test_expansion_limit_reports_incomplete_search_not_disconnected(tmp_path,monkeypatch):
+def test_rectangle_limit_switches_to_network_search(tmp_path,monkeypatch):
     mock_local_map(tmp_path,monkeypatch)
     first=route.bounds_for(ll(100,100),ll(3900,100),3000)
     monkeypatch.setattr(route,'MAX_SEARCH_TILES',len(tile_set(first)))
     monkeypatch.setattr(route,'decode',lambda *a,**kw:{'features':[],'tiles':1,'bytesRead':1})
     def disconnected(*args):raise ValueError('没有连续铁路路径')
     monkeypatch.setattr(route,'choose_route',disconnected)
-    with pytest.raises(ValueError,match='尚不能判断铁路是否连通'):
-        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+    calls=[]
+    monkeypatch.setattr(route,'network_route',lambda *args:calls.append(args) or ('sparse',{}))
+    assert route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])==('sparse',{})
+    assert len(calls)==1
 
 
 def test_data_budget_is_shared_by_expansion_batches(tmp_path,monkeypatch):
@@ -270,10 +302,160 @@ def test_map_change_between_batches_rejects_mixed_snapshot(tmp_path,monkeypatch)
         route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
 
 
-def test_unconnected_map_stops_at_final_search_margin(tmp_path,monkeypatch):
+def test_unconnected_rectangle_switches_to_rail_frontier(tmp_path,monkeypatch):
     mock_local_map(tmp_path,monkeypatch)
     monkeypatch.setattr(route,'decode',lambda *a,**kw:{'features':[],'tiles':1,'bytesRead':1})
     def disconnected(*args):raise ValueError('没有连续铁路路径')
     monkeypatch.setattr(route,'choose_route',disconnected)
-    with pytest.raises(ValueError,match='外侧 32 公里'):
-        route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])
+    calls=[]
+    monkeypatch.setattr(route,'network_route',lambda *args:calls.append(args) or ('sparse',{}))
+    assert route.automatic_route({'from_coord':ll(100,100),'to_coord':ll(3900,100)},[])==('sparse',{})
+    assert len(calls)==1
+
+
+def test_small_quantisation_gap_at_adjacent_tile_seam_is_joined():
+    a=feature([(3000,100),(4160,100)])
+    b=feature([(-64,102.5),(1000,102.5)]);b['x']+=1
+    data,info=route.route_graph([a,b],ll(3100,100),ll(5000,102.5))
+    assert info['tile_seam_joins']==1
+    at.route_data({'geojson':data})
+
+
+@pytest.mark.parametrize('change',['layer','structure','angle','gap','same-tile'])
+def test_extra_seam_tolerance_never_bridges_unrelated_railways(change):
+    a=feature([(3000,100),(4160,100)])
+    b=feature([(-64,102.5),(1000,102.5)]);b['x']+=1
+    end=ll(5000,102.5)
+    if change=='layer':b['properties']['layer']=1
+    if change=='structure':b['properties']['brunnel']='bridge'
+    if change=='angle':b=feature([(0,102.5),(1000,2000)]);b['x']+=1;end=ll(5000,1800)
+    if change=='gap':b=feature([(-64,104),(1000,104)]);b['x']+=1;end=ll(5000,104)
+    if change=='same-tile':a=feature([(100,100),(2000,100)]);b=feature([(2000,102.5),(4000,102.5)]);end=ll(3900,102.5)
+    start=ll(200,100) if change=='same-tile' else ll(3100,100)
+    with pytest.raises(ValueError,match='没有连续'):
+        route.route_graph([a,b],start,end)
+
+
+def test_ambiguous_parallel_seam_continuations_are_not_joined():
+    a=feature([(3000,100),(4096,100)])
+    b=feature([(0,102.5),(1000,102.5)]);b['x']+=1
+    c=feature([(0,97.5),(1000,97.5)]);c['x']+=1
+    with pytest.raises(ValueError,match='没有连续'):
+        route.route_graph([a,b,c],ll(3100,100),ll(5000,102.5))
+
+
+def test_shallow_border_crossing_quantisation_is_measured_across_track():
+    # A 5-unit border offset is <1 unit perpendicular to this shallow track.
+    a=feature([(100,3900),(1080,4096)])
+    b=feature([(1085,0),(2085,200)]);b['y']+=1
+    data,info=route.route_graph([a,b],ll(100,3900),ll(2085,4296))
+    assert info['tile_seam_joins']==1
+    at.route_data({'geojson':data})
+
+
+@pytest.mark.parametrize('gap,angle,heading,joined',[
+    (5,10,0,1), (8,5,0,1), (8.01,5,0,0),
+    (5,15,0,0), (5,5,4,0),
+])
+def test_shallow_seam_retains_distance_lateral_and_heading_guards(gap,angle,heading,joined):
+    def tangent(degrees):
+        return (route.math.cos(route.math.radians(degrees)),route.math.sin(route.math.radians(degrees)))
+    signature=('rail',0,'')
+    nodes=[((100,4096),signature,True),((100+gap,4096),signature,True)]
+    t=tangent(angle);u=tangent(angle+heading)
+    seams=[(0,1,1,-1,(0,0),tuple(-v for v in t)),(1,1,1,1,(0,1),u)]
+    assert route.stitch_tile_seams(nodes,[],seams)[1]==joined
+
+
+def test_single_family_disconnect_does_not_rebuild_identical_graph(monkeypatch):
+    calls=[]
+    def disconnected(*args):
+        calls.append(args)
+        raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'route_graph',disconnected)
+    with pytest.raises(ValueError,match='没有连续'):
+        route.choose_route([feature([(0,0),(100,100)])],ll(0,0),ll(100,100))
+    assert len(calls)==1
+
+
+@pytest.mark.parametrize('budget_end',[False,True])
+@pytest.mark.parametrize('batches',[4,7])
+def test_graph_backoff_checks_last_batch_even_below_threshold(tmp_path,monkeypatch,budget_end,batches):
+    path=mock_local_map(tmp_path,monkeypatch)
+    calls=[];attempts=[]
+    monkeypatch.setattr(route,'MAX_NETWORK_TILES',256*batches if budget_end else 16384)
+    def decode(request,**kwargs):
+        used={tuple(p) for p in request['visited']}
+        cells=list(request['tiles'])
+        for x in range(10000):
+            p=[x,0]
+            if tuple(p) not in used and p not in cells:cells.append(p)
+            if len(cells)>=256:break
+        cells=cells[:256];calls.append(cells)
+        return {'features':[],'tiles':len(cells),'bytesRead':1,'inspected':cells,
+                'frontier':[[12000+len(calls),0]] if len(calls)<batches or budget_end else []}
+    def choose(*args):
+        attempts.append(len(calls))
+        if len(calls)<batches:raise ValueError('没有连续铁路路径')
+        return {},{}
+    monkeypatch.setattr(route,'decode_request',decode)
+    monkeypatch.setattr(route,'choose_route',choose)
+    _,info=route.network_route(path,[ll(100,100),ll(3000,100)])
+    assert attempts==([1,2,3,4] if batches==4 else [1,2,3,5,7])
+    assert info['graph_attempts']==len(attempts)
+
+
+def test_collinear_compaction_preserves_bends_structures_and_edge_length():
+    coords=[ll(x,100) for x in range(0,4001,100)]+[ll(4000,1000)]
+    structure={'geometry':{'coordinates':[coords[3],coords[5]]}}
+    result=route.compact_alignment(coords,[structure],40075016.686/route.N)
+    assert result[0]==coords[0] and result[-1]==coords[-1]
+    assert coords[3] in result and coords[5] in result and coords[-2] in result
+    assert len(result)<10
+    assert all(route.math.dist(route.tile_point(a),route.tile_point(b))*40075016.686/route.N<=1500.001 for a,b in zip(result,result[1:]))
+
+
+def test_large_rectangle_routes_with_small_actual_tile_budget(tmp_path,monkeypatch):
+    mock_local_map(tmp_path,monkeypatch)
+    start,end=[-79.335,44.748],[-81.724,47.676]
+    assert len(tile_set(route.bounds_for(start,end,3000)))>20000
+    calls=[];progress=[]
+    def decode(request,**kw):
+        assert request['follow'] is True and request['railType']=='auto'
+        assert request['limit']<=256 and 0<kw['timeout']<=90
+        calls.append(request)
+        return {'features':[],'tiles':len(request['tiles']),'bytesRead':100,'inspected':request['tiles'],'frontier':[]}
+    monkeypatch.setattr(route,'decode_request',decode)
+    monkeypatch.setattr(route,'choose_route',lambda *args:({'type':'FeatureCollection'},{}))
+    _,info=route.automatic_route({'from_coord':start,'to_coord':end},[],progress=lambda *args:progress.append(args))
+    assert len(calls)==1 and info['search_method']=='railway-frontier'
+    assert info['searched_tiles']<20 and progress
+
+
+def test_network_exhaustion_does_not_fabricate_a_route(tmp_path,monkeypatch):
+    path=mock_local_map(tmp_path,monkeypatch)
+    monkeypatch.setattr(route,'decode_request',lambda request,**kw:{'features':[],'tiles':len(request['tiles']),
+        'bytesRead':1,'inspected':request['tiles'],'frontier':[]})
+    def disconnected(*args):raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'choose_route',disconnected)
+    with pytest.raises(ValueError,match='不会画直线补连'):
+        route.network_route(path,[ll(100,100),ll(3000,100)])
+
+
+@pytest.mark.parametrize('failure',['tile-budget','bytes','map-change','duplicate','timeout'])
+def test_network_search_guards(tmp_path,monkeypatch,failure):
+    path=mock_local_map(tmp_path,monkeypatch);clock=[0];calls=[]
+    monkeypatch.setattr(route.time,'monotonic',lambda:clock[0])
+    if failure=='tile-budget':monkeypatch.setattr(route,'MAX_NETWORK_TILES',1)
+    if failure=='bytes':monkeypatch.setattr(route,'MAX_SEARCH_BYTES',0)
+    def decode(request,**kw):
+        calls.append(request)
+        if failure=='map-change':path.write_bytes(b'changed')
+        if failure=='timeout':clock[0]=241
+        return {'features':[],'tiles':1,'bytesRead':1,
+                'inspected':[] if failure=='duplicate' else request['tiles'][:request['limit']], 'frontier':[[1,1]]}
+    monkeypatch.setattr(route,'decode_request',decode)
+    def disconnected(*args):raise ValueError('没有连续铁路路径')
+    monkeypatch.setattr(route,'choose_route',disconnected)
+    expected={'tile-budget':'实际地图块处理上限','bytes':'累计底图数据过大','map-change':'底图在读取期间改变','duplicate':'未推进或重复','timeout':'240 秒'}[failure]
+    with pytest.raises(ValueError,match=expected):route.network_route(path,[ll(100,100),ll(3000,100)])

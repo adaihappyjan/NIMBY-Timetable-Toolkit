@@ -15,6 +15,7 @@ const server=http.createServer(async(req,res)=>{
     let body='';for await(const part of req)body+=part;const payload=body?JSON.parse(body):{};
     let result={ok:true,value:{},accounting:[],packages:[],tasks:[]};
     if(url.pathname==='/api/bootstrap')result=bootstrap;
+    if(url.pathname==='/api/files')result={ok:true,files:bootstrap.files};
     if(url.pathname==='/api/cleanup/preview'){
       const targets=[{name:'旧时刻表.json',path:'QA-old-timetable.json',kind:'timetable-json',bytes:100,reason:'旧游戏导出，需确认'},
         {name:'旧线路图.json',path:'QA-old-map.json',kind:'map-json',bytes:200,reason:'旧地图，需确认'}]
@@ -369,6 +370,24 @@ const server=http.createServer(async(req,res)=>{
     assert.equal(await page.locator('#at-via-1').inputValue(),'沿线站 — planned');
     await page.click('#at-preview');
     assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.discovery_source_sha256),'qa-snapshot');
+    // Facility avoidance controls and worker payload (no live files or game UI).
+    assert.ok(await page.locator('#at-player-radius').isDisabled());
+    await page.selectOption('#at-player-obstacles','tunnel');
+    assert.ok(await page.locator('#at-player-radius').isEnabled());
+    await page.fill('#at-player-radius','85');
+    await page.click('#at-preview');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.player_obstacle_mode),'tunnel');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.player_station_radius_m),85);
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.obstacle_mode),'bridge');
+    await page.locator('#at-player-obstacles').evaluate(e=>e.closest('article').setAttribute('data-qa-avoidance','true'));
+    await page.locator('[data-qa-avoidance]').screenshot({path:path.join(output,'player-avoidance.png')});
+    await page.selectOption('#at-structure','ground');
+    assert.ok(await page.locator('#at-player-obstacles').isDisabled());
+    assert.ok(await page.locator('#at-player-radius').isDisabled());
+    await page.click('#at-preview');
+    assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.player_obstacle_mode),'off');
+    await page.selectOption('#at-structure','auto');
+    assert.ok(await page.locator('#at-player-radius').isEnabled());
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({page_errors:errors,exports:exportsSeen,screenshots:output,tutorial_lessons:9},null,2));
   }finally{await browser.close();server.close();}

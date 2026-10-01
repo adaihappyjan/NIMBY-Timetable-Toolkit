@@ -656,12 +656,14 @@ def read_track_geometry(
     region_start: int = 0,
     include_planned: bool = False,
     _node_sink: dict | None = None,
-) -> TrackGeometry:
+    _nodes_only: bool = False,
+) -> TrackGeometry | None:
     """Read the complete, JSON-free track graph from a decompressed save.
 
     Defaults to state-0 tracks for compatibility with existing analysis views.
     ``include_planned=True`` also reads state-1 blueprints, essential for
-    construction conflict checks. ``_node_sink`` is an internal reader adapter.
+    construction conflict checks. ``_node_sink`` is an internal reader adapter;
+    its ``_nodes_only`` path skips unused geometry summaries, not record checks.
 
     A persisted drawn-track node has the observed shape::
 
@@ -692,16 +694,15 @@ def read_track_geometry(
     i = start
     while i < end:
         # Fast pre-filter: a track id is an 8-byte varint whose 8th byte == 0x1.
-        if i + 7 >= end:
+        # Search candidate bytes in C rather than stepping through every byte
+        # in Python. Preserve overlaps and the caller's exact byte bounds.
+        marker = raw.find(b'\x01', i + 7, end)
+        if marker < 0:
             break
-        if raw[i + 7] != TYPE_TRACK:
-            i += 1
-            continue
-        r = _is_id(raw, i, {TYPE_TRACK})
-        if not r or r[1] - i < 7:
-            i += 1
-            continue
-        e = r[1]
+        i = marker - 7
+        # Type-1 IDs require exactly eight varint bytes (value >> 49 == 1).
+        # Reject non-record suffixes before the more expensive varint decode.
+        e = i + 8
         if e + 4 > end:
             break
         # The third byte is a real structural/elevation layer, not padding.
@@ -711,6 +712,11 @@ def read_track_geometry(
             and raw[e + 2] <= 31
             and raw[e + 3] in (1, 255)
         ):
+            i += 1
+            continue
+
+        r = _is_id(raw, i, {TYPE_TRACK})
+        if not r or r[1] != e:
             i += 1
             continue
 
@@ -773,6 +779,10 @@ def read_track_geometry(
 
     if _node_sink is not None:
         _node_sink.update(nodes_by_id)
+    if _nodes_only:
+        # The node adapter needs full validated records, not cartographic
+        # segment lists or haversine summary statistics it would discard.
+        return None
     level_counts: dict[int, int] = {}
     variant_counts: dict[int, int] = {}
     for node in nodes_by_id.values():
@@ -834,7 +844,7 @@ def read_track_geometry(
 def read_track_nodes(raw: bytes, *, include_planned: bool = False) -> dict[int, _TrackNode]:
     """Read nodes with record offsets; explicitly opt in to state-1 blueprints."""
     nodes: dict[int, _TrackNode] = {}
-    read_track_geometry(raw, include_planned=include_planned, _node_sink=nodes)
+    read_track_geometry(raw, include_planned=include_planned, _node_sink=nodes, _nodes_only=True)
     return nodes
 
 

@@ -1,5 +1,20 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../web/autotrack.js'),'utf8');
+test('player avoidance choice reaches backend, invalidates preview and disables in forced mode',async()=>{
+  const h=harness();h.$('#at-structure').value='auto';h.$('#at-player-obstacles').value='tunnel';
+  h.$('#at-player-obstacles').events.change();assert.equal(h.$('#at-player-radius').disabled,false);
+  h.$('#at-player-radius').value='85';await h.$('#at-preview').click();
+  assert.equal(h.calls[0].payload.player_obstacle_mode,'tunnel');assert.equal(h.calls[0].payload.player_station_radius_m,85);
+  await h.context.window.autotrackResult(h.result,h.calls[0].ctx);
+  h.$('#at-player-radius').value='100';h.$('#at-player-radius').events.input();
+  assert.equal(h.$('#at-download').disabled,true);
+  await h.$('#at-preview').click();h.$('#at-player-obstacles').value='bridge';
+  await h.context.window.autotrackResult(h.result,h.calls[1].ctx);
+  assert.equal(h.$('#at-download').disabled,true);
+  h.$('#at-structure').value='ground';h.$('#at-structure').events.change();
+  assert.equal(h.$('#at-player-obstacles').disabled,true);assert.equal(h.$('#at-player-radius').disabled,true);
+  await h.$('#at-preview').click();assert.equal(h.calls[2].payload.player_obstacle_mode,'off');
+});
 function harness(){
   const nodes=new Map(),calls=[];
   function element(){return {value:'',checked:false,disabled:false,textContent:'',files:[],events:{},children:[],
@@ -159,10 +174,20 @@ test('discovery results and chosen candidates cannot survive stale parameters',a
 
 test('discovery rejects coordinates, too many selected stations and empty selection',async()=>{
   const coord=await autoHarness();await coord.$('#at-discover').click();assert.equal(coord.calls.length,0);
-  const h=await discoveryHarness(19);await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
+  const h=await discoveryHarness(39);await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
   h.$('#at-discovery-replace').checked=true;h.$('#at-discovery-replace').events.change();
   assert.equal(h.$('#at-use-discovery').disabled,true);
   for(const row of h.$('#at-discovery-list').children){row.children[0].checked=true;row.children[0].events.change();}
   assert.equal(h.$('#at-use-discovery').disabled,true);
   await h.$('#at-use-discovery').click();assert.equal(h.$('#at-via-list').children.length,0);
+});
+
+test('nineteen intermediate stations can be selected for a twenty-one station plan',async()=>{
+  const h=await discoveryHarness(19);await h.context.window.autotrackResult(h.discoveryResult,h.calls[0].ctx);
+  for(const row of h.$('#at-discovery-list').children){row.children[0].checked=true;row.children[0].events.change();}
+  h.$('#at-discovery-replace').checked=true;h.$('#at-discovery-replace').events.change();
+  assert.equal(h.$('#at-use-discovery').disabled,false);
+  await h.$('#at-use-discovery').click();
+  assert.equal(h.$('#at-via-list').children.length,19);
+  await h.$('#at-preview').click();assert.equal(h.calls[1].payload.via.length,19);
 });

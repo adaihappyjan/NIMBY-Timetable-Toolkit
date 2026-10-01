@@ -83,11 +83,13 @@ _DOWNLOADS = Path.home() / "Downloads"
 EXPORT_DIR = (_DOWNLOADS if _DOWNLOADS.is_dir() else Path.home()) / "NIMBY 线路图导出"
 
 sys.path.insert(0, str(ROOT))
-from toolkit_cleanup import cleanup_preview, execute_cleanup, set_copy_protection  # noqa: E402
+from toolkit_cleanup import cleanup_preview, execute_cleanup, set_copy_protection, TOOL_COPY_RE  # noqa: E402
 from toolkit_scriptgen import build_mod_zip, validate_script_source  # noqa: E402
 from toolkit_modcatalog import get_vehicle_mod, scan_vehicle_mods  # noqa: E402
 from toolkit_vehiclegen import build_vehicle_mod_zip  # noqa: E402
 from toolkit_workspace import project_state, atomic_store, parse_log
+from toolkit_livefiles import StableFiles
+LIVE_FILES = StableFiles()
 from toolkit_tilecache import control as tilecache_control, read_config as tilecache_config
 from toolkit_tilewatch import configure as tilewatch_configure, status as tilewatch_status
 from toolkit_updater import (  # noqa: E402
@@ -111,6 +113,7 @@ def read_settings() -> dict:
         "save_dir": "",
         "auto_check_updates": True,
         "map_export_dir": "",
+        "follow_latest": True,
     }
     try:
         stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
@@ -123,6 +126,7 @@ def read_settings() -> dict:
         "workers": stored.get("workers", stored.get("Workers")),
         "save_dir": stored.get("save_dir", stored.get("SaveDir")),
         "map_export_dir": stored.get("map_export_dir"),
+        "follow_latest": stored.get("follow_latest"),
         "auto_check_updates": stored.get(
             "auto_check_updates", stored.get("AutoCheckUpdates")
         ),
@@ -141,7 +145,7 @@ def read_settings() -> dict:
 
 def write_settings(settings: dict) -> dict:
     current = read_settings()
-    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates", "map_export_dir"):
+    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates", "map_export_dir", "follow_latest"):
         if key in settings:
             current[key] = settings[key]
     current["enabled"] = bool(current["enabled"])
@@ -330,9 +334,8 @@ def file_info(path: Path) -> dict:
         "path": str(path),
         "size": stat.st_size,
         "modified_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-        "tool_generated": any(
-            marker in path.name for marker in ("_Toolkit_", "_Extension_", "_Recovery_", "_Repair_", "_Workspace_", "_Autotrack_")
-        ),
+        "modified_ns": str(stat.st_mtime_ns),
+        "tool_generated": bool(TOOL_COPY_RE.search(path.name)),
     }
 
 
@@ -341,16 +344,15 @@ def recent_files() -> dict:
         # Don't create an empty folder in the wrong place on other machines;
         # the UI will prompt the user to pick the real save directory.
         return {"saves": [], "exports": []}
-    saves = sorted(SAVE_DIR.glob("*.nimbyrails5"), key=lambda path: path.stat().st_mtime, reverse=True)
-    exports = sorted(
-        SAVE_DIR.glob("*Timetable Export*.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    return {
-        "saves": [file_info(path) for path in saves[:40]],
-        "exports": [file_info(path) for path in exports[:40]],
-    }
+    result={}
+    for group,pattern in [('saves','*.nimbyrails5'),('exports','*Timetable Export*.json')]:
+        rows=[]
+        for path in SAVE_DIR.glob(pattern):
+            try:
+                if path.is_file() and not path.is_symlink():rows.append(file_info(path))
+            except OSError:continue  # Game may rotate autosaves while enumerating.
+        result[group]=sorted(rows,key=lambda r:int(r['modified_ns']),reverse=True)[:200]
+    return result
 
 
 def _safe_export_name(value: str, default: str, suffix: str) -> str:
@@ -491,7 +493,7 @@ class TaskManager:
 
     def _build_args(self, action: str, payload: dict) -> list[str]:
         if action == 'autotrack':
-            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'via', 'map_path', 'route_path', 'rail_type', 'allow_partial', 'discovery_source_sha256') if k in payload}
+            request = {k: payload[k] for k in ('operation', 'preset', 'geojson', 'variant', 'bridge_variant', 'tunnel_variant', 'structure_mode', 'obstacle_mode', 'player_obstacle_mode', 'player_station_radius_m', 'start_m', 'end_m', 'gap_m', 'fingerprint', 'from_station', 'to_station', 'from_coord', 'to_coord', 'via', 'map_path', 'route_path', 'rail_type', 'allow_partial', 'discovery_source_sha256') if k in payload}
             request['save'] = str(validate_input_path(payload.get('save', ''), '.nimbyrails5'))
             request['apply'] = payload.get('apply') is True
             if request['apply']:
@@ -826,6 +828,12 @@ class TaskManager:
             save = validate_input_path(payload.get("save", ""), ".nimbyrails5")
             output = validate_output_path(payload.get("output", ""))
             args = ["station-name-write", "--save", str(save), "--output", str(output)]
+            if payload.get('preview'):
+                args.append('--preview')
+            elif not re.fullmatch(r'[0-9a-f]{64}',str(payload.get('fingerprint',''))):
+                raise RuntimeError('请先预览站名，再确认写入新副本')
+            if payload.get('fingerprint'):
+                args += ['--fingerprint',str(payload['fingerprint'])]
             export_value = str(payload.get("export", "")).strip()
             if export_value:
                 export = validate_input_path(export_value, ".json")
@@ -1100,19 +1108,26 @@ UPDATE_LOCK = threading.Lock()
 
 
 CAPABILITIES = [
-    {"rank": "轨道", "name": "多站自动铺轨（实验功能）", "status": "available", "detail": "按多个站点分段寻路、预览失败区间；只写新副本，需游戏内接轨与验收"},
+    {"rank": "铺轨", "name": "多站自动铺轨与沿途站识别", "status": "available", "detail": "选择首尾，识别沿线已建/蓝图站；最多 40 站逐段预览，可确认仅生成通过区间。只写新副本，不自动接站或配置信号"},
+    {"rank": "寻路", "name": "长距离铁路分块寻路", "status": "available", "detail": "沿游戏本地铁路底图分块探索，修复接缝和明确桥头汇合；最多处理 16384 个实际地图块，保留时间与节点预算，不用直线补断路"},
+    {"rank": "避让", "name": "水域、道路与玩家设施预避让", "status": "available", "detail": "分别选择向上 +1、向下 -1 或关闭，包含已建/蓝图轨道、站台及可调车站中心保护圈；只调新蓝图，仍须游戏内验收坡度和净空"},
+    {"rank": "站名", "name": "车站名称预览与补全", "status": "available", "detail": "从匹配的游戏时刻表导出读取名称，或按 ID 手动填写；列出缺名原因、保留自定义名，确认后只写新副本，不凭空猜名"},
+    {"rank": "文件", "name": "自动跟进新存档与时刻表", "status": "available", "detail": "每 5 秒检查同项目稳定文件，识别同名覆盖；有任务或未完成编辑时提示确认，不自动切换工具副本，也不代替游戏内保存/导出"},
     {"rank": 1, "name": "时刻表检查与副本修复", "status": "available", "detail": "存档匹配、缺日、循环、车队与相位诊断"},
     {"rank": 2, "name": "智能迁移与车库接班", "status": "available", "detail": "按唯一 ID 迁移车队并批量绑定扩展"},
     {"rank": 3, "name": "时刻表编排器", "status": "available", "detail": "计算高峰/平峰间隔、发车偏移、跨午夜班次和理论车数"},
     {"rank": 4, "name": "NimbyScript 规则生成器", "status": "available", "detail": "生成车库接班、到站等待和信号限速 private mod"},
     {"rank": 5, "name": "运营分析与运营报告", "status": "available", "detail": "服务时段、班距均匀度、覆盖天数、车队规模 KPI，导出 CSV/JSON"},
     {"rank": 6, "name": "车辆工坊与模组体检", "status": "available", "detail": "生成车辆单元与编组文件，读取已有车型参数；需游戏启用和购车测试"},
-    {"rank": 7, "name": "一键线路图", "status": "available", "detail": "地理、八向、地铁线网及条形图；共线分色、换乘站，支持 SVG / JSON 和独立导出文件夹"},
+    {"rank": 7, "name": "一键线路图", "status": "available", "detail": "地理、八向、地铁线网、网格及条形图；同线支线共线合并、可选换乘图标、线路搜索排序，支持 SVG / JSON 和独立导出文件夹"},
     {"rank": 8, "name": "现实路网参考图", "status": "available", "detail": "叠加 OpenRailwayMap 与游戏路网，规划针本地存储、导出 GeoJSON/CSV"},
     {"rank": 9, "name": "路网导出对比", "status": "available", "detail": "只对比两份游戏时刻表导出的线路、车站、站序与坐标，不是二进制存档差分"},
     {"rank": 10, "name": "规则包批量绑定", "status": "available", "detail": "规则包、源码静态检查、距离限定信号限速；固定脚本 ID 与存档定义双重核验后才允许车库接班写入"},
     {"rank": 11, "name": "现实路网导入向导", "status": "available", "detail": "从 OSM 拉取真实线路与站序，生成复刻对照清单并导出 JSON/CSV，一键把站点加入规划针"},
     {"rank": 12, "name": "程序更新", "status": "available", "detail": "启动自动检查 GitHub Release，软件内下载、SHA-256/逐文件校验、失败尝试恢复；恢复不完整时停止自动重启并保留备份"},
+    {"rank": "缓存", "name": "ORM 本地瓦片缓存", "status": "available", "detail": "缓存实际浏览过的铁路地图，可设置随游戏启动；不预下载整个地区，不修改存档"},
+    {"rank": "清理", "name": "副本与旧导出清理", "status": "available", "detail": "核对清单和哈希后清理工具副本；旧时刻表/地图 JSON 需手动勾选，保护当前文件和玩家续存副本，提供恢复入口"},
+    {"rank": "运行", "name": "免安装与后台处理", "status": "available", "detail": "完整 EXE 包内置 Python/Node.js；耗时任务后台运行，直读复用同次快照并保留写后回读，无需安装运行库，不弹终端"},
 ]
 
 
@@ -1158,6 +1173,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path
         try:
+            if route == '/api/files':
+                self.send_json({'ok':True,'save_dir':str(SAVE_DIR),'files':LIVE_FILES.observe(recent_files())})
+                return
             if route == '/api/tilecache/status':
                 result = tilecache_control(SETTINGS_DIR)
                 result['game_start'] = tilewatch_status(SETTINGS_DIR)
