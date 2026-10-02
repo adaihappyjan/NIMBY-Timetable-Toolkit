@@ -1825,7 +1825,7 @@ $('#main-nav').addEventListener('click', e => { const b=e.target.closest('[data-
 /* ---- Command palette (Ctrl/Cmd+K) + keyboard view switching ---- */
 const CMDK = { open:false, items:[], filtered:[], cursor:0 };
 function cmdkBuild() {
-  const iconOf = {}; $$('.nav-item').forEach(b => { iconOf[b.dataset.view] = (b.querySelector('span')?.textContent || '›'); });
+  const iconOf = {}; $$('.nav-item').forEach(b => { iconOf[b.dataset.view] = (b.querySelector('span')?.innerHTML || '›'); });
   CMDK.items = Object.keys(viewMeta).map((k, i) => ({ view:k, icon:iconOf[k]||'›', title:viewMeta[k][1], sub:viewMeta[k][0], idx:i+1 }));
 }
 function cmdkRender() {

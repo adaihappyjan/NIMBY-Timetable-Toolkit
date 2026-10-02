@@ -388,6 +388,25 @@ const server=http.createServer(async(req,res)=>{
     assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.player_obstacle_mode),'off');
     await page.selectOption('#at-structure','auto');
     assert.ok(await page.locator('#at-player-radius').isEnabled());
+    // Stable 1.8.7 theme: navigation SVGs, command search and beta notice.
+    await page.evaluate(()=>{switchView('dashboard');document.querySelector('#toast').hidden=true;});
+    assert.equal(await page.locator('#main-nav .nav-item svg').count(),17);
+    for(const width of [1500,1000,720]){
+      await page.setViewportSize({width,height:1100});
+      const icon=await page.locator('#main-nav [data-view="dashboard"] svg').boundingBox();
+      assert.ok(icon&&icon.width>=16&&icon.height>=16,`navigation icon at ${width}px`);
+      await page.evaluate(()=>window.scrollTo(0,0));
+      await page.screenshot({path:path.join(output,`theme-dashboard-${width}.png`),animations:'disabled'});
+    }
+    await page.setViewportSize({width:1500,height:1100});
+    await page.keyboard.press('Control+k');
+    await page.fill('#cmdk-input','功能一览');
+    assert.equal(await page.locator('#cmdk-list .cmdk-item svg').count(),1);
+    await page.keyboard.press('Enter');
+    assert.ok(await page.locator('#release-preview').isVisible());
+    assert.match(await page.locator('#release-preview').innerText(),/2\.0\.0 beta 3D 版本即将释出/);
+    assert.match(await page.locator('#release-preview').innerText(),/不会下载安装任何 3D 内容/);
+    await page.screenshot({path:path.join(output,'theme-release-preview.png'),animations:'disabled'});
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({page_errors:errors,exports:exportsSeen,screenshots:output,tutorial_lessons:9},null,2));
   }finally{await browser.close();server.close();}

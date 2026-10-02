@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/studio.css">
   <link rel="stylesheet" href="/autotrack.css">
   <link rel="stylesheet" href="/usability.css">
+  <link rel="stylesheet" href="/theme.css">
 </head>
 <body>
   <section id="startup-error" role="alert" hidden style="position:fixed;top:12px;left:260px;right:20px;z-index:10000;padding:16px;border:1px solid #efab64;border-radius:12px;background:#291f19;color:#fff;box-shadow:0 4px 20px #0008">
@@ -25,23 +26,28 @@
         <div><strong>NIMBY</strong><small>运营工作台</small></div>
       </div>
       <nav id="main-nav" aria-label="主要功能">
-        <button class="nav-item active" data-view="dashboard"><span>⌂</span>总览与体检</button>
-        <button class="nav-item" data-view="workspace" title="读取存档，按线路批量配置、诊断和验收"><span>▦</span>线路工作台</button>
-        <button class="nav-item" data-view="learn"><span>?</span>教程中心</button>
-        <button class="nav-item" data-view="analytics"><span>◉</span>运营分析</button>
-        <button class="nav-item" data-view="map"><span>⛓</span>线路图</button>
-        <button class="nav-item" data-view="realnet"><span>◍</span>现实路网</button>
-        <button class="nav-item" data-view="autotrack"><span>⇢</span>自动铺轨</button>
-        <button class="nav-item" data-view="tilecache"><span>▧</span>ORM 地图缓存</button>
-        <button class="nav-item" data-view="timetable" title="计算理论方案，或精细编辑停站与运营指令"><span>◫</span>时刻表配置</button>
-        <button class="nav-item" data-view="extensions"><span>⇆</span>车库接班</button>
-        <button class="nav-item" data-view="binder" title="生成规则包及对象绑定清单；部分规则仍需游戏内勾选"><span>⧉</span>批量绑定</button>
-        <button class="nav-item" data-view="vehicle"><span>▤</span>车辆工坊</button>
-        <button class="nav-item" data-view="scripts" title="生成游戏扩展脚本，不会自动在游戏内启用"><span>{ }</span>脚本规则</button>
-        <button class="nav-item" data-view="history"><span>◔</span>历史数据对比</button>
-        <button class="nav-item" data-view="cleanup"><span>♲</span>副本清理</button>
-        <button class="nav-item" data-view="roadmap"><span>⌁</span>功能一览</button>
-        <button class="nav-item" data-view="author"><span>♡</span>关于作者</button>
+        <div class="nav-group">开始</div>
+        <button class="nav-item active" data-view="dashboard" title="总览与体检"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg></span>总览与体检</button>
+        <button class="nav-item" data-view="workspace" title="读取存档，按线路批量配置、诊断和验收"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>线路工作台</button>
+        <button class="nav-item" data-view="learn" title="教程中心"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.5c-2-1.3-4.5-2-8-2v13c3.5 0 6 .7 8 2 2-1.3 4.5-2 8-2v-13c-3.5 0-6 .7-8 2z"/><path d="M12 6.5v13"/></svg></span>教程中心</button>
+        <div class="nav-group">分析与地图</div>
+        <button class="nav-item" data-view="analytics" title="运营分析"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18"/><path d="M7 17v-6"/><path d="M12 17V6"/><path d="M17 17v-9"/></svg></span>运营分析</button>
+        <button class="nav-item" data-view="map" title="线路图"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="18" r="2.2"/><circle cx="18.5" cy="5" r="2.2"/><path d="M7.7 18H15a3.5 3.5 0 0 0 0-7H9a3 3 0 0 1 0-6h7.3"/></svg></span>线路图</button>
+        <button class="nav-item" data-view="realnet" title="现实路网"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg></span>现实路网</button>
+        <div class="nav-group">建设与排班</div>
+        <button class="nav-item" data-view="autotrack" title="自动铺轨"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18"/><path d="M16 3v18"/><path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h14"/></svg></span>自动铺轨</button>
+        <button class="nav-item" data-view="tilecache" title="ORM 地图缓存"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 4.5-9 4.5L3 8l9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16l9 4.5 9-4.5"/></svg></span>ORM 地图缓存</button>
+        <button class="nav-item" data-view="timetable" title="计算理论方案，或精细编辑停站与运营指令"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>时刻表配置</button>
+        <button class="nav-item" data-view="extensions" title="车库接班"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h15"/><path d="M15 4l4 4-4 4"/><path d="M20 16H5"/><path d="M9 12l-4 4 4 4"/></svg></span>车库接班</button>
+        <button class="nav-item" data-view="binder" title="生成规则包及对象绑定清单；部分规则仍需游戏内勾选"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3.1-3.1a4 4 0 0 0-5.7-5.7L12 6.3"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.1 3.1a4 4 0 0 0 5.7 5.7l1.1-1.1"/></svg></span>批量绑定</button>
+        <div class="nav-group">模组</div>
+        <button class="nav-item" data-view="vehicle" title="车辆工坊"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 10.5h14"/><path d="M9 14h.01"/><path d="M15 14h.01"/><path d="M8.5 17L7 21"/><path d="M15.5 17l1.5 4"/></svg></span>车辆工坊</button>
+        <button class="nav-item" data-view="scripts" title="生成游戏扩展脚本，不会自动在游戏内启用"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M13.5 5l-3 14"/></svg></span>脚本规则</button>
+        <div class="nav-group">维护与关于</div>
+        <button class="nav-item" data-view="history" title="历史数据对比"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2L3.5 8.5"/><path d="M3.5 4v4.5H8"/><path d="M12 8v4.5l3 1.8"/></svg></span>历史数据对比</button>
+        <button class="nav-item" data-view="cleanup" title="副本清理"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5"/><path d="M14 11v5"/></svg></span>副本清理</button>
+        <button class="nav-item" data-view="roadmap" title="功能一览"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6l1.5 1.5L7.5 5"/><path d="M3.5 12l1.5 1.5L7.5 11"/><path d="M3.5 18l1.5 1.5L7.5 17"/><path d="M11.5 6.3H20"/><path d="M11.5 12.3H20"/><path d="M11.5 18.3H20"/></svg></span>功能一览</button>
+        <button class="nav-item" data-view="author" title="关于作者"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/></svg></span>关于作者</button>
       </nav>
       <div class="sidebar-foot">
         <span class="pulse-dot"></span>
@@ -184,10 +190,13 @@
               <h2>只读存档，一键体检。</h2>
               <p>选一个存档即可完成结构总览、直读体检与班距估算——<b>全程只用存档，不需要导出 JSON</b>。所有写入永远只创建新存档。</p>
             </div>
-            <div class="route-art" aria-hidden="true">
-              <i class="line line-a"></i><i class="line line-b"></i><i class="line line-c"></i>
-              <b class="station s1"></b><b class="station s2"></b><b class="station s3"></b><b class="station s4"></b>
-            </div>
+            <svg class="route-art" viewBox="0 0 380 226" preserveAspectRatio="xMaxYMid slice" fill="none" aria-hidden="true">
+              <path d="M-10 62H110L210 162H390M-10 162H110L210 62H390M300-10V240" stroke="#22394a" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M-10 62H110L210 162H390" stroke="#7eacff" stroke-width="4"/>
+              <path d="M300-10V240" stroke="#efbc6d" stroke-width="4"/>
+              <path d="M-10 162H110L210 62H390" stroke="#51ddc2" stroke-width="4"/>
+              <g fill="#101c27" stroke="#e3edf2" stroke-width="3"><circle cx="56" cy="62" r="6"/><circle cx="56" cy="162" r="6"/><circle cx="160" cy="112" r="9"/><circle cx="252" cy="62" r="6"/><circle cx="252" cy="162" r="6"/><circle cx="300" cy="62" r="9"/><circle cx="300" cy="162" r="9"/><circle cx="300" cy="112" r="5"/><circle cx="350" cy="62" r="6"/><circle cx="350" cy="162" r="6"/></g>
+            </svg>
           </article>
           <article class="status-card" id="health-summary">
             <div class="empty-health">
@@ -661,7 +670,7 @@
             <div class="ttd-write-result" id="oprule-result" hidden></div>
           </div>
         </article>
-        <div class="section-intro" style="margin-top:6px">
+        <div class="section-intro">
           <div><p class="eyebrow aqua">FLEET MIGRATION</p><h2>智能迁移与编排</h2><p>把现有车队迁移到游戏里准备好的 Daily 模板，并保留模板的线路与车库结构。</p></div>
           <span class="phase-badge">写入新副本</span>
         </div>
@@ -975,6 +984,11 @@
         <div class="section-intro">
           <div><p class="eyebrow aqua">CAPABILITY LADDER</p><h2>功能一览与使用范围</h2><p>以下按功能分类列出，不代表可靠性排名。“可用”表示已有实现，不等于每份存档均已通过游戏验收。</p></div>
         </div>
+        <article class="panel" id="release-preview" aria-labelledby="release-preview-title">
+          <div class="panel-heading"><div><p class="step">下一版本预告 · 尚未发布</p><h3 id="release-preview-title">2.0.0 beta 3D 版本即将释出</h3></div><span class="phase-badge">开发中</span></div>
+          <p>3D 功能正在独立开发，具体能力与使用方式以 beta 发布说明为准。当前 1.8.7 仅更新工具箱界面与现有功能，不包含或启用 3D 功能、注入组件及实验项目。</p>
+          <p>此处仅作预告，不会下载安装任何 3D 内容。稳定版自动更新不会安装预发布版。</p>
+        </article>
         <div class="roadmap" id="roadmap-list"></div>
       </section>
 
