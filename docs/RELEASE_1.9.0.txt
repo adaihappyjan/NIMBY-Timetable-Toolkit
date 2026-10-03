@@ -1,0 +1,30 @@
+NIMBY Timetable Toolkit 1.9.0 — English-first, bilingual interface
+
+Interface and documentation
+- English is now the default; Simplified Chinese is available in the header.
+- The language choice survives application restarts. Changing it asks for confirmation before reloading; finish active tasks and save drafts first.
+- Bundled offline language resources cover navigation, tutorials, forms, map labels and diagnostic messages.
+- Player-defined names, paths, IDs and game data remain unchanged.
+- English README, quick-start TXT, user guide and Diagnostics.exe entry point; Chinese instructions remain available.
+
+Existing features
+- Retains timetable editing, automatic track laying, avoidance, route maps, local map caching, file following and copy cleanup.
+- Save writes still create new copies. Structural verification is not in-game acceptance; load and inspect every generated save.
+- Experimental projects and local development files are not included.
+
+Coming next
+2.0.0 beta with 3D features is coming soon, developed separately.
+This release does not contain or enable 3D, injection components or experimental projects.
+The announcement does not download anything. Stable updates do not install prereleases.
+
+Updating
+Use Check for updates, then confirm Download update and restart.
+The Windows x64 portable ZIP includes Python, Node.js and desktop components.
+SHA-256 and individual files are verified. Game saves and personal settings are retained.
+Git source checkouts must update through Git rather than the portable updater.
+
+简体中文
+默认英文；顶部可切换简体中文并记住选择。切换会确认后重载，请先完成任务并保存草稿。
+保留现有非 3D 功能，不翻译玩家站名、线路名、文件路径或存档数据。
+所有写入仍创建新副本，需在游戏内加载检查。可从“检查更新”确认升级。
+2.0.0 beta 3D 版本即将释出；本版本不包含或启用 3D，也不会自动安装预发布版。

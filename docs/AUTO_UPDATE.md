@@ -1,36 +1,60 @@
-# 自动更新安全设计
+# Automatic updates
 
-从 v1.5.0 起，官方便携版可以在软件内部完成后续更新。自动更新只管理解压后的工具箱程序文件；NIMBY Rails 存档、导出、生成的模组以及位于用户配置目录的设置均不在更新范围内。
+[简体中文](AUTO_UPDATE.zh-CN.md)
 
-## 用户流程
+Official portable releases have supported in-app updates since v1.5.0.
+The updater manages only the extracted application's manifest-listed files.
+Game saves, exports, generated mods and preferences in the user configuration
+folder are outside its update scope.
 
-1. 软件启动后读取缓存；距离上次联网检查超过 6 小时才访问一次 GitHub 最新 Release。顶部按钮也可随时强制检查。
-2. 发现更高的稳定版时显示版本、大小与发行说明。只有用户点击“下载并重启更新”后才下载和修改文件。
-3. 校验成功后启动独立更新助手。当前工具箱退出以释放 `libzstd.dll`，助手备份受管理文件、安装新文件并回读版本。
-4. 成功或回滚完整时会重新打开工具箱。若回滚不完整则不自动重启；保留更新日志和备份，重新解压完整安装包恢复程序。界面会区分未安装、已恢复、恢复不完整或状态未知，不会把所有失败都称为已回滚。
+## User workflow
 
-“启动时自动检查”可在更新条中关闭。关闭后仍可点击顶部版本按钮手动检查。源码目录含有 `.git` 时只报告版本，不执行覆盖，应由开发者使用 Git 更新。
+1. Startup uses cached release information, checking GitHub when the last online
+   check is more than six hours old. The version button can force a check.
+2. A newer stable release displays its version, size and release notes.
+   Downloading and installation require confirmation.
+3. After verification, a separate helper waits for the toolkit to exit, backs up
+   managed files, installs the update and reads the version back.
+4. Successful installation or complete rollback restarts the toolkit. Incomplete
+   rollback does not restart it: retain logs and backups, and extract a complete
+   release to recover. The interface distinguishes these outcomes.
 
-## 校验链
+Disable startup checks in the update panel if desired; manual checks remain
+available. A checkout containing `.git` reports versions but cannot be overwritten
+by this updater. Update source checkouts through Git.
 
-更新器接受的输入必须同时满足：
+## Verification
 
-- 元数据来自固定 API：`adaihappyjan/NIMBY-Timetable-Toolkit` 的最新稳定 Release；草稿和预发布版不接受。
-- 下载 URL 必须属于该仓库的 GitHub Release 路径，资产名必须精确匹配当前标签的便携 ZIP 和 `SHA256SUMS.txt`。
-- 标签必须是 `v主版本.次版本.修订号`，且必须严格高于当前版本。
-- ZIP 的 SHA-256 必须与 `SHA256SUMS.txt` 中该文件的值一致，下载大小必须与 Release 元数据一致。
-- ZIP 只允许一个顶层版本目录；拒绝绝对路径、`..`、重复路径、符号链接、超量文件和解压膨胀。
-- 包内 `.toolkit-manifest.json` 的版本必须与标签一致，并覆盖包内除清单自身外的每个文件。每个文件的长度与 SHA-256 都要逐一吻合。
-- 必要启动器、版本文件、Web 前后端、更新器及 `libzstd.dll` 缺一不可。
+Every accepted update must satisfy all of the following:
 
-## 安装与回滚
+- Metadata comes from this project's latest stable GitHub release. Drafts and
+  prereleases are rejected; a 2.0.0 beta announcement is not an update.
+- Download URLs belong to this repository's release paths. The portable ZIP and
+  `SHA256SUMS.txt` asset names must match the selected tag.
+- The tag follows `vMAJOR.MINOR.PATCH` and is newer than the installed version.
+- ZIP SHA-256 matches the checksum file; size matches release metadata.
+- The archive has one versioned top-level directory. Absolute paths, traversal,
+  duplicate paths, symlinks and excessive file counts or unpacked size are rejected.
+- `.toolkit-manifest.json` matches the version and covers every other packaged
+  file. Each file's size and SHA-256 are checked.
+- Required launchers, version data, frontend, backend, updater and compression
+  runtime must all be present.
 
-更新包先解压到用户配置目录的独立暂存文件夹。助手等待旧进程退出后，只处理新旧清单中明确列出的相对路径：
+## Installation and recovery
 
-- 更新前复制现有受管理文件到本次更新的 `backup` 目录。
-- 每个新文件先复制为同目录临时文件，再使用原子替换；清单最后替换。
-- 只删除旧清单中存在、但新清单已移除的文件；用户自行放入软件目录的其它文件不会被扫描或删除。
-- 任一复制、锁定、校验或版本回读失败时，只对已经改动的文件执行回滚；原先不存在的新文件会移除，原有文件从备份恢复。
-- 更新结果写入用户配置目录，新旧版本都能在下次启动时读取并提示。
+The package is staged in a separate user-configuration subfolder. After the old
+process exits, the helper handles only paths listed in the old or new manifest:
 
-该机制防止下载损坏、路径穿越、资产拿错、版本串包和安装中断，但它不能替代发行者代码签名。首次获取 v1.5.0 时仍应从项目官方 Release 下载；之后的更新不需要用户访问 GitHub 页面。
+- Existing managed files are copied to the update's backup directory.
+- New files are copied to same-directory temporary files, then atomically
+  replaced. The manifest is replaced last.
+- Only previously managed files removed from the new manifest are deleted.
+  Unmanaged user files are not scanned or removed.
+- A copy, lock, verification or version-readback failure triggers rollback of
+  files actually changed. Previously absent files are removed; existing files
+  are restored from backup.
+- An update result is saved for the next startup to display.
+
+These checks protect against damaged downloads, unsafe paths, mixed packages
+and interrupted installation. They do not replace publisher code signing.
+Obtain the first installation from the official release page.

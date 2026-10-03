@@ -54,15 +54,12 @@ def find_zstd_library() -> str:
     candidates: list[Path] = []
     if os.name == "nt":
         here = Path(__file__).resolve().parent
-        user_profile = Path(os.environ.get("USERPROFILE", str(Path.home())))
         program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
         program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
         candidates = [
             # Every official Windows portable release ships this verified AMD64 DLL.
             here / "libzstd.dll",
             Path(sys.executable).resolve().parent / "libzstd.dll",
-            user_profile
-            / ".cache/codex-runtimes/codex-primary-runtime/dependencies/native/git/mingw64/bin/libzstd.dll",
             Path(sys.executable).resolve().parents[1] / "native/git/mingw64/bin/libzstd.dll",
             program_files / "Git/mingw64/bin/libzstd.dll",
             program_files / "Git/usr/bin/libzstd.dll",

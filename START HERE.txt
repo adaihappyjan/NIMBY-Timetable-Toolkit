@@ -1,0 +1,38 @@
+NIMBY Timetable Toolkit — Start here
+==================================
+
+Windows 10/11 x64 portable release
+
+1. Extract the entire ZIP to a folder you can write to.
+2. Run NIMBYToolkit.exe. Keep the runtime and web folders beside it.
+3. No separate Python or Node.js installation is needed.
+4. English is the default. Use the top language selector for 简体中文.
+5. Choose your game save in Overview & health, then Run health check.
+
+Changes create a NEW save. Load and check it in NIMBY Rails before deciding to
+use it. Never replace your main save before checking.
+
+Need timetable data?
+Pause the game, save, and export timetable data while still paused. Select the
+matching save and Timetable Export JSON. Toolkit map/report JSON is not a game export.
+
+Updating
+Use Check for updates and confirm Download update and restart. The package and
+individual files are verified. Saves and personal settings are retained.
+Stable updates do not install beta releases. Source checkouts use Git instead.
+
+Troubleshooting
+- Keep every extracted file; do not launch from inside the ZIP.
+- If the window fails to open, run Diagnostics.exe (故障诊断.exe is an alias).
+- Logs: %LOCALAPPDATA%\NIMBY_Timetable_Toolkit\logs.
+- Remove private usernames/paths before sharing a diagnostic report.
+- Do not disable antivirus or other system security features.
+
+Changing language reloads the interface. Export/save drafts and finish tasks first.
+Station names, line names, file paths and game data are never translated.
+
+Tutorials: open Tutorials in the app, or docs/USER_GUIDE.md.
+中文说明：先看这里.txt / README.zh-CN.md。
+
+3D is not included. 2.0.0 beta is coming soon; details will be announced separately.
+Nothing is installed by this announcement.

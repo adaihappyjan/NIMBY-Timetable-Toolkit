@@ -6,6 +6,7 @@ const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'../web'), output=path.resolve(process.argv[2]);
 fs.mkdirSync(output,{recursive:true});
 const exportsSeen=[];
+const english=process.env.QA_LANGUAGE==='en';
 const cleanupCalls=[];
 const bootstrap={ok:true,app_version:fs.readFileSync(path.join(root,'../VERSION'),'utf8').trim(),files:{saves:[],exports:[]},settings:{enabled:false,days:14,keep:5,auto_check_updates:false},
   cleanup:{completed_copy_count:1,protected_copy_count:1,candidate_count:0,candidate_bytes:0,keep:5,days:14,targets:[],copies:[{name:'QA_Workspace_20260101_000000.nimbyrails5',pinned:true}]},capabilities:[],map_export_dir:output};
@@ -36,7 +37,9 @@ const server=http.createServer(async(req,res)=>{
   }
   if(process.env.QA_STATIC_ORIGIN){
     // Exercise the actual Python static handler/bundle, while all data APIs stay mocked.
-    const upstream=await fetch(new URL(req.url,process.env.QA_STATIC_ORIGIN));
+    const assetURL=new URL(req.url,process.env.QA_STATIC_ORIGIN);
+    if(!assetURL.searchParams.has('lang'))assetURL.searchParams.set('lang',process.env.QA_LANGUAGE||'zh-CN');
+    const upstream=await fetch(assetURL);
     res.writeHead(upstream.status,{'Content-Type':upstream.headers.get('content-type')||'application/octet-stream'});
     res.end(Buffer.from(await upstream.arrayBuffer()));return;
   }
@@ -75,14 +78,14 @@ const server=http.createServer(async(req,res)=>{
     assert.equal(await page.locator('#map-metro-theme-wrap').isVisible(),false);
     await page.evaluate(()=>{const el=document.querySelector('#map-metro-theme');el.value='atlas';el.dispatchEvent(new Event('change'));});
     assert.equal(await page.locator('#map-canvas svg').getAttribute('data-metro-theme'),'atlas');
-    assert.match(await page.locator('#map-render-status').innerText(),/已绘制.*铁路总览/);
+    assert.match(await page.locator('#map-render-status').innerText(),english?/Railway overview/i:/已绘制.*铁路总览/);
     await page.selectOption('#map-metro-theme','metro');
     await page.click('#export-map-svg');await page.click('#export-map-json');
     await page.waitForFunction(()=>document.querySelector('#map-export-status').textContent.includes('.json'));
     assert.equal(exportsSeen.length,2);
     const json=JSON.parse(fs.readFileSync(exportsSeen.find(e=>e.format==='json').path));
     assert.equal(json.drawing.style,'metro');assert.equal(json.schematic_layout.coordinate_space,'display-only');assert.equal(json.stations.c.lon,2);
-    const svg=fs.readFileSync(exportsSeen.find(e=>e.format==='svg').path,'utf8');assert.ok(svg.includes('地铁线网图'));
+    const svg=fs.readFileSync(exportsSeen.find(e=>e.format==='svg').path,'utf8');assert.match(svg,english?/Metro network/i:/地铁线网图/);
     await page.fill('#map-line-search','1号线');
     assert.equal(await page.locator('.map-line-check').count(),1);
     assert.equal(await page.evaluate(()=>selectedMapLines().length),3);
@@ -275,7 +278,7 @@ const server=http.createServer(async(req,res)=>{
     await page.evaluate(()=>switchView('timetable'));
     await page.locator('#view-timetable').screenshot({path:path.join(output,'timetable-guidance.png')});
     await page.evaluate(()=>switchView('cleanup'));
-    await page.getByText('副本保留管理 · 勾选后永久保留').click();
+    await page.getByText(english?'Copy protection · Check to keep permanently':'副本保留管理 · 勾选后永久保留').click();
     assert.equal(await page.locator('[data-protect-copy]').isChecked(),true);
     await page.locator('#view-cleanup').screenshot({path:path.join(output,'cleanup-guidance.png')});
     await page.check('#cleanup-timetables');await page.check('#cleanup-maps');
@@ -295,9 +298,9 @@ const server=http.createServer(async(req,res)=>{
     await page.waitForFunction(()=>!state.cleanupBusy);
     assert.equal(cleanupCalls.length,1);assert.deepEqual(cleanupCalls[0].selected,['QA-old-timetable.json']);
     await page.evaluate(()=>toast(updateFailureMessage({rollback_complete:false,backup_dir:'QA backup',error:'测试恢复失败'}),true));
-    assert.ok((await page.locator('#error-help').innerText()).includes('展开诊断信息'));
+    assert.match(await page.locator('#error-help').innerText(),english?/diagnostic/i:/展开诊断信息/);
     await page.click('#error-help summary');
-    assert.ok((await page.locator('#error-help pre').innerText()).includes('恢复不完整'));
+    assert.match(await page.locator('#error-help pre').innerText(),english?/not fully restored/i:/恢复不完整/);
     await page.click('#error-help button');
     await page.evaluate(()=>switchView('learn'));
     assert.equal(await page.locator('[data-lesson]').count(),9);
@@ -328,7 +331,7 @@ const server=http.createServer(async(req,res)=>{
     assert.ok(await page.locator('#at-partial-wrap').isVisible());
     await page.check('#at-accept');assert.ok(await page.locator('#at-apply').isDisabled());
     await page.check('#at-partial-accept');assert.ok(await page.locator('#at-apply').isEnabled());
-    assert.match(await page.locator('#at-apply').innerText(),/2 个通过区间/);
+    assert.match(await page.locator('#at-apply').innerText(),english?/2 passed sections/:/2 个通过区间/);
     assert.equal(await page.locator('#at-map line').count(),2,'no line across the failed middle leg');
     await page.locator('#at-partial-wrap').scrollIntoViewIfNeeded();
     await page.locator('#at-partial-wrap').evaluate(e=>e.closest('article').setAttribute('data-qa-partial','true'));
@@ -339,7 +342,7 @@ const server=http.createServer(async(req,res)=>{
     assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.allow_partial),true);
     assert.equal(await page.evaluate(()=>window.qaPartialTask.payload.fingerprint),'qa-partial-token');
     await page.evaluate(()=>window.autotrackResult({...window.qaPartialResult,partial_output:true,output_save:'QA-only.nimbyrails5'}));
-    assert.match(await page.locator('#at-output').innerText(),/跳过 1 个区间.*B 西站 → C 东站/);
+    assert.match(await page.locator('#at-output').innerText(),english?/skipped 1 sections.*B 西站 → C 东站/:/跳过 1 个区间.*B 西站 → C 东站/);
     assert.ok(await page.locator('#at-partial-wrap').isHidden());
     // Saved-station discovery: mock only worker output; exercise the real controls.
     await page.evaluate(async()=>{
@@ -400,12 +403,12 @@ const server=http.createServer(async(req,res)=>{
     }
     await page.setViewportSize({width:1500,height:1100});
     await page.keyboard.press('Control+k');
-    await page.fill('#cmdk-input','功能一览');
+    await page.fill('#cmdk-input',english?'Features':'功能一览');
     assert.equal(await page.locator('#cmdk-list .cmdk-item svg').count(),1);
     await page.keyboard.press('Enter');
     assert.ok(await page.locator('#release-preview').isVisible());
-    assert.match(await page.locator('#release-preview').innerText(),/2\.0\.0 beta 3D 版本即将释出/);
-    assert.match(await page.locator('#release-preview').innerText(),/不会下载安装任何 3D 内容/);
+    assert.match(await page.locator('#release-preview').innerText(),english?/2\.0\.0 beta 3D is coming soon/:/2\.0\.0 beta 3D 版本即将释出/);
+    assert.match(await page.locator('#release-preview').innerText(),english?/no 3D content is downloaded or installed/:/不会下载安装任何 3D 内容/);
     await page.screenshot({path:path.join(output,'theme-release-preview.png'),animations:'disabled'});
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({page_errors:errors,exports:exportsSeen,screenshots:output,tutorial_lessons:9},null,2));

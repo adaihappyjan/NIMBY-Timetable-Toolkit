@@ -46,7 +46,19 @@ def diagnose():
     return result
 
 
-def readable_report(result):
+def readable_report(result, language='zh-CN'):
+    if language == 'en':
+        from toolkit_locale import translate_message
+        lines=['NIMBY Timetable Toolkit — Diagnostic report',
+               'Result: '+('Basic checks passed' if result['ok'] else 'Issues found; review failed checks'), '',
+               'These checks do not modify game saves or certify in-game operation.',
+               'If the window still fails to open, include a screenshot and startup.log.', '']
+        for check in result['checks']:
+            lines.extend([('PASS' if check['ok'] else 'FAIL')+': '+translate_message(check['name']),
+                          '  '+translate_message(check['detail'])])
+        lines.extend(['','Application: '+result['app'],'Runtime: '+result['python_executable'],
+                      'Python: '+result['python'],'','Review private usernames and paths before sharing this report.'])
+        return '\n'.join(lines)+'\n'
     lines=['NIMBY 工具箱 · 故障诊断报告',
            '结果：'+('基础检查全部通过' if result['ok'] else '发现问题，请查看下面标记为“失败”的项目'),
            '', '这些检查不会修改游戏存档，也不代表所有游戏功能已经验收。',
@@ -63,6 +75,9 @@ def main():
     parser.add_argument('--diagnose',action='store_true');parser.add_argument('--self-test',action='store_true');parser.add_argument('--report',type=Path)
     args=parser.parse_args()
     logs=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'NIMBY_Timetable_Toolkit'/'logs'
+    try:
+        language=json.loads((logs.parent/'settings.json').read_text('utf-8-sig')).get('language','en')
+    except (OSError,ValueError):language='en'
     logs.mkdir(parents=True,exist_ok=True)
     log=logs/'startup.log'
     # Bounded rotation, preserves the previous startup rather than growing forever.
@@ -72,9 +87,9 @@ def main():
     try:
         if args.diagnose or args.self_test:
             result=diagnose()
-            report=args.report or logs/('诊断报告-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.txt')
+            report=args.report or logs/('diagnostics-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.txt')
             report.parent.mkdir(parents=True,exist_ok=True)
-            report.write_text(json.dumps(result,ensure_ascii=False,indent=2) if args.self_test else readable_report(result),encoding='utf-8-sig')
+            report.write_text(json.dumps(result,ensure_ascii=False,indent=2) if args.self_test else readable_report(result,language),encoding='utf-8-sig')
             if args.diagnose and not args.self_test and os.name=='nt':os.startfile(report)
             return 0 if result['ok'] else 1
         sys.argv=[str(ROOT/'toolkit_webapp.py')]
@@ -83,7 +98,9 @@ def main():
     except Exception:
         traceback.print_exc()
         if os.name=='nt' and not args.self_test:
-            ctypes.windll.user32.MessageBoxW(None,'启动遇到问题。请双击“故障诊断.exe”。\n日志位置：'+str(log),'NIMBY 工具箱',0x10)
+            message=('启动遇到问题。请运行“故障诊断.exe”。\n日志位置：' if language=='zh-CN' else
+                     'Startup failed. Run Diagnostics.exe.\nLog: ')
+            ctypes.windll.user32.MessageBoxW(None,message+str(log),'NIMBY Timetable Toolkit',0x10)
         return 1
 
 

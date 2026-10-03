@@ -36,13 +36,12 @@ if (Test-Path -LiteralPath $SettingsFile) {
 
 function Find-Python {
     $candidates = @(
-        (Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'),
-        (Join-Path $env:USERPROFILE 'Envs\oldC-python310\Scripts\python.exe')
+        (Join-Path $ToolRoot '.venv\Scripts\python.exe')
     )
     foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate) { return $candidate } }
     $command = Get-Command python -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    throw '未找到 Python。请从 Codex 环境启动本工具。'
+    throw 'Python was not found. Use the portable EXE release, or install Python 3.10+ and add it to PATH.'
 }
 $Python = Find-Python
 

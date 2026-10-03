@@ -32,9 +32,9 @@ if not errorlevel 1 (
 
 :not_found
 echo.
-echo [NIMBY Rails Toolkit] 未找到兼容的 64 位 Python 3.10 或更高版本。
-echo 请从 https://www.python.org/downloads/windows/ 安装官方 64 位 Python，
-echo 安装时勾选 "Add python.exe to PATH"，然后重新双击“启动工具箱.cmd”。
+echo [NIMBY Rails Toolkit] Compatible 64-bit Python 3.10+ was not found.
+echo Use the portable EXE release, or install official 64-bit Python from:
+echo https://www.python.org/downloads/windows/ and enable "Add python.exe to PATH".
 echo.
 pause
 exit /b 1
@@ -59,10 +59,10 @@ exit /b
 
 :zstd_invalid
 echo.
-echo [NIMBY Rails Toolkit] zstd 运行库缺失、损坏或架构不兼容。
-echo 官方便携包已经内置 64 位 libzstd.dll。请重新下载完整 ZIP，
-echo 完整解压后确认 libzstd.dll 与 toolkit_binary.py 位于同一目录。
-echo 请勿只复制“启动工具箱.cmd”单个文件。
+echo [NIMBY Rails Toolkit] zstd is missing, damaged or incompatible.
+echo The official portable release includes 64-bit libzstd.dll.
+echo Extract the complete ZIP. Keep libzstd.dll beside toolkit_binary.py.
+echo Do not copy the launcher out by itself.
 echo.
 if /i "%~1"=="--check" exit /b 2
 pause

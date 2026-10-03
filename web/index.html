@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#071827">
   <title>NIMBY Rails 运营工作台</title>
+  <script src="/locale.js"></script>
   <script src="/startup.js"></script>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/studio.css">
@@ -62,6 +63,7 @@
           <h1 id="view-title">铁路运营总览</h1>
         </div>
         <div class="top-actions">
+          <label class="language-control" title="Language / 语言"><span class="sr-only">Language / 语言</span><select id="language-select" aria-label="Language / 语言"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
           <button class="secondary-button" id="open-tutorial" type="button">操作教程</button>
           <span class="local-chip">● 仅在本机运行</span>
           <button class="update-chip" id="update-check" type="button" title="检查工具箱更新"><span class="update-dot">↻</span><span id="update-label">检查更新</span></button>
@@ -986,7 +988,7 @@
         </div>
         <article class="panel" id="release-preview" aria-labelledby="release-preview-title">
           <div class="panel-heading"><div><p class="step">下一版本预告 · 尚未发布</p><h3 id="release-preview-title">2.0.0 beta 3D 版本即将释出</h3></div><span class="phase-badge">开发中</span></div>
-          <p>3D 功能正在独立开发，具体能力与使用方式以 beta 发布说明为准。当前 1.8.7 仅更新工具箱界面与现有功能，不包含或启用 3D 功能、注入组件及实验项目。</p>
+              <p>3D 功能正在独立开发，具体能力与使用方式以 beta 发布说明为准。当前稳定版不包含或启用 3D 功能、注入组件及实验项目。</p>
           <p>此处仅作预告，不会下载安装任何 3D 内容。稳定版自动更新不会安装预发布版。</p>
         </article>
         <div class="roadmap" id="roadmap-list"></div>
@@ -1005,7 +1007,7 @@
             <span class="author-handle">AUTHOR · @adaihappyjan</span>
             <h3>各位玩 NIMBY Rails 的大家好呀～</h3>
             <p>这里是 adaihappyjan，叫我阿达就好啦！(≧▽≦)/</p>
-            <p>最开始做这个小工具箱，其实只是因为我太懒了，不想每次都一个一个地把列车塞进时间段里……于是就借助 Cursor 搓了个小脚本出来 (´▽｀)</p>
+            <p>这个工具箱最初只是一个减少重复排班操作的小脚本，后来在社区反馈中逐步成长。</p>
             <p>结果后来在好多人的鼓励和建议下，它就这样一点一点长大，最后变成了现在这个综合工具箱！ヽ(✿ﾟ▽ﾟ)ノ</p>
             <p>目前工具箱里已经实装了几乎所有我能想到、并且自己很想要的功能～至于以后嘛，除了继续做我能想到的新东西，也会努力把大家提出的那些“我原本完全没想到还能这么玩”的功能加进去！(๑•̀ㅂ•́)و✧</p>
             <p>总之，真的非常感谢一路以来给我鼓励、建议和反馈的大家啦！能让这个原本只是为了偷懒而诞生的小工具，慢慢变成一个大家都能用上的工具箱，我真的超级开心～</p>

@@ -27,7 +27,7 @@ def test_actual_http_entrypoint_contains_dependencies_in_order(assets_server):
     html = urlopen(assets_server + "/").read().decode("utf-8")
     assert 'src="/metro.js' not in html
     assert 'src="/metro-poster.js' not in html
-    paths = re.findall(r'(?:src|href)="(/[^"?]+\.(?:js|css)\?v=[a-f0-9]+)"', html)
+    paths = re.findall(r'(?:src|href)="(/[^"?]+\.(?:js|css)\?v=[a-f0-9]+(?:&lang=[\w-]+)?)"', html)
     assert len(paths) >= 7
     entry = next(p for p in paths if p.startswith('/app.js?'))
     with urlopen(assets_server + entry) as response:

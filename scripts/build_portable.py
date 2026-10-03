@@ -15,6 +15,8 @@ FIXED_FILES = (
     "启动工具箱.cmd",
     "launcher.bat",
     "README.md",
+    "README.zh-CN.md",
+    "START HERE.txt",
     "LICENSE",
     "NOTICE",
     "requirements.txt",
@@ -78,7 +80,8 @@ def build_portable(version: str, output_dir: Path, root: Path = ROOT, *, extras:
             else path.read_bytes()
         )
     if extras:
-        if set(extras) != {'NIMBYToolkit.exe', '故障诊断.exe', 'runtime/runtime.zip'}:
+        required = {'NIMBYToolkit.exe', '故障诊断.exe', 'runtime/runtime.zip'}
+        if set(extras) not in (required, required | {'Diagnostics.exe'}):
             raise ValueError('零基础包只允许两个指定启动器和已校验运行库')
         entries.update(extras)
     manifest = {

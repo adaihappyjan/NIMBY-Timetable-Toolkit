@@ -122,6 +122,7 @@ def build(version,output,cache):
     with tempfile.TemporaryDirectory(prefix='nimby-launcher-') as temp:
         extras=compile_launchers(runtime,Path(temp))
     extras['runtime/runtime.zip']=runtime
+    extras['Diagnostics.exe']=extras['故障诊断.exe']
     archive,sums=build_portable(version,output,extras=extras)
     if archive.stat().st_size>100_000_000:raise RuntimeError('包超过旧版更新器的 100 MB 上限，不可发布')
     print(archive,flush=True);print(sums,flush=True)

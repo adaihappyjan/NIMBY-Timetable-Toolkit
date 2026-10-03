@@ -7,7 +7,7 @@
 ---
 
 ## 0. 备份状态（安全前提）
-- 已把 **32/32** 个 `.nimbyrails5` 复制到 `F:\Codex\NIMBY_Timetable_Toolkit\_backups\saves_<时间戳>\`。
+- 已把 **32/32** 个 `.nimbyrails5` 复制到项目本地的 `_backups/saves_<时间戳>/`。
 - 每个文件做了 **SHA256 逐一校验**，0 失败，清单见该目录 `_manifest.json`。
 - 备份目录已加入 `.gitignore`（`_backups/`、`_research/`），不会被提交。
 

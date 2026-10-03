@@ -26,31 +26,48 @@ WEB_ROOT = ROOT / "web"
 BACKEND = ROOT / "toolkit_backend.py"
 ASSET_VERSION = uuid.uuid4().hex[:8]
 APP_SCRIPT_PARTS = ("metro.js", "metro-poster.js", "app.js")
+from toolkit_locale import normalize_language, localize_payload
 
 
-def app_script_bytes() -> bytes:
+def static_bytes(name: str, language: str | None = None) -> bytes:
+    original = WEB_ROOT / name
+    if language == 'en' and name.endswith(('.js', '.html')) and name != 'locale.js':
+        localized = WEB_ROOT / 'locales/en' / name
+        manifest = WEB_ROOT / 'locales/en/sources.json'
+        if localized.is_file() and manifest.is_file():
+            hashes = json.loads(manifest.read_text('utf-8'))
+            source_hash = hashlib.sha256(original.read_text('utf-8').encode()).hexdigest()
+            if hashes.get(name) != source_hash:
+                raise OSError(f'English assets are out of date: {name}. Rebuild language assets or reinstall the complete release.')
+            return localized.read_bytes()
+        raise OSError(f'English assets are missing: {name}. Reinstall the complete release.')
+    return original.read_bytes()
+
+
+def app_script_bytes(language: str | None = None) -> bytes:
     """One response defines map dependencies before the UI, including in WebView2."""
     chunks = []
     for name in APP_SCRIPT_PARTS:
         path = WEB_ROOT / name
         if not path.is_file():
             raise FileNotFoundError(f"工具箱安装不完整，缺少 web/{name}；请重新解压完整安装包。")
-        chunks.append(b"\n;/* " + name.encode("ascii") + b" */\n" + path.read_bytes())
+        chunks.append(b"\n;/* " + name.encode("ascii") + b" */\n" + static_bytes(name, language))
     return b"".join(chunks)
 
 
-def version_static_html(html: str) -> str:
+def version_static_html(html: str, language: str | None = None) -> str:
     """Version every local script/style; app.js includes its map dependencies."""
     html = re.sub(r'\s*<script src="/(?:metro|metro-poster)\.js"></script>', '', html)
     def replace(match: re.Match) -> str:
         attribute, route = match.groups()
         path = WEB_ROOT / route.lstrip("/")
         try:
-            data = app_script_bytes() if route == "/app.js" else path.read_bytes()
+            data = app_script_bytes(language) if route == "/app.js" else static_bytes(route.lstrip('/'), language)
             version = hashlib.sha256(data).hexdigest()[:16]
         except OSError:
             version = ASSET_VERSION  # The resource request will give a clear error.
-        return f'{attribute}="{route}?v={version}"'
+        suffix = f'&lang={language}' if language else ''
+        return f'{attribute}="{route}?v={version}{suffix}"'
     return re.sub(r'(src|href)="(/[^"?]+\.(?:js|css))"', replace, html)
 # NIMBY Rails stores saves under a "Saved Games/Weird and Wry/NIMBY Rails"
 # folder, but the exact location differs per machine (OneDrive redirect, custom
@@ -114,6 +131,7 @@ def read_settings() -> dict:
         "auto_check_updates": True,
         "map_export_dir": "",
         "follow_latest": True,
+        "language": "en",
     }
     try:
         stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
@@ -127,6 +145,7 @@ def read_settings() -> dict:
         "save_dir": stored.get("save_dir", stored.get("SaveDir")),
         "map_export_dir": stored.get("map_export_dir"),
         "follow_latest": stored.get("follow_latest"),
+        "language": stored.get("language"),
         "auto_check_updates": stored.get(
             "auto_check_updates", stored.get("AutoCheckUpdates")
         ),
@@ -140,12 +159,13 @@ def read_settings() -> dict:
     defaults["workers"] = max(1, min(32, int(defaults["workers"])))
     defaults["save_dir"] = str(defaults.get("save_dir") or "")
     defaults["auto_check_updates"] = bool(defaults["auto_check_updates"])
+    defaults["language"] = normalize_language(defaults["language"])
     return defaults
 
 
 def write_settings(settings: dict) -> dict:
     current = read_settings()
-    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates", "map_export_dir", "follow_latest"):
+    for key in ("enabled", "days", "keep", "workers", "save_dir", "auto_check_updates", "map_export_dir", "follow_latest", "language"):
         if key in settings:
             current[key] = settings[key]
     current["enabled"] = bool(current["enabled"])
@@ -154,6 +174,7 @@ def write_settings(settings: dict) -> dict:
     current["workers"] = max(1, min(32, int(current["workers"])))
     current["save_dir"] = str(current.get("save_dir") or "")
     current["auto_check_updates"] = bool(current["auto_check_updates"])
+    current["language"] = normalize_language(current["language"])
     if "map_export_dir" in settings:
         value = str(settings["map_export_dir"] or "").strip()
         folder = map_export_directory(value)
@@ -1144,6 +1165,9 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def send_json(self, payload: dict, status: int = 200) -> None:
+        # Legacy API clients keep the original messages unless they opt in.
+        language = normalize_language(self.headers.get('X-NIMBY-Language', 'zh-CN'))
+        payload = localize_payload(payload, language)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1398,6 +1422,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def serve_static(self, route: str) -> None:
+        query = parse_qs(urlparse(self.path).query)
+        language = normalize_language(query.get('lang', [read_settings().get('language', 'en')])[0])
         relative = "index.html" if route in ("", "/") else unquote(route.lstrip("/"))
         path = (WEB_ROOT / relative).resolve()
         if WEB_ROOT.resolve() not in path.parents and path != WEB_ROOT.resolve():
@@ -1407,15 +1433,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "Static resource not found")
             return
         try:
-            data = app_script_bytes() if relative == "app.js" else path.read_bytes()
+            data = app_script_bytes(language) if relative == "app.js" else static_bytes(relative, language)
         except OSError as exc:
             self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if path.name == "index.html":
             html = data.decode("utf-8")
-            html = version_static_html(html)
+            html = version_static_html(html, language)
             html = html.replace("仅在本机运行", f"仅在本机运行 · v{APP_VERSION}")
+            html = html.replace('Local only</span>', f'Local only · v{APP_VERSION}</span>')
             data = html.encode("utf-8")
         if content_type.startswith("text/") or content_type in ("application/javascript", "application/json"):
             content_type += "; charset=utf-8"
@@ -1538,7 +1565,7 @@ def run_desktop_window(app_url: str, server: ThreadingHTTPServer) -> bool:
 
     try:
         window = webview.create_window(
-            "NIMBY Rails 运营工作台",
+            "NIMBY Timetable Toolkit",
             app_url,
             width=1280,
             height=860,

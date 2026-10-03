@@ -25,7 +25,7 @@ def test_theme_is_last_and_content_versioned():
     assert html.index('/usability.css') < html.index('/theme.css') < html.index('</head>')
     assert '/theme.css?v=' in web.version_static_html(html)
     assert '2.0.0 beta 3D 版本即将释出' in html
-    assert '当前 1.8.7' in html and '不会下载安装任何 3D 内容' in html
+    assert '当前稳定版' in html and '不会下载安装任何 3D 内容' in html
     assert '/experiments/' not in html and '/nimby3d' not in html
 
 

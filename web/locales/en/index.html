@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071827">
+  <title>NIMBY Rails Operations workspace</title>
+  <script src="/locale.js"></script>
+  <script src="/startup.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/studio.css">
+  <link rel="stylesheet" href="/autotrack.css">
+  <link rel="stylesheet" href="/usability.css">
+  <link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+  <section id="startup-error" role="alert" hidden style="position:fixed;top:12px;left:260px;right:20px;z-index:10000;padding:16px;border:1px solid #efab64;border-radius:12px;background:#291f19;color:#fff;box-shadow:0 4px 20px #0008">
+    <strong>The toolkit interface did not finish loading</strong>
+    <p id="startup-error-detail" style="white-space:pre-wrap;overflow-wrap:anywhere">Checking startup status…</p>
+    <button id="startup-reload" type="button">Reload interface</button>
+    <small>Reloads only the toolkit interface; does not restart the game or rerun startup cleanup.</small>
+  </section>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div><strong>NIMBY</strong><small>Operations workspace</small></div>
+      </div>
+      <nav id="main-nav" aria-label="Main navigation">
+        <div class="nav-group">Start</div>
+        <button class="nav-item active" data-view="dashboard" title="Overview &amp; health"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg></span>Overview & health</button>
+        <button class="nav-item" data-view="workspace" title="Read saves; configure, diagnose and verify lines in batches"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>Line workspace</button>
+        <button class="nav-item" data-view="learn" title="Tutorials"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.5c-2-1.3-4.5-2-8-2v13c3.5 0 6 .7 8 2 2-1.3 4.5-2 8-2v-13c-3.5 0-6 .7-8 2z"/><path d="M12 6.5v13"/></svg></span>Tutorials</button>
+        <div class="nav-group">Analysis & maps</div>
+        <button class="nav-item" data-view="analytics" title="Operating analysis"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5h18"/><path d="M7 17v-6"/><path d="M12 17V6"/><path d="M17 17v-9"/></svg></span>Operating analysis</button>
+        <button class="nav-item" data-view="map" title="Route maps"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="18" r="2.2"/><circle cx="18.5" cy="5" r="2.2"/><path d="M7.7 18H15a3.5 3.5 0 0 0 0-7H9a3 3 0 0 1 0-6h7.3"/></svg></span>Route maps</button>
+        <button class="nav-item" data-view="realnet" title="Real-world network"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg></span>Real-world network</button>
+        <div class="nav-group">Build & schedule</div>
+        <button class="nav-item" data-view="autotrack" title="Automatic track laying"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18"/><path d="M16 3v18"/><path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h14"/></svg></span>Automatic track laying</button>
+        <button class="nav-item" data-view="tilecache" title="ORM Map cache"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 4.5-9 4.5L3 8l9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16l9 4.5 9-4.5"/></svg></span>ORM Map cache</button>
+        <button class="nav-item" data-view="timetable" title="Calculate theoretical plans or edit dwell times and operating orders in detail"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></span>Timetables</button>
+        <button class="nav-item" data-view="extensions" title="Depot joins"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h15"/><path d="M15 4l4 4-4 4"/><path d="M20 16H5"/><path d="M9 12l-4 4 4 4"/></svg></span>Depot joins</button>
+        <button class="nav-item" data-view="binder" title="Generate rule packs and object-binding checklists; some rules still need manual activation in game"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3.1-3.1a4 4 0 0 0-5.7-5.7L12 6.3"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.1 3.1a4 4 0 0 0 5.7 5.7l1.1-1.1"/></svg></span>Batch binding</button>
+        <div class="nav-group">Mods</div>
+        <button class="nav-item" data-view="vehicle" title="Vehicle workshop"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 10.5h14"/><path d="M9 14h.01"/><path d="M15 14h.01"/><path d="M8.5 17L7 21"/><path d="M15.5 17l1.5 4"/></svg></span>Vehicle workshop</button>
+        <button class="nav-item" data-view="scripts" title="Generate game extension scripts; they are not enabled automatically in game"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M13.5 5l-3 14"/></svg></span>Script rules</button>
+        <div class="nav-group">Maintenance & about</div>
+        <button class="nav-item" data-view="history" title="History comparison"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2L3.5 8.5"/><path d="M3.5 4v4.5H8"/><path d="M12 8v4.5l3 1.8"/></svg></span>History comparison</button>
+        <button class="nav-item" data-view="cleanup" title="Copy cleanup"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5"/><path d="M14 11v5"/></svg></span>Copy cleanup</button>
+        <button class="nav-item" data-view="roadmap" title="Features"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6l1.5 1.5L7.5 5"/><path d="M3.5 12l1.5 1.5L7.5 11"/><path d="M3.5 18l1.5 1.5L7.5 17"/><path d="M11.5 6.3H20"/><path d="M11.5 12.3H20"/><path d="M11.5 18.3H20"/></svg></span>Features</button>
+        <button class="nav-item" data-view="author" title="About"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z"/></svg></span>About</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="pulse-dot"></span>
+        <div><strong>Local safe mode</strong><small>Never overwrite the input save</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="view-eyebrow">CONTROL CENTER</p>
+          <h1 id="view-title">Railway operations overview</h1>
+        </div>
+        <div class="top-actions">
+          <label class="language-control" title="Language"><span class="sr-only">Language</span><select id="language-select" aria-label="Language"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
+          <button class="secondary-button" id="open-tutorial" type="button">Tutorials</button>
+          <span class="local-chip">● Local only</span>
+          <button class="update-chip" id="update-check" type="button" title="Check for toolkit updates"><span class="update-dot">↻</span><span id="update-label">Check for updates</span></button>
+          <button class="icon-button" id="refresh-files" title="Refresh files">↻</button>
+        </div>
+      </header>
+
+      <aside class="update-banner" id="update-banner" role="status" hidden>
+        <div class="update-banner-icon">↑</div>
+        <div class="update-banner-copy">
+          <strong id="update-title">New version available</strong>
+          <small id="update-detail">Download and install safely from the toolkit.</small>
+          <details id="update-notes-box" hidden><summary>Release notes</summary><pre id="update-notes"></pre></details>
+        </div>
+        <label class="update-auto"><input id="update-auto-check" type="checkbox" checked> Check automatically on startup</label>
+        <button class="text-button" id="update-dismiss" type="button">Later</button>
+        <button class="primary-button" id="update-install" type="button">Download update and restart</button>
+      </aside>
+
+      <section class="view" id="view-autotrack">
+        <div class="section-header"><div><p class="eyebrow aqua">TRACK BLUEPRINTS</p><h2>Follow the game map section by section, in stop order.</h2><p>Add intermediate stops, inspect failures section by section and generate a new copy after adjusting the plan. Connection gaps are left near stations; platforms, points and signals are not changed automatically.</p></div><button class="text-button" id="at-help">Tutorial</button></div>
+        <article class="panel" id="at-tutorial" hidden aria-label="Automatic track laying: first-use tutorial"><h3 id="at-tutorial-title">First use</h3><p id="at-tutorial-text"></p><div class="button-row"><button class="secondary-button" id="at-tutorial-back">Back</button><button class="primary-button" id="at-tutorial-next">Next</button><button class="text-button" id="at-tutorial-close">Read later</button></div></article>
+        <article class="panel">
+          <div class="panel-heading"><h3>① Select save and route</h3><span class="local-chip">Offline preview · No timetable JSON required</span></div>
+          <p>Uses the save selected in Overview & health: <strong id="at-save-name">Not selected</strong> <button class="text-button" id="at-choose-save">Select a save</button></p>
+          <p id="at-catalog-state" role="status">Opening this page automatically reads stations, game map data and local routes.</p><button class="secondary-button" id="at-refresh">Read again</button>
+          <div class="form-grid">
+            <label>Route source<select id="at-preset"><option value="auto">Auto · Connect multiple stops in order</option><option value="file">Auto-detected local GeoJSON</option><option value="vandry-dessane">Vandry–Dessane · Reference route</option><option value="custom">Manual import (fallback)</option></select></label>
+            <label>Origin (search, or enter longitude,Latitude)<input id="at-from" list="at-stations" placeholder="Type a station name and select a complete result"></label>
+            <div id="at-via-panel" class="at-wide">
+              <h3>Intermediate stops · Connect from top to bottom</h3>
+              <p>Origin → Intermediate stops 1 → Intermediate stops 2 → … → destination. Up to 40 stops; move entries up/down to reorder. Removing a stop changes only the plan, not the game station. Preview again after removal.</p>
+              <div id="at-via-list"></div>
+              <button type="button" class="secondary-button" id="at-add-via">＋ Add intermediate stop</button>
+              <button type="button" class="secondary-button" id="at-discover">Find intermediate stations between endpoints</button>
+              <p>Find only built or blueprint stations already in the save; never create stations. Select complete endpoint names first. Candidates follow the railway route, not a straight line. There is no endpoint-distance cap, but large map areas may need separate batches. Existing intermediate stops are not used in this search.</p>
+              <div id="at-discovery" hidden>
+                <p id="at-discovery-summary" role="status"></p>
+                <div id="at-discovery-list"></div>
+                <label><input type="checkbox" id="at-discovery-replace">Replace the current intermediate-stop list with selected stations (does not change game stations)</label>
+                <button type="button" class="secondary-button" id="at-use-discovery" disabled>Use selected stations as intermediate stops</button>
+              </div>
+            </div>
+            <label>Destination (search, or enter longitude,Latitude)<input id="at-to" list="at-stations" placeholder="Type a station name and select a complete result"></label>
+            <datalist id="at-stations"></datalist>
+            <label>Real-world railway category<select id="at-rail-type"><option value="auto">Auto · All visible railway types</option><option value="rail">Railway rail</option><option value="light_rail">Light rail light_rail</option><option value="subway">Metro subway</option><option value="tram">Tram tram</option><option value="narrow_gauge">Narrow gauge narrow_gauge</option><option value="monorail">Monorail monorail</option><option value="funicular">Funicular funicular</option></select></label>
+            <label>Local routes<select id="at-route-path"><option value="">Not read yet</option></select></label>
+            <label>Game vector map (auto-detected; path can be corrected)<input id="at-map-path" placeholder="Game directory/resources/maps/osm400.pmtiles"></label>
+            <label>Custom route file<input id="at-file" type="file" accept=".json,.geojson,application/json" disabled></label>
+            <label>Structure mode<select id="at-structure"><option value="auto">Auto · Ground by default; preserve mapped bridges and tunnels</option><option value="ground">All at ground level (ignore mapped bridges and tunnels)</option><option value="bridge">All elevated · Level +1</option><option value="tunnel">All tunnel · Level -1</option></select></label>
+            <label>Water / road avoidance<select id="at-obstacles"><option value="bridge">Raise potential conflicts by one level +1</option><option value="tunnel">Lower potential conflicts by one level -1</option><option value="off">Off · Keep only mapped bridges and tunnels</option></select><small>Applies only to automatic structures. Conservative estimates from map data may add extra bridges or tunnels. This is not an in-game collision check.</small></label>
+            <label>Player track / station avoidance<select id="at-player-obstacles"><option value="off">Off · Stop at existing player tracks</option><option value="bridge">Raise potential conflicts · +1 level</option><option value="tunnel">Lower potential conflicts · -1 level</option></select><small>Includes built and blueprint tracks and platforms; adjusts only new blueprints. Existing grade-separated crossings stay unchanged, and endpoint connection gaps remain. If the target level is occupied, generation stops instead of adding further height changes.</small></label>
+            <label>Station-center protection radius (m)<input id="at-player-radius" type="number" value="60" min="10" max="200" disabled><small>Applies when player-facility avoidance is enabled. A ground-level circle around each station center approximates the station area, not its physical building outline. The current section's endpoints are excluded. Check clearance and gradients in game.</small></label>
+            <label>Ground-level track type<select id="at-variant"><option value="6">Medium speed · 160 km/h (default)</option><option value="2">High speed · 350 km/h</option><option value="4">Tram · 60 km/h</option></select></label>
+            <label>Bridge track type<select id="at-bridge-variant"><option value="6">Medium speed · 160 km/h</option><option value="2">High speed · 350 km/h</option><option value="4">Tram · 60 km/h</option></select></label>
+            <label>Tunnel track type<select id="at-tunnel-variant"><option value="6">Medium speed · 160 km/h</option><option value="2">High speed · 350 km/h</option><option value="4">Tram · 60 km/h</option></select></label>
+            <label>Track-connection margin (m)<input id="at-gap" type="number" value="50" min="20" max="200"></label>
+            <label>Start distance (m)<input id="at-start" type="number" value="0" min="0" step="1"></label>
+            <label>End distance (m; blank means end of route)<input id="at-end" type="number" min="0" step="1" placeholder="Entire section"></label>
+          </div>
+          <button class="primary-button" id="at-preview">② Check conflicts and preview</button>
+          <p class="repair-note">Station names come from the current save; enter coordinates for unbuilt map locations. There is no endpoint-distance or total-length cap, but endpoints must be at least 0.1 km apart. Short searches expand locally; long or detouring routes explore railway-connected tile chunks from both ends instead of rejecting bounding boxes above 4096 tiles. The background task reports tiles checked. Data, time and 16384-tile safety budgets remain; reaching a budget does not prove disconnection. Find intermediate stations, select built/blueprint stops and preview sections. Up to 40 stops and 8000 double-track nodes, with coordinate and conflict checks. No antimeridian crossings or straight-line gap filling. Only three built-in track types are supported.</p>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>③ Check alignment before generating</h3><span id="at-state" role="status" aria-live="polite">Waiting for preview</span></div>
+          <p id="at-summary">Preview length, nodes, bridges and avoidance results.</p>
+          <div id="at-leg-results" aria-live="polite"></div>
+          <svg id="at-map" viewBox="0 0 900 320" role="img" aria-label="Offline route preview; cyan means ground level and orange means bridges" style="width:100%;height:320px;background:#0b1e2c;border-radius:12px"></svg>
+          <p>Cyan: ground level　Orange: bridges at level +1　Purple: tunnels at level -1. Red stops touch failed sections. Partial generation leaves these sections empty without connecting across them. Blueprints are written to a new test save; Export preview plan saves only a JSON report. No terrain is shown, so check gradients and clearance in game.</p>
+          <ul id="at-warnings"></ul>
+          <label id="at-partial-wrap" hidden><input id="at-partial-accept" type="checkbox">Generate only sections that passed; skip failed sections. I understand gaps must be connected manually in game.</label>
+          <label><input id="at-accept" type="checkbox">I will save my game first, inspect the new copy while paused and leave the main save untouched.</label>
+          <div class="button-row"><button class="primary-button" id="at-apply" disabled>Generate new test save</button><button class="secondary-button" id="at-download" disabled>Export preview plan</button></div>
+          <p id="at-output" role="status"></p>
+        </article>
+        <article class="panel"><h3>Where does the data come from?</h3><p>Game map data is discovered from Steam libraries. Place GeoJSON in the save directory, its routes subfolder or the toolkit's routes folder, then read again. No individual uploads needed. Timetable-export JSON is not treated as a route file.</p><p>The complete portable release includes routing components; no separate Node.js installation is needed. If missing, extract the complete package again. Source installs require Node.js 22+. GeoJSON and reference routes do not need it. Calculations run in the background without terminal windows or uploading saves/maps.</p><p>Base-map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors（ODbL）</a> / OpenMapTiles. Map data is not engineering topology. Check generated routes in a new save copy first.</p></article>
+      </section>
+      <section class="view" id="view-tilecache">
+        <div class="section-header"><div><p class="eyebrow aqua">LOCAL TILE CACHE</p><h2>Keep the railway tiles you view on your computer.</h2><p>Caches only ORM tiles actually viewed in the game. No region predownloads and no save changes. The service continues after closing the toolkit. Enable Launch with game below to start it without opening the toolkit.</p></div></div>
+        <article class="panel">
+          <div class="panel-heading"><h3>Cache service</h3><strong id="tc-state" role="status" aria-live="polite">Not read yet</strong></div>
+          <p id="tc-stats">Refresh to check status.</p>
+          <p id="tc-performance"></p>
+          <p id="tc-error" role="status" aria-live="polite"></p>
+          <p id="tc-game-status">Launch with game: not checked</p>
+          <button class="secondary-button" id="tc-game-start">Enable launch with game</button>
+          <p class="repair-note">Windows After Windows login, a silent watcher checks every 5 seconds and starts the cache when NIMBY Rails launches, without a terminal window. Disabling this removes its user startup entry. Exiting the game does not stop the cache. If you stop it manually, it stays stopped for that game session.</p>
+          <div class="analytics-tools">
+            <button class="primary-button" id="tc-start">Start cache</button>
+            <button class="secondary-button" id="tc-stop" disabled>Stop background service</button>
+            <button class="text-button" id="tc-refresh">Refresh status</button>
+            <button class="text-button" id="tc-prune" disabled>Clean up using these rules</button>
+            <button class="text-button danger-text" id="tc-clear" disabled>Clear tile cache…</button>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>Connect to the game · One-time setup</h3></div>
+          <ol><li>Start the cache service first.</li><li>Map options on the right side of the game → Sources / Source → New Source / New source」.</li><li>Copy the complete URL below. Add and enable a Generic raster layer in the game, then disable the equivalent online ORM layer to avoid duplicate downloads.</li><li>View the area you are building in the game, then refresh here. Download and cache-hit counts should increase. First loads still depend on network speed.</li></ol>
+          <div class="file-grid">
+            <label>Railway layer<select id="tc-style"><option value="standard">Standard · Railways and stations</option><option value="maxspeed">Speed limit</option><option value="signals">Signals</option><option value="electrification">Electrification</option><option value="gauge">Track gauge</option></select></label>
+            <label>Map source URL for the game<input id="tc-url" readonly aria-label="Map source URL for the game"></label>
+          </div>
+          <button class="secondary-button" id="tc-copy">Copy map source URL</button>
+          <p class="repair-note">If the game rejects a local HTTP URL, keep the original source and report the message. Do not disable system security. Stopping the service makes the local map source unavailable, including cached tiles.</p>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><h3>Storage & network settings</h3><span>Save after making changes</span></div>
+          <div class="file-grid">
+            <label>Cache parent directory<input id="tc-directory" placeholder="Absolute local path"></label>
+            <label>Fixed port<input id="tc-port" type="number" min="1024" max="65535"></label>
+            <label>Tile content limit(MB)<input id="tc-max" type="number" min="64" max="51200"></label>
+            <label>Remove tiles unused for (days)<input id="tc-age" type="number" min="1" max="3650"></label>
+          </div>
+          <p><label><input type="checkbox" id="tc-offline"> Read cached tiles only (missing areas and zoom levels will not download)</label></p>
+          <p><label><input type="checkbox" id="tc-auto"> Start cache when the toolkit launches (not a Windows startup entry)</label></p>
+          <button class="primary-button" id="tc-save">Save settings</button>
+          <p class="repair-note">Stop the service before changing its directory or port. A new directory does not move or delete the old cache. The size limit covers tile content; the database adds some overhead. Least-recently-used tiles are removed automatically. Hit/download counters cover only the current service session.</p>
+          <details><summary>Usage rules and troubleshooting</summary><p>Online caching respects server expiry and revalidates on demand. Read-only caches may show old maps. HTTP 429 pauses all upstream requests and preserves the wait across restarts. Network errors are never stored as images. No regional batch downloading or global pre-caching.</p><p>Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>; Style © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noopener">OpenRailwayMap</a>，<a href="https://creativecommons.org/licenses/by-sa/2.0/" target="_blank" rel="noopener">CC-BY-SA 2.0</a>。<a href="https://wiki.openstreetmap.org/wiki/OpenRailwayMap/API" target="_blank" rel="noopener">Service usage rules</a>。</p></details>
+        </article>
+      </section>
+      <section class="view active" id="view-dashboard">
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="hero-copy">
+              <p class="eyebrow aqua">NETWORK READINESS</p>
+              <h2>Read your save. Check its health.</h2>
+              <p>Select a save for a structural overview, direct health checks and headway estimates——<b>Uses only the save—no JSON export required</b>. Every write creates a new save.</p>
+            </div>
+            <svg class="route-art" viewBox="0 0 380 226" preserveAspectRatio="xMaxYMid slice" fill="none" aria-hidden="true">
+              <path d="M-10 62H110L210 162H390M-10 162H110L210 62H390M300-10V240" stroke="#22394a" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M-10 62H110L210 162H390" stroke="#7eacff" stroke-width="4"/>
+              <path d="M300-10V240" stroke="#efbc6d" stroke-width="4"/>
+              <path d="M-10 162H110L210 62H390" stroke="#51ddc2" stroke-width="4"/>
+              <g fill="#101c27" stroke="#e3edf2" stroke-width="3"><circle cx="56" cy="62" r="6"/><circle cx="56" cy="162" r="6"/><circle cx="160" cy="112" r="9"/><circle cx="252" cy="62" r="6"/><circle cx="252" cy="162" r="6"/><circle cx="300" cy="62" r="9"/><circle cx="300" cy="162" r="9"/><circle cx="300" cy="112" r="5"/><circle cx="350" cy="62" r="6"/><circle cx="350" cy="162" r="6"/></g>
+            </svg>
+          </article>
+          <article class="status-card" id="health-summary">
+            <div class="empty-health">
+              <span>◎</span><strong>Ready for a health check</strong><small>Select a file to start scanning</small>
+            </div>
+          </article>
+        </div>
+
+        <article class="panel file-panel">
+          <div class="panel-heading">
+            <div><p class="step">Step 01 · No JSON</p><h3>Select a save to begin</h3></div>
+            <button class="text-button" id="select-latest">Select latest files</button>
+          </div>
+          <div class="file-grid file-grid-solo">
+            <label>Input save<select id="save-select" aria-label="Input save"></select></label>
+            <button class="primary-button scan-button" id="scan-button"><span>Run health check · No JSON</span><small>Read-only check · Large saves may take longer</small></button>
+          </div>
+          <div class="safety-strip"><span>✓</span>Health checks do not modify game saves. Reports and task records may be stored in the toolkit directory. Game-data changes create a new save copy.</div>
+          <label class="checkbox-label"><input type="checkbox" id="follow-latest" checked>Follow the latest game save and timetable export for the same project</label>
+          <p id="live-files-status" class="save-dir-hint" role="status">Checks every 5 seconds and waits for stable files. Does not export from the game or assume the newest files match.</p>
+          <button id="live-files-apply" class="secondary-button" hidden>Use latest files and reload</button>
+          <details class="adv-json" id="adv-json-box">
+            <summary><span class="sd-label">Need timetable data? Export it from the game first</span><span class="sd-path">Select the game-generated JSON, then verify it against the save</span></summary>
+            <div class="adv-json-body">
+              <p class="save-dir-hint">Ordinary save health checks do not need this step. Fleet migration, template recovery, operating details, maps loaded from exports and some fleet bindings require<b>Timetable data exported by the game</b>; The toolkit cannot export timetable data from the running game for you.</p>
+              <ol class="save-dir-hint">
+                <li>Open the save you want to process in NIMBY Rails, <b>Pause the game and save</b>。</li>
+                <li>Keep the game paused without changing lines or trains; in<b>Export timetable data in the game</b>, Wait for a file whose name contains <code>Timetable Export</code> of <code>.json</code> Files.</li>
+                <li>Return to the toolkit and wait for file discovery, or Refresh files if follow-latest is off. Confirm the selected save and export, then choose<b>“Verify save against game export”</b>。</li>
+              </ol>
+              <p class="save-dir-hint">Empty list? Finish exporting in game and check that the save directory contains the file. After changing timetables, lines or trains, save and export again. <b>Toolkit route-map JSON, operating reports and plan JSON cannot replace this file.</b></p>
+              <div class="file-grid">
+                <label>Game-generated timetable data(Timetable Export JSON)<select id="export-select" aria-label="Game-generated timetable data"></select></label>
+                <button class="secondary-button" id="deep-scan-button">Verify save against game export</button>
+              </div>
+            </div>
+          </details>
+          <details class="save-dir" id="save-dir-box">
+            <summary><span class="sd-label">Save directory</span><span class="sd-path" id="save-dir-current">Scanning…</span></summary>
+            <div class="save-dir-body">
+              <p class="save-dir-hint" id="save-dir-hint"></p>
+              <div class="save-dir-row">
+                <input type="text" id="save-dir-input" placeholder="Paste the NIMBY Rails save-folder path…" aria-label="Save directory path">
+                <button class="secondary-button" id="save-dir-apply">Use this directory</button>
+                <button class="text-button" id="save-dir-detect">Detect again</button>
+              </div>
+              <div class="save-dir-cands" id="save-dir-cands"></div>
+            </div>
+          </details>
+        </article>
+
+        <article class="panel" id="stationname-panel">
+          <div class="panel-heading">
+            <div><p class="step">Write · New save only</p><h3>Write real station names</h3></div>
+            <span class="pill" id="stationname-count">Unnamed station: —</span>
+          </div>
+          <p class="save-dir-hint">Read station names from a game timetable export and verify IDs and positions. Names are not guessed from location. Preview names available to write and stations still unnamed; existing custom names are kept by default. <b>Writes a new copy only. Load that copy in game before saving again to retain the names.</b> A new export can provide names for newly built stations. If names are still missing, enter them manually below.</p>
+          <div class="file-grid">
+            <label>Name source (game timetable export)<select id="stationname-export" aria-label="Name source: game timetable data"></select></label>
+            <label class="checkbox-label"><input type="checkbox" id="stationname-all"> Also replace existing station names</label>
+            <button class="secondary-button" id="stationname-preview">Check available station names</button>
+            <button class="primary-button" id="stationname-write" disabled><span>Confirm write to a new copy</span><small>Check station names before writing</small></button>
+          </div>
+          <label>Enter names manually (optional; one station per line: ID=Station name)<textarea id="stationname-pairs" rows="3" placeholder="0x20000020f0001=Gogama"></textarea></label>
+          <div id="stationname-result" class="mini-summary" hidden></div>
+        </article>
+
+        <article class="panel" id="overview-panel">
+          <div class="panel-heading">
+            <div><p class="step">No JSON</p><h3>Read the structural overview from a save</h3></div>
+            <button class="secondary-button" id="overview-read">Reload structure</button>
+          </div>
+          <div class="repair-note">No JSON export needed. Decompress the save and enumerate stations, lines, signals, trains and timetables directly. All reads are non-mutating. The first deep scan may take longer.</div>
+          <div class="metric-grid" id="overview-metrics" hidden></div>
+          <div class="overview-health" id="overview-health" hidden></div>
+          <div class="overview-meta" id="overview-meta"></div>
+          <div class="overview-lists" id="overview-lists" hidden>
+            <div class="overview-col">
+              <div class="panel-heading small"><h4>Lines with track paths</h4><span class="count-badge" id="overview-route-count">0</span></div>
+              <div class="overview-scroll" id="overview-routes"></div>
+            </div>
+            <div class="overview-col">
+              <div class="panel-heading small"><h4>Operating timetables (using these lines)</h4><span class="count-badge" id="overview-container-count">0</span></div>
+              <div class="overview-scroll" id="overview-containers"></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel" id="timetable-panel">
+          <div class="panel-heading">
+            <div><p class="step">No JSON</p><h3>Read stop-by-stop timetable</h3></div>
+            <button class="secondary-button" id="timetable-read">Read stop-by-stop times</button>
+          </div>
+          <div class="repair-note">Read relative arrival/departure times from line templates at 0.5-second storage precision, not live game movements. Templates can be one-way, round-trip or circular; inspect their stop order before treating them as full train cycles.</div>
+          <div class="timetable-lines" id="timetable-lines"><div class="placeholder">Read stop-by-stop times to expand each line's timetable from the current save.</div></div>
+        </article>
+
+        <article class="panel" id="ops-panel">
+          <div class="panel-heading">
+            <div><p class="step">No JSON needed · Estimates</p><h3>Estimate operations from the save alone</h3></div>
+            <button class="secondary-button" id="ops-read">Recalculate for target headway</button>
+          </div>
+          <div class="repair-note">
+            Headways are derived from rules, <b>Not written to the save</b>, so estimates are read directly from the save: <code>h ≈ Line-template duration T ÷ Train count N</code>(T, N All read directly from the save).
+            This simplified estimate omits return travel, turnaround, depot moves and waiting outside the template. It may underestimate required trains; the error varies by line.
+            The game expands exact departures, headways and service days at runtime. They cannot be reproduced precisely from the save alone. When available, exports are used as<b>Game-export reference data</b> Reconcile each entry.
+          </div>
+          <div class="ops-planner">
+            <label class="output-label">Target headway (s)<input id="ops-target" type="number" min="30" step="30" placeholder="e.g. 600 = 10 min"></label>
+            <label class="output-label ops-guard"><input type="checkbox" id="ops-use-export" checked> Compare with the game's timetable export (read-only)</label>
+          </div>
+          <div id="ops-summary" class="overview-meta"></div>
+          <div class="timetable-lines" id="ops-lines"><div class="placeholder">Recalculate for target headway estimates headways from the current save. Enter a target to estimate required trains.</div></div>
+        </article>
+
+        <div class="metric-grid" id="metric-grid" hidden></div>
+        <article class="panel" id="findings-panel" hidden>
+          <div class="panel-heading"><div><p class="step">Diagnostic results</p><h3>Items needing attention</h3></div><span class="count-badge" id="finding-count">0</span></div>
+          <div class="finding-list" id="finding-list"></div>
+        </article>
+        <article class="panel" id="repair-panel" hidden>
+          <div class="panel-heading"><div><p class="step">Repair selected issues</p><h3>Repairable tasks</h3></div><span class="count-badge" id="repair-count">0</span></div>
+          <div class="repair-note">Repair only issues confirmed by export data, such as continuous depot loops or competing old timetables, in a new save. The main save remains unchanged.</div>
+          <div id="repair-list" class="schedule-grid"></div>
+          <div class="action-panel">
+            <label class="output-label">New repaired save<input id="fix-output" type="text" spellcheck="false"></label>
+            <button class="primary-button" id="fix-button">Repair selected issues in a new save</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-analytics">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">OPERATIONS ANALYTICS</p><h2>Operating analysis (read-only)</h2><p>Calculate service hours, headway regularity, days covered and fleet size from the game export JSON. Never modifies saves.</p></div>
+          <span class="phase-badge safe">Read-only analysis</span>
+        </div>
+          <div class="metric-grid" id="analytics-kpi"><div class="placeholder">Per-timetable operating details require a game timetable export. Open Overview & health › Need timetable data? Export it from the game first. Follow the steps to select and verify matching files. Headway estimates in the overview do not need an export.</div></div>
+        <article class="panel" id="analytics-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">Per-timetable metrics</p><h3>Timetable operating details</h3></div>
+            <div class="analytics-tools">
+              <input id="analytics-search" type="search" placeholder="Search timetables / lines…" spellcheck="false">
+              <select id="analytics-filter" aria-label="Filter by severity">
+                <option value="all">All severities</option>
+                <option value="critical">Critical only</option>
+                <option value="warning">Warnings only</option>
+                <option value="issues">Issues found</option>
+                <option value="good">Healthy</option>
+              </select>
+              <button class="text-button" id="export-report-csv">Export CSV</button>
+              <button class="text-button" id="export-report-json">Export operating report JSON</button>
+            </div>
+          </div>
+          <div id="analytics-list" class="analytics-list"></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-map">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">TRANSIT MAP</p><h2>Route maps (read-only)</h2><p>Search and select lines, then choose a geographic map, urban metro poster or railway overview. Layout uses actual stop order and interchange relationships without changing game tracks. Export SVG for printing or sharing.</p></div>
+          <span class="phase-badge safe">Read-only analysis</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">Step 1</p><h3>Select lines</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="load-lines">Load lines from game timetable data</button>
+              <button class="text-button" id="map-select-service">Select passenger lines in filtered results</button>
+              <button class="text-button" id="map-select-all">Select all filtered results</button>
+              <button class="text-button" id="map-clear">Deselect filtered results</button>
+              <button class="text-button" id="map-clear-all">Deselect all lines</button>
+            </div>
+          </div>
+          <div class="map-list-tools">
+            <label>Search lines<input id="map-line-search" type="search" placeholder="Line name, number or station name" autocomplete="off"></label>
+            <label>Sort<select id="map-line-sort"><option value="name-asc">Name A–Z (natural sort)</option><option value="name-desc">Name Z–A</option><option value="code-asc">Line number ↑</option><option value="stops-desc">Most stops first → fewer</option><option value="stops-asc">Fewest stops first → more</option><option value="selected-first">Selected first</option></select></label>
+            <label class="map-toggle"><input id="map-only-selected" type="checkbox">Selected only</label>
+            <p id="map-selection-summary" role="status">No lines loaded</p>
+          </div>
+          <p class="map-selection-note">Search filters only the list, not selection or drawing. Selected lines hidden by search are still drawn and exported.</p>
+          <div id="map-line-list" class="map-line-grid"><div class="placeholder">Export timetable data in game. Refresh files in Overview & health, select that export, then Load lines from game timetable data. This does not read a route-map export from the toolkit JSON.</div></div>
+          <details class="map-branch-controls">
+            <summary>Group branches of the same line (metro diagram only)</summary>
+            <p>Automatic grouping uses names/numbers and shared sections, or matching colors, shared endpoints and at least two shared sections. A shared origin alone does not merge lines. Override incorrect groups here.</p>
+            <label>Group name <input id="map-branch-name" type="text" maxlength="80" placeholder="e.g. Airport Line"></label>
+            <div class="button-row">
+              <button id="map-branch-group" type="button">Group selected as one line</button>
+              <button id="map-branch-independent" type="button">Keep selected lines separate</button>
+              <button id="map-branch-auto" type="button">Selected lines reset to automatic grouping</button>
+            </div>
+            <p>Applies to all selected lines, including those hidden by search. Clear the selection first, then choose the branches to group. A group uses the first listed line's color and draws shared adjacent-stop sections once; sections with different stop orders remain distinct. Reloading data clears manual groups. Route-map JSON exports retain grouping. Game lines and saves are unchanged.</p>
+          </details>
+        </article>
+        <article class="panel" id="map-render-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">Route maps</p><h3>Network diagram</h3></div>
+            <div class="analytics-tools">
+              <label class="map-toggle">Style
+                <select id="map-style">
+                  <option value="geo">Geographic diagram (multiple lines)</option>
+                  <option value="schematic">Octolinear diagram</option>
+                  <option value="metro">Metro network map (shared corridors / interchanges)</option>
+                  <option value="strip">Single-line strip map (metro-style)</option>
+                </select>
+              </label>
+              <label class="map-toggle" id="map-metro-theme-wrap" hidden>Network map layout<select id="map-metro-theme"><option value="metro">Urban metro · Rounded corners / labels along lines</option><option value="atlas">Railway overview · Compact / small markers</option></select><select id="map-metro-orientation" aria-label="Map orientation"><option value="h">Landscape poster</option><option value="v">Portrait overview</option><option value="geo">Preserve approximate geographic direction</option></select></label>
+              <label class="map-toggle" id="map-transfer-wrap" hidden>Interchange markers<select id="map-transfer-style"><option value="circle">Large circle</option><option value="capsule">Capsule (rounded rectangle)</option></select></label>
+              <label class="map-toggle" id="map-layout-wrap" hidden>Layout<select id="map-metro-layout"><option value="regular">Standard network</option><option value="grid">Grid layout (horizontal / vertical)</option></select></label>
+              <label class="map-toggle" id="map-merge-wrap" hidden><input id="map-merge-branches" type="checkbox" checked>Merge branches of the same line (automatic or manual grouping)</label>
+              <label class="map-toggle" id="map-orient-wrap" hidden>Direction
+                <select id="map-orient">
+                  <option value="h">Landscape</option>
+                  <option value="v">Portrait</option>
+                </select>
+              </label>
+              <label class="map-toggle"><input type="checkbox" id="map-all-labels"> Show all station names</label>
+              <label class="map-toggle"><input type="checkbox" id="map-curved" checked> Smooth curves</label>
+              <button class="text-button" id="draw-map">Draw route map</button>
+              <label class="map-toggle">Zoom<select id="map-zoom"><option value="fit">Fit to window</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select></label>
+              <button class="text-button" id="export-map-svg">Export SVG</button>
+              <button class="text-button" id="export-map-json">Export route-map data JSON</button>
+            </div>
+          </div>
+          <details class="map-advanced">
+            <summary>Route-map export folder · This page only SVG / JSON</summary>
+            <label class="map-export-label">Full folder path<input id="map-export-dir" type="text" placeholder="For example D:\NIMBY Route maps"></label>
+            <button class="text-button" id="map-export-save">Save folder</button>
+            <button class="text-button" id="map-export-default">Reset to default folder</button>
+            <p id="map-export-status" role="status">JSON Exports selected lines, stop order, original coordinates and drawing settings. This is not a game timetable export or an automatic-track-laying route GeoJSON.</p>
+          </details>
+          <details class="map-advanced">
+            <summary>Advanced options · Font / canvas / line width / stations</summary>
+            <div class="map-adv-grid">
+              <label>Label font size<input type="number" id="map-fontsize" value="11" min="6" max="40" step="1"></label>
+              <label>Canvas width<input type="number" id="map-width" value="1400" min="600" max="6000" step="20"></label>
+              <label>Canvas height<input type="number" id="map-height" value="940" min="400" max="6000" step="20"></label>
+              <label>Line width<input type="number" id="map-linewidth" value="6" min="1" max="30" step="1"></label>
+              <label>Station marker size<input type="number" id="map-dotscale" value="1" min="0.3" max="4" step="0.1"></label>
+              <label>Stop spacing<input type="number" id="map-gap" value="66" min="24" max="200" step="2"></label>
+              <button class="text-button" id="map-reset-adv">Reset defaults</button>
+            </div>
+            <p class="map-adv-hint">Canvas size applies to geographic, octolinear and metro maps. Metro diagrams use straight segments, rounded corners and labels along lines. Crowded areas expand the canvas or use leader lines, never numeric labels instead of names. Choose landscape metro, portrait railway or approximate geographic orientation. Spacing affects strip and metro maps; smooth curves apply only to geographic diagrams. Interchanges require the same station ID; matching names alone are not merged.</p>
+          </details>
+          <p id="map-render-status" role="status" aria-live="polite">Select lines to draw. Railway overview is a layout under Metro network map.</p>
+          <div id="map-canvas" class="map-canvas"><div class="placeholder">Select lines, then Draw route map”.</div></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-realnet">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">REAL-WORLD REFERENCE</p><h2>Real-world reference map</h2><p>Overlay OpenRailwayMap data and your game's lines and stations in the same geographic coordinates to plan recreations. Planning pins and the view are saved in this browser.</p></div>
+          <span class="phase-badge">Internet required</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">Base map & layers</p><h3>Reference map</h3></div>
+            <div class="analytics-tools realnet-tools">
+              <label class="map-toggle">Base map
+                <select id="realnet-base" aria-label="Base map">
+                  <option value="carto">Light base map</option>
+                  <option value="osm">OpenStreetMap</option>
+                  <option value="dark">Dark base map</option>
+                </select>
+              </label>
+              <label class="map-toggle">Railway layer
+                <select id="realnet-overlay" aria-label="Railway layer">
+                  <option value="standard">Standard (lines / stations)</option>
+                  <option value="maxspeed">Speed limit</option>
+                  <option value="signals">Signals</option>
+                  <option value="none">Off</option>
+                </select>
+              </label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-game" checked> Overlay game network</label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-signals"> Show signals / points</label>
+              <label class="map-toggle"><input type="checkbox" id="realnet-show-tracks"> Show actual track paths</label>
+            </div>
+          </div>
+          <div class="realnet-importbar">
+            <strong>Read directly from a save (no JSON)</strong>
+            <button class="text-button" id="realnet-read-save">Read the network from this save (including signals)</button>
+            <button class="text-button" id="realnet-read-tracks">Read actual track geometry</button>
+            <span id="realnet-read-count" class="realnet-import-count"></span>
+            <small>Scan the whole selected save and reconstruct tracks using complete Track IDs, bidirectional adjacency, and every structure and height level<strong>Actual track alignment</strong>(including tracks far from stations and valid long connections. No JSON export needed. The first scan may take longer.</small>
+          </div>
+          <div class="realnet-searchbar">
+            <input id="realnet-search" type="search" placeholder="Find a place (e.g. Tokyo Station, Shanghai, 45.5,-73.6)" spellcheck="false">
+            <button class="text-button" id="realnet-go">Go to</button>
+            <button class="text-button" id="realnet-fit-game">Fit game network</button>
+            <label class="map-toggle"><input type="checkbox" id="realnet-pin-mode"> Click map to place planning pins</label>
+            <button class="text-button" id="realnet-export-geojson">Export station markers as GeoJSON (not a track-laying route)</button>
+            <button class="text-button" id="realnet-export-csv">Export planning pins CSV</button>
+            <button class="text-button danger-text" id="realnet-clear-pins">Clear planning pins</button>
+          </div>
+          <div class="realnet-importbar">
+            <strong>Real-world data import</strong>
+            <button class="text-button" id="realnet-import-stations">Fetch real-world stations in this area</button>
+            <button class="text-button" id="realnet-import-lines">Fetch real-world lines in this area</button>
+            <button class="text-button" id="realnet-import-to-pins" disabled>Add stations as planning pins</button>
+            <button class="text-button danger-text" id="realnet-import-clear" disabled>Clear imported data</button>
+            <span id="realnet-import-count" class="realnet-import-count"></span>
+            <small>OpenStreetMap data via Overpass, for recreation reference. Zoom to city level first.</small>
+          </div>
+          <div id="realnet-map" class="realnet-map"><div class="placeholder">Loading map components… (the first load needs internet access for Leaflet and tiles)</div></div>
+          <div class="realnet-foot">
+            <span id="realnet-pin-count">0 planning pins</span>
+            <small>Base map © OpenStreetMap / CARTO; Railway layer © <a href="https://www.openrailwaymap.org/" target="_blank" rel="noopener">OpenRailwayMap</a>(CC-BY-SA 2.0). For personal reference only.</small>
+          </div>
+        </article>
+        <article class="panel" id="realnet-lines-panel" hidden>
+          <div class="panel-heading">
+            <div><p class="step">Real-world network import wizard</p><h3>Real-world line checklist</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="realnet-lines-json" disabled>Export manifest JSON</button>
+              <button class="text-button" id="realnet-lines-csv" disabled>Export manifest CSV</button>
+              <button class="text-button danger-text" id="realnet-lines-clear" disabled>Clear lines</button>
+            </div>
+          </div>
+          <p class="repair-note">Real-world lines from OpenStreetMap, including ordered stops, for recreating in game. Click a line to highlight it; click Stations→pins to add this line's stops to planning pins. Distance is approximated by straight-line segments between stops.</p>
+          <div id="realnet-lines-list" class="realnet-lines-list"><div class="placeholder">Fetch real-world lines in this area reads metro, light rail, tram and railway route relations within the current map view.</div></div>
+        </article>
+        <article class="panel" id="realnet-pin-panel" hidden>
+          <div class="panel-heading"><div><p class="step">Planning checklist</p><h3>Planning pins (recreation checklist)</h3></div><span class="phase-badge safe">Local storage</span></div>
+          <div id="realnet-pin-list" class="realnet-pin-list"></div>
+        </article>
+        <article class="panel" id="realnet-align-panel">
+          <div class="panel-heading">
+            <div><p class="step">Coordinate-level alignment</p><h3>Edit station coordinates (does not move tracks)</h3></div>
+            <span class="phase-badge safe">New saves only</span>
+          </div>
+          <p class="repair-note">Read the network from the current save first. Select a station, enter target coordinates or capture them from the map, then add it to the alignment list. Generation changes only the station's 16-byte coordinate field in a new save. Platform tracks, signals, connections and other data do not move.</p>
+          <div class="realnet-searchbar">
+            <select id="align-station" aria-label="Select station"><option value="">Read the network first…</option></select>
+            <input id="align-lonlat" type="text" placeholder="Target coordinates lon,lat(e.g. -79.38,43.64)" spellcheck="false">
+            <label class="map-toggle"><input type="checkbox" id="align-pick"> Click map to capture coordinates</label>
+            <button class="text-button" id="align-add">Add to alignment list</button>
+          </div>
+          <div id="align-list" class="realnet-pin-list"></div>
+          <div class="realnet-searchbar">
+            <input id="align-output" type="text" placeholder="New save filename (without extension)" spellcheck="false">
+            <button class="text-button" id="align-generate" disabled>Generate new aligned save</button>
+            <button class="text-button danger-text" id="align-clear" disabled>Clear alignment list</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-timetable">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">TIMETABLE STUDIO</p><h2>Timetable tools: choose a task</h2><p>This page contains theoretical planning and save-editing tools. Generating a train graph does not configure the game. Load and verify every new save copy in game.</p></div>
+          <span class="phase-badge safe">Plans do not write saves · Changes create a new copy</span>
+        </div>
+        <nav class="task-shortcuts" aria-label="Timetable tasks">
+          <a href="#ttd-panel">Calculate theoretical plan only</a><a href="#ttd-write">Edit dwell times</a><a href="#oprule-card">Edit game operating orders</a><a href="#migration-output">Migrate fleet</a><a href="#recover-panel">Restore historical fleet</a>
+        </nav>
+        <p class="repair-note">Term: line-template duration＝Run once in the listed stop order; full train cycle＝Total time to return to the same departure conditions, including return travel and turnaround. Departure offsets＝Delay relative to the first train, e.g. 0 / 7 / 14 minutes. Next day 00:30 Accepted format 24:30. Use the seconds/minutes selector beside the input.</p>
+        <article class="panel" id="ttd-panel">
+          <div class="panel-heading"><div><p class="step">Timetable studio</p><h3>Train-graph design</h3></div>
+            <button class="secondary-button" id="ttd-read">Read lines again (no JSON)</button>
+          </div>
+          <div class="ttd-layout">
+            <div class="ttd-form">
+              <label>Lines<select id="ttd-line" aria-label="Lines"><option value="">First select Read lines again (no JSON)”</option></select></label>
+              <label>Direction of travel
+                <select id="ttd-dir">
+                  <option value="round" selected>Outbound template + symmetric return (estimate)</option>
+                  <option value="single">Run the complete template (do not add a return trip)</option>
+                </select>
+              </label>
+              <div class="ttd-row"><label>First departure<input id="ttd-first" type="text" value="05:30" placeholder="05:30"></label><label>Last departure<input id="ttd-last" type="text" value="24:30" placeholder="24:30"><small>Next-day writes supported 24:30 / 25:00</small></label></div>
+              <div class="ttd-row"><label>Peak headway<input id="ttd-peak" type="number" min="0.5" max="180" step="0.5" value="4"><span>min</span></label><label>Off-peak headway<input id="ttd-offpeak" type="number" min="0.5" max="360" step="0.5" value="10"><span>min</span></label></div>
+              <label>Peak windows<input id="ttd-windows" value="07:00-09:30, 16:00-19:00"><small>Separate time windows with commas; overnight windows are supported</small></label>
+              <div class="ttd-row"><label>Destination turnaround<input id="ttd-layover" type="number" min="0" max="60" step="0.5" value="4"><span>min</span></label><label>Template run<input id="ttd-run" type="number" min="1" max="600" step="0.1" value="0" readonly><span>min</span></label></div>
+              <div class="ttd-row"><label>Uniform dwell time<input id="ttd-dwell" type="number" min="0" max="600" step="1" placeholder="Use template dwell times"><span>s</span><small>Leave blank to use template dwell times. Entered values affect only this estimate and are not written automatically to the game</small></label></div>
+              <button class="primary-button full" id="ttd-generate">Generate theoretical operating plan</button>
+              <div class="ttd-exports" hidden id="ttd-exports">
+                <button class="text-button" id="ttd-backfill" title="Copy current dwell settings to the dwell-time editor below”">↓ Copy to dwell-time editor</button>
+                <button class="text-button" id="ttd-export-csv">Export CSV</button>
+                <button class="text-button" id="ttd-export-json">Export theoretical operating plan JSON</button>
+                <button class="text-button" id="ttd-export-svg">Export train graph SVG</button>
+              </div>
+            </div>
+            <div class="ttd-results" id="ttd-results">
+              <div class="placeholder">Read lines again without JSON, select the lines and parameters, then Generate theoretical operating plan”.</div>
+            </div>
+          </div>
+          <div class="ttd-write" id="ttd-write">
+            <div class="ttd-write-head">
+              <div><p class="step">Write to save · In-game validation completed</p><h3>Write dwell times</h3></div>
+              <span class="phase-badge">Write new saves only</span>
+            </div>
+            <p class="ttd-write-note">Write the line's dwell-time input directly, including its default and per-stop copies, matching the game's storage format. Takes effect when the new save loads; actual dwell is ≈ Configured dwell + boarding/alighting time. <b>Creates a new save; never modifies the original.</b></p>
+            <div class="ttd-w-lineinfo">Write lines: <b id="ttd-w-linename">Use the designer above</b><select id="ttd-w-line" hidden aria-label="Write lines"></select></div>
+            <div class="ttd-write-form">
+              <label>Write mode
+                <select id="ttd-w-mode">
+                  <option value="uniform" selected>Uniform across line</option>
+                  <option value="perstop">Per-stop settings</option>
+                </select>
+              </label>
+              <label id="ttd-w-stop-wrap">Dwell time<input id="ttd-w-stop" type="number" min="1" max="600" step="1" value="45"><span>s</span></label>
+              <label class="ttd-w-out">Output filename<input id="ttd-w-output" type="text" readonly></label>
+              <button class="primary-button" id="ttd-w-write">Write a new save</button>
+            </div>
+            <div class="ttd-w-perstop" id="ttd-w-perstop" hidden>
+              <div class="ttd-w-perstop-bar">
+                <span>Dwell time per stop (s). Leave blank＝Use line default.</span>
+                <span class="ttd-w-fill">
+                  <button type="button" class="text-button" data-fill="clear">Clear all</button>
+                  <button type="button" class="text-button" data-fill="default">Fill all with defaults</button>
+                </span>
+              </div>
+              <div class="ttd-w-stoplist" id="ttd-w-stoplist"></div>
+            </div>
+            <div class="ttd-write-result" id="ttd-w-result" hidden></div>
+          </div>
+          <div class="ttd-write oprule-card" id="oprule-card">
+            <div class="ttd-write-head">
+              <div><p class="step">CUSTOM TIMETABLE · No JSON</p><h3>Custom operating-timetable editor</h3></div>
+              <span class="phase-badge">Write new saves only</span>
+            </div>
+            <p class="ttd-write-note">Edit the complete order table in one place: lines, entry/exit stops, timing points, days, repeats and per-train offsets. Leave new IDs blank for automatic assignment. Stop choices come from the selected line. Advanced fields Line＝Lines, Timing＝Timing mode, Enter/Exit＝entry/exit stops. Stacking means nested sub-orders; up to 10 offset groups are supported. Writing creates a new copy and verifies its structure.</p>
+            <div class="oprule-toolbar">
+              <button class="secondary-button" id="oprule-read">Read current save</button>
+              <label>Timetable<select id="oprule-schedule" disabled><option value="">Read the save first</option></select></label>
+              <div class="oprule-file-actions">
+                <button class="text-button" id="oprule-reset" disabled>Undo all changes</button>
+                <button class="text-button" id="oprule-export" disabled>Export a reusable timetable plan</button>
+                <label class="text-button oprule-import">Import plan<input id="oprule-import" type="file" accept="application/json,.json" disabled></label>
+              </div>
+            </div>
+            <div id="oprule-editor" hidden>
+              <div class="oprule-summary" id="oprule-summary"></div>
+              <div class="oprule-audit" id="oprule-audit"></div>
+              <div class="oprule-timeline" id="oprule-timeline"></div>
+              <div class="oprule-smartbar">
+                <div class="oprule-smart-head"><b>Generate departure sequence</b><small>Append single-run orders using a start time, end time and headway. New IDs are assigned when writing; no manual IDs needed</small></div>
+                <label class="oprule-field">Line<select id="oprule-smart-line"></select></label>
+                <label class="oprule-field">Start<input id="oprule-smart-start" type="text" value="06:00"></label>
+                <label class="oprule-field">End<input id="oprule-smart-end" type="text" value="09:00"></label>
+                <label class="oprule-field">Interval (min)<input id="oprule-smart-headway" type="number" min="0.5" max="1440" step="0.5" value="7"></label>
+                <label class="oprule-field">Days<select id="oprule-smart-days"><option value="31">Weekdays</option><option value="127">Every day</option><option value="96">Weekend</option></select></label>
+                <label class="oprule-field">Offset groups<select id="oprule-smart-group"><option value="0">groups 1</option><option value="1">groups 2</option><option value="2">groups 3</option><option value="3">groups 4</option><option value="4">groups 5</option><option value="5">groups 6</option><option value="6">groups 7</option><option value="7">groups 8</option><option value="8">groups 9</option><option value="9">groups 10</option></select></label>
+                <button type="button" class="secondary-button" id="oprule-smart-generate">Generate and append</button>
+              </div>
+              <div class="oprule-bulkbar">
+                <label class="oprule-selectall"><input id="oprule-select-all" type="checkbox" checked> Select all orders</label>
+                <span class="oprule-bulk-label">Batch days</span>
+                <button class="text-button" data-op-days="127">Every day</button>
+                <button class="text-button" data-op-days="31">Weekdays</button>
+                <button class="text-button" data-op-days="96">Weekend</button>
+                <span class="oprule-bulk-label">Shift times</span>
+                <input id="oprule-shift" type="number" min="0.5" max="1440" step="0.5" value="5" aria-label="Batch time shift (min)">
+                <button class="text-button" data-op-shift="-1">−</button>
+                <button class="text-button" data-op-shift="1">＋</button>
+                <button class="text-button" id="oprule-sort">Sort by time</button>
+              </div>
+              <div class="oprule-entry-list" id="oprule-entry-list"></div>
+              <section class="oprule-groups">
+                <div class="oprule-section-head">
+                  <div><b>Offset group settings</b><small>Assign orders freely to groups 1–10; each group has its own distribution mode</small></div>
+                  <div><button class="text-button" id="oprule-copy-group">Duplicate group</button><button class="text-button" id="oprule-paste-group" disabled>Paste into this group</button></div>
+                </div>
+                <div class="oprule-group-tabs" id="oprule-group-tabs"></div>
+                <div class="oprule-group-editor" id="oprule-group-editor"></div>
+              </section>
+              <div class="oprule-savebar">
+                <div class="oprule-save-copy"><b id="oprule-dirty">Unchanged</b><small>Before writing, verify the target timetable, confirm other timetables are unchanged, and validate the compressed readback</small></div>
+                <label class="ttd-w-out">Output filename<input id="oprule-output" type="text" readonly></label>
+                <button class="primary-button" id="oprule-write">Create save with custom timetable</button>
+              </div>
+            </div>
+            <div class="ttd-write-result" id="oprule-result" hidden></div>
+          </div>
+        </article>
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">FLEET MIGRATION</p><h2>Migration & scheduling</h2><p>Migrate existing fleets to Daily templates prepared in game, retaining each template's line and depot structure.</p></div>
+          <span class="phase-badge">Write a new copy</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Smart matching</p><h3>Ready-to-run migration plan</h3></div><span class="count-badge" id="pair-count">0</span></div>
+          <div id="pair-list" class="pair-list"><div class="placeholder">Migration requires timetable data exported by the game. Open Overview & health › Need timetable data? Export it from the game first. Select and verify matching files before executable plans appear.</div></div>
+        </article>
+        <article class="panel action-panel">
+          <div>
+            <label class="switch-row"><input type="checkbox" id="garage-join" checked><span class="switch"></span><span><strong>Also enable the depot-join extension</strong><small>Trains are identified by unique ID; duplicate names do not collide</small></span></label>
+            <label class="output-label">New save name<input id="migration-output" type="text" spellcheck="false"></label>
+          </div>
+          <button class="primary-button" id="migrate-button">Create a new save</button>
+        </article>
+        <article class="panel planner-panel">
+          <div class="panel-heading"><div><p class="step">Calculate only</p><h3>Even departure-offset plan</h3></div><button class="text-button" id="export-plan">Export plan JSON</button></div>
+          <div class="planner-layout">
+            <div class="planner-form">
+              <label>Plan name<input id="plan-name" value="New line Daily"></label>
+              <div class="planner-row"><label>First departure<input id="plan-first" type="time" value="05:30"></label><label>Last departure<input id="plan-last" type="time" value="01:00"></label></div>
+              <div class="planner-row"><label>Full cycle per train<input id="plan-cycle" type="number" min="5" max="1440" value="90"><span>min</span></label><label>Extra delay for first train<input id="plan-phase" type="number" min="0" max="60" step="0.5" value="0"><span>min</span></label></div>
+              <div class="planner-row"><label>Peak headway<input id="plan-peak" type="number" min="0.5" max="180" step="0.5" value="5"><span>min</span></label><label>Off-peak headway<input id="plan-offpeak" type="number" min="0.5" max="360" step="0.5" value="12"><span>min</span></label></div>
+              <label>Peak windows<input id="plan-windows" value="07:00-09:30, 15:30-18:30"><small>Separate time windows with commas; overnight windows are supported</small></label>
+              <button class="primary-button full" id="calculate-plan">Calculate operating plan</button>
+            </div>
+            <div class="planner-results" id="planner-results">
+              <div class="placeholder">Enter operating conditions, then select Calculate operating plan”.</div>
+            </div>
+          </div>
+        </article>
+        <article class="panel" id="headway-panel">
+          <div class="panel-heading"><div><p class="step">Tools</p><h3>Headway planner (target headway → Required train count)</h3></div><span class="phase-badge safe">Theoretical estimate · No save writes</span></div>
+          <p class="repair-note">By default, estimates use saved line-template duration and assigned train count. With verified export data, they use exported headway × current train count to infer duration. Neither is guaranteed to equal a full train cycle. Theoretical fleet size uses duration ÷ target headway, rounded up. Extra depot moves, conflict waits and spares are excluded; account for them before changing fleet size. First run a no-JSON health check or verify the save against its game export”.</p>
+          <div class="headway-controls">
+            <label>Target headway<input id="headway-target" type="number" min="0.5" max="240" step="0.5" value="5"><span>min</span></label>
+            <label class="map-toggle"><input type="checkbox" id="headway-only-service" checked> Passenger lines only</label>
+            <button class="secondary-button" id="headway-calc">Calculate required trains</button>
+            <button class="text-button" id="headway-export" hidden>Export plan CSV</button>
+          </div>
+          <div class="headway-summary" id="headway-summary"></div>
+          <div class="headway-table-wrap"><table class="headway-table" id="headway-table" hidden><thead><tr><th>Timetable</th><th>Current train count</th><th>Current headway</th><th>Template / estimated duration T</th><th>Target headway</th><th>Required train count</th><th>Change</th></tr></thead><tbody id="headway-rows"></tbody></table></div>
+        </article>
+        <article class="panel" id="recover-panel">
+          <div class="panel-heading"><div><p class="step">Template recovery</p><h3>Restore a fleet from an older export</h3></div><span class="phase-badge safe">Write a new copy · Verify in game</span></div>
+          <p class="repair-note">If a Daily template loses its fleet, recover the train list from an older game timetable export while using the template structure in the current save. A new save is written; the main save stays unchanged. First verify current files in Overview & health. Recovery requires an export from before the fleet was lost; a fresh export cannot reconstruct a missing list.</p>
+          <div class="file-grid recover-grid">
+            <label>Target template (currently blank timetable)<select id="recover-target" aria-label="Target template"></select></label>
+            <button class="secondary-button" id="find-reference-btn">Find historical fleets</button>
+          </div>
+          <div id="reference-list" class="pair-list"><div class="placeholder">Select a target template, then Find historical fleets”.</div></div>
+          <div class="action-panel">
+            <div>
+              <label class="switch-row"><input type="checkbox" id="recover-garage" checked><span class="switch"></span><span><strong>Also enable the depot-join extension</strong><small>Trains are identified by unique ID; duplicate names do not collide</small></span></label>
+              <label class="output-label">New restored save<input id="recover-output" type="text" spellcheck="false"></label>
+            </div>
+            <button class="primary-button" id="recover-btn" disabled>Restore from this template</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-extensions">
+        <p class="repair-note">Timetable garage join relaxes position matching for existing trains. It does not build depots, schedule returns or bypass signals. First generate the rule under Script rules, extract it to the save directory's mods folder, enable it in game and save. Then verify the files and bind it in bulk. The diagnostic assistant's read-only logging mod is separate and cannot replace it.</p>
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">DEPOT CONTROL</p><h2>Timetable garage join</h2><p>Add or remove Timetable garage join in bulk, affecting only trains assigned to selected timetables.</p></div>
+          <span class="phase-badge">Unique-ID mode</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Select fleets</p><h3>Configured timetables</h3></div><button class="text-button" id="toggle-schedules">Select all</button></div>
+          <div id="schedule-list" class="schedule-grid"><div class="placeholder">In Overview & health, select the save and game timetable export, then Verify save against game export. Fleets appear here after verification. The no-JSON health check does not populate this list.</div></div>
+        </article>
+        <article class="panel action-panel">
+          <label class="output-label">New save name<input id="extension-output" type="text" spellcheck="false"></label>
+          <div class="button-row"><button class="secondary-button" id="remove-extension">Remove extension</button><button class="primary-button" id="add-extension">Add extension</button></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-binder">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">BATCH BINDER</p><h2>Batch extension binding</h2><p>Configure operating extensions for multiple lines and fleets. Generate a loadable private mod and per-object activation checklist, or write verified depot joins into a new save. Arbitrary binary fields are never overwritten.</p></div>
+          <span class="phase-badge safe">mod Safety + verified writes</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">Step 1</p><h3>Select lines to bind</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="binder-load-lines">Load lines from game timetable data</button>
+              <button class="text-button" id="binder-lines-all">Select all</button>
+              <button class="text-button" id="binder-lines-none">Clear</button>
+            </div>
+          </div>
+          <div id="binder-line-list" class="map-line-grid"><div class="placeholder">Select game-generated timetable data in Overview & health, then Load lines from game timetable data”.</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Step 2</p><h3>Operating-rule mod (safe)</h3></div><span class="phase-badge safe">Generate a mod without changing saves</span></div>
+          <div class="binder-rules">
+            <label class="map-toggle"><input type="checkbox" id="binder-garage" checked> Depot joins(Timetable garage join)</label>
+            <label class="map-toggle"><input type="checkbox" id="binder-hold"> Additional wait on arrival <input type="number" id="binder-hold-s" value="30" min="0" max="3600" step="5"> s</label>
+            <label class="map-toggle"><input type="checkbox" id="binder-speed"> Signal approach speed limit <input type="number" id="binder-speed-kmh" value="40" min="1" max="500" step="5"> km/h · Distance to signal <input type="number" id="binder-speed-distance" value="800" min="1" max="15000" step="50"> m within</label>
+          </div>
+          <div class="binder-meta">
+            <label>Mod name<input type="text" id="binder-name" value="Batch operations extensions" spellcheck="false"></label>
+            <label>Mods ID<input type="text" id="binder-id" value="stm_timetable_garage_join_1" readonly spellcheck="false"><small>Binary binding accepts only verified fixed ID</small></label>
+            <button class="primary-button" id="binder-generate">Generate binding mod + checklist</button>
+          </div>
+          <div id="binder-result" class="binder-result" hidden></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading">
+            <div><p class="step">Step 3 (optional)</p><h3>Batch depot joins · Write new save</h3></div>
+            <div class="analytics-tools">
+              <button class="text-button" id="binder-load-fleets">Load fleets from verified results</button>
+              <button class="text-button" id="binder-fleets-all">Select all</button>
+              <button class="text-button" id="binder-fleets-none">Clear</button>
+            </div>
+          </div>
+          <p class="repair-note">Creates a new save and never overwrites the original. Export timetable data in game, select the matching files in Overview & health, then verify them. The no-JSON health check does not provide depot-extension binding data.</p>
+          <div id="binder-fleet-list" class="schedule-grid"><div class="placeholder">Verify the save against the game export, then Load fleets from verified results”.</div></div>
+          <div class="binder-meta">
+            <label class="output-label">New save name<input id="binder-output" type="text" spellcheck="false"></label>
+            <button class="primary-button" id="binder-write-garage">Batch-write depot joins</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="view" id="view-vehicle">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">ROLLING STOCK WORKSHOP</p><h2>Vehicle & asset mod builder</h2><p>Generate a vehicle mod with configuration and placeholder textures. Extract it into private mods, enable it in game and test purchasing trains. Successful generation is not in-game acceptance. Replace textures later if desired.</p></div>
+          <span class="phase-badge">Generate mod files</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Read-only import</p><h3>Installed vehicles & Steam Workshop</h3></div><button class="text-button" id="veh-scan-mods">Scan vehicle mods</button></div>
+          <p class="repair-note">Read mod.txt from built-in vehicles, private mods and Steam Workshop. Check duplicate IDs, formation references and 1024×128 textures without modifying original files. Exported Train records do not contain vehicle-type or formation definitions, so active fleet configurations are not reconstructed from timetable exports.</p>
+          <div class="binder-meta"><label>Select mod<select id="veh-catalog"><option value="">Not scanned</option></select></label><label>Select vehicle type<select id="veh-catalog-model"><option value="">Load a mod first</option></select></label><button class="secondary-button" id="veh-import-model">Import into advanced editor</button></div>
+          <div id="veh-catalog-summary" class="placeholder">After scanning, view mods, vehicle units, vehicle types, formations and issue counts.</div>
+        </article>
+        <div class="script-layout">
+          <article class="panel script-builder">
+            <p class="step">Mod information</p><h3>Vehicle definition</h3>
+            <div class="veh-form">
+              <label>Mod name<input id="veh-mod-name" value="Custom EMU pack"></label>
+              <div class="planner-row"><label>Author<input id="veh-author" value="Local toolbox"></label><label>Version<input id="veh-version" value="1.0.0"></label></div>
+              <label>Vehicle name<input id="veh-model-name" value="City Metro 100"></label>
+              <label>Vehicle type ID<input id="veh-model-id" value="city_metro_100"><small>ASCII letters, numbers and underscores; sanitized automatically</small></label>
+              <div class="planner-row">
+                <label>Purpose
+                  <select id="veh-role">
+                    <option value="metro">Metro metro</option><option value="commuter" selected>Commuter commuter</option>
+                    <option value="regional">Region regional</option><option value="intercity">Intercity intercity</option>
+                    <option value="high-speed">High speed high-speed</option><option value="tram">Tram tram</option>
+                    <option value="light-rail">Light rail light-rail</option><option value="long-distance">Long-distance long-distance</option>
+                  </select>
+                </label>
+                <label>Traction
+                  <select id="veh-power-type">
+                    <option value="electric" selected>Electric electric</option><option value="diesel">Diesel diesel</option>
+                    <option value="steam">Steam steam</option><option value="turbine">Turbine turbine</option>
+                  </select>
+                </label>
+              </div>
+              <div class="planner-row">
+                <label>Track gauge
+                  <select id="veh-gauge"><option value="standard" selected>Standard gauge</option><option value="narrow">Narrow gauge</option><option value="broad">Broad gauge</option><option value="minimum-gauge">Minimum gauge</option><option value="monorail">Monorail</option><option value="maglev">Maglev</option><option value="tyres">Rubber-tyred</option></select>
+                </label>
+                <label>Production year<input id="veh-year" type="number" min="1800" max="2100" value="2015"></label>
+                <label>Country code<input id="veh-country" maxlength="2" placeholder="CN" value="CN"><small>ISO 2 letters</small></label>
+              </div>
+            </div>
+
+            <p class="step">Formations</p>
+            <div class="veh-form">
+              <div class="rule-options">
+                <label class="rule-option"><input type="checkbox" id="veh-two-cabs" checked><span><strong>One cab car at each end</strong><small>Disable for single-ended driving</small></span></label>
+                <label class="rule-option"><input type="checkbox" id="veh-middle-enabled" checked><span><strong>Include intermediate cars</strong><small>Disable to use cab cars only</small></span></label>
+              </div>
+            <div class="planner-row"><label>Minimum intermediate cars<input id="veh-middle-min" type="number" min="0" max="30" value="1"></label><label>Default<input id="veh-middle-def" type="number" min="0" max="30" value="2"></label><label>Up to<input id="veh-middle-max" type="number" min="1" max="30" value="6"></label></div>
+              <label class="map-toggle"><input type="checkbox" id="veh-advanced-enabled"> Use advanced vehicle structure (arbitrary TrainUnit definitions / multiple formations)</label>
+              <button class="text-button" id="veh-build-advanced" type="button">Convert this form to the advanced structure</button>
+              <label>Advanced structure JSON<textarea id="veh-advanced-json" rows="14" spellcheck="false" placeholder='{"units": [...], "compositions": [...]}'></textarea><small>Add any number of units and formations. When enabled, this advanced definition takes precedence.</small></label>
+            </div>
+
+            <p class="step">Cab-car parameters</p>
+            <div class="veh-grid">
+              <label>Length m<input id="veh-head-length" type="number" step="0.1" min="1" max="30" value="20"></label>
+              <label>Width m<input id="veh-head-width" type="number" step="0.05" min="1" max="3.75" value="2.9"></label>
+              <label>Maximum speed km/h<input id="veh-head-max-speed" type="number" min="10" max="10000" value="120"></label>
+              <label>Power kW<input id="veh-head-power" type="number" min="0" max="100000" value="1500"></label>
+              <label>Empty mass kg<input id="veh-head-empty-mass" type="number" min="1000" max="100000000" value="42000"></label>
+              <label>Unit price<input id="veh-head-price" type="number" min="0" value="2500000"></label>
+              <label>Passenger<input id="veh-head-max-pax" type="number" min="0" max="1000" value="150"></label>
+              <label>standing capacity<input id="veh-head-standing-pax" type="number" min="0" max="1000" value="100"></label>
+            </div>
+
+            <p class="step">Intermediate-car parameters</p>
+            <div class="veh-grid">
+              <label>Length m<input id="veh-middle-length" type="number" step="0.1" min="1" max="30" value="20"></label>
+              <label>Width m<input id="veh-middle-width" type="number" step="0.05" min="1" max="3.75" value="2.9"></label>
+              <label>Maximum speed km/h<input id="veh-middle-max-speed" type="number" min="10" max="10000" value="120"></label>
+              <label>Power kW<input id="veh-middle-power" type="number" min="0" max="100000" value="0"></label>
+              <label>Empty mass kg<input id="veh-middle-empty-mass" type="number" min="1000" max="100000000" value="34000"></label>
+              <label>Unit price<input id="veh-middle-price" type="number" min="0" value="1800000"></label>
+              <label>Passenger<input id="veh-middle-max-pax" type="number" min="0" max="1000" value="220"></label>
+              <label>standing capacity<input id="veh-middle-standing-pax" type="number" min="0" max="1000" value="150"></label>
+            </div>
+
+            <p class="step">Placeholder livery (textures can be replaced later)</p>
+            <div class="veh-color-row">
+              <label>Body stripe<input id="veh-body-color" type="color" value="#c0392b"></label>
+              <label>Windows<input id="veh-window-color" type="color" value="#243244"></label>
+              <label>Doors<input id="veh-door-color" type="color" value="#3c424e"></label>
+            </div>
+            <button class="primary-button full" id="generate-vehicle">Generate vehicle mod ZIP</button>
+          </article>
+          <article class="panel script-preview">
+            <div class="panel-heading"><div><p class="step">Mode</p><h3>How to use the generated files</h3></div><span class="verified-chip">Vehicle mod format v2</span></div>
+            <ol class="install-steps"><li><b>1</b><span>Download and extract the vehicle pack</span></li><li><b>2</b><span>Place the folder in the NIMBY Rails mods directory</span></li><li><b>3</b><span>Enable the mod from the game's main menu</span></li><li><b>4</b><span>The vehicle and formation become available in the purchase menu</span></li></ol>
+            <div class="veh-preview" id="veh-preview"><div class="placeholder">Generate a vehicle mod ZIP to preview its formations and mod.txt here.</div></div>
+            <div class="script-safety"><strong>Safety limits</strong><p>Generates mod files only; never changes saves. Textures are procedural placeholders(1024×128, 34.13 px/m). Estimates use the game's published formula: tractive effort is 0.75×The smaller of power/speed and maximum tractive effort.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-scripts">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">SCRIPT WORKSHOP</p><h2>NimbyScript Rule generator</h2><p>Select rules checked against the official interface to generate a complete mod package for the private mods folder.</p></div>
+          <span class="phase-badge">Tools</span>
+        </div>
+        <div class="script-layout">
+          <article class="panel script-builder">
+            <p class="step">Mod information</p><h3>Operating rule pack</h3>
+            <label>Display name<input id="script-name" value="Das Rails operations rules"></label>
+            <label>Scripts ID<input id="script-id" value="das_rails_operations_rules"><small>Use ASCII letters, numbers and underscores only</small></label>
+            <div class="rule-options">
+              <label class="rule-option"><input type="checkbox" id="rule-garage" checked><span><strong>Depot joins</strong><small>Relax shift-position matching without creating lines or bypassing occupancy checks</small></span></label>
+              <label class="rule-option"><input type="checkbox" id="rule-hold"><span><strong>Additional wait on arrival</strong><small>Add a wait after arrival at selected stops</small></span><input class="inline-number" id="rule-hold-seconds" type="number" min="0" max="3600" value="30"><em>s</em></label>
+              <label class="rule-option speed-rule"><input type="checkbox" id="rule-speed"><span><strong>Segmented approach speed limit</strong><small>Apply only within the specified distance, rather than slowing trains immediately from the 15 km lookahead limit</small></span><input class="inline-number" id="rule-speed-kmh" type="number" min="1" max="500" value="40"><em>km/h</em><input class="inline-number" id="rule-speed-distance" type="number" min="1" max="15000" value="800"><em>m within</em></label>
+            </div>
+            <button class="primary-button full" id="generate-script">Generate private-mod ZIP</button>
+          </article>
+          <article class="panel script-preview">
+            <div class="panel-heading"><div><p class="step">Mode</p><h3>How to use the generated files</h3></div><span class="verified-chip">Official API signature</span></div>
+            <ol class="install-steps"><li><b>1</b><span>Download and extract the rule pack</span></li><li><b>2</b><span>Copy the entire folder into NIMBY Rails' private mods</span></li><li><b>3</b><span>Enable the mod in game</span></li><li><b>4</b><span>Enable the extension only on the trains, stops or signals that need it</span></li></ol>
+            <details class="script-expert"><summary>Advanced source validation</summary><label>Paste or edit NimbyScript<textarea id="script-expert-source" rows="12" spellcheck="false" placeholder="script meta { ... }"></textarea></label><button class="secondary-button" id="validate-script-source" type="button">Validate this source</button></details>
+            <div id="script-validation" class="veh-preview"><div class="placeholder">After generation, view static validation results, events and complete source code.</div></div>
+            <div class="script-safety"><strong>Rule limits</strong><p>The generator does not create tracks, timetables or trains, or bypass native route checks. Frequent signal events are checked for logging and unlimited-distance speed limits. The game compiler remains authoritative.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-cleanup">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">STORAGE CARE</p><h2>Clean up copies and old exports</h2><p>Preview first, then select files to move to Recycle Bin. Toolkit save copies need matching creation records and unchanged contents. Modified or protected copies are skipped. Timetable and route-map JSON exports are included only in manual cleanup, never startup cleanup.</p></div>
+          <span class="phase-badge safe">Recoverable cleanup</span>
+        </div>
+        <div class="cleanup-grid">
+          <article class="panel cleanup-settings">
+            <p class="step">Automatic rules</p><h3>Retention policy</h3>
+            <label class="switch-row compact"><input type="checkbox" id="cleanup-enabled"><span class="switch"></span><span><strong>Clean up toolkit copies on startup (move to Recycle Bin)</strong><small>Off by default; handles only toolkit copies and unfinished temporary files older than 1 hour, not exports JSON</small></span></label>
+            <div class="number-grid">
+              <label>Older than (days)<input id="cleanup-days" type="number" min="1" max="365"></label>
+              <label>Keep at least this many per group<input id="cleanup-keep" type="number" min="1" max="50"></label>
+            </div>
+            <button class="secondary-button full" id="save-cleanup-settings">Save automatic rules</button>
+          </article>
+          <article class="panel cleanup-summary" id="cleanup-summary"></article>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Candidate files</p><h3>Cleanup preview</h3></div><div class="segmented"><button class="active" data-clean-mode="automatic">Automatic rules</button><button data-clean-mode="compact">Reduce stored copies now</button></div></div>
+          <div class="cleanup-extra">
+            <label><input id="cleanup-timetables" type="checkbox">Manually select old game timetable JSON exports (save directory)</label>
+            <label><input id="cleanup-maps" type="checkbox">Manually select old route-map JSON exports (save directory and current map export folder)</label>
+            <p>Toolkit copies and timetables are grouped by project; maps by selected lines and drawing settings. Keep the newest files per group. Older does not mean useless: select each file explicitly. Current overview/history selections are protected. Subfolders and unknown JSON files are not scanned. SVG and TXT map exports are excluded.</p>
+            <button id="refresh-cleanup" class="secondary-button">Refresh cleanup preview</button>
+          </div>
+          <div id="cleanup-list" class="cleanup-list"></div>
+          <details class="map-advanced"><summary>Copy protection · Check to keep permanently</summary><p>Removing protection does not immediately clean up a copy. Creation records, content verification and cleanup rules still apply. Review older unrecorded copies manually; they are not automatically claimed as toolkit outputs.</p><div id="cleanup-protection"></div></details>
+          <div class="cleanup-actions"><p id="cleanup-explanation"></p><button class="danger-button" id="execute-cleanup" disabled>Move selected files to Recycle Bin</button></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">FLEET HISTORY</p><h2>History comparison</h2><p>Scan historical exports in parallel and compare timetable changes between any two. All operations are read-only.</p></div>
+          <span class="phase-badge">Multicore processing</span>
+        </div>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Batch inventory</p><h3>Check historical exports</h3></div><button class="text-button" id="run-inventory">Parallel inventory</button></div>
+          <div id="inventory-summary" class="clean-grid" hidden></div>
+          <div id="inventory-list" class="cleanup-list"><div class="placeholder">Select Parallel inventory to scan recent historical exports.</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Version comparison</p><h3>Differences between exports</h3></div></div>
+          <div class="file-grid compare-grid">
+            <label>Older export<select id="compare-before" aria-label="Older export"></select></label>
+            <label>Newer export<select id="compare-after" aria-label="Newer export"></select></label>
+            <button class="primary-button" id="run-compare">Compare two exports</button>
+          </div>
+          <div id="compare-result" class="compare-result"><div class="placeholder">Select two exports, then select Compare”.</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading"><div><p class="step">Compare network exports</p><h3>Line and station field differences</h3></div><span class="phase-badge safe">Read-only</span></div>
+          <div class="file-grid compare-grid">
+            <label>Older export<select id="netdiff-before" aria-label="Older export (network)"></select></label>
+            <label>Newer export<select id="netdiff-after" aria-label="Newer export (network)"></select></label>
+            <button class="primary-button" id="run-netdiff">Compare networks</button>
+          </div>
+          <div id="netdiff-result" class="compare-result"><div class="placeholder">Compare line, station, stop-order and coordinate changes between two exports.</div></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-roadmap">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">CAPABILITY LADDER</p><h2>Features and scope</h2><p>Features are grouped by purpose, not ranked by reliability. Available means implemented; it does not mean every save has passed in-game validation.</p></div>
+        </div>
+        <article class="panel" id="release-preview" aria-labelledby="release-preview-title">
+          <div class="panel-heading"><div><p class="step">Coming next · Not yet released</p><h3 id="release-preview-title">2.0.0 beta 3D is coming soon</h3></div><span class="phase-badge">In development</span></div>
+              <p>3D features are developed separately. Capabilities and instructions will be described in the beta release notes. The current stable version does not include or enable 3D features, injection components or experimental projects.</p>
+          <p>Announcement only: no 3D content is downloaded or installed. Stable updates do not install prereleases.</p>
+        </article>
+        <div class="roadmap" id="roadmap-list"></div>
+      </section>
+
+      <section class="view" id="view-author">
+        <div class="section-intro">
+          <div><p class="eyebrow aqua">MEET THE MAKER</p><h2>About</h2><p>A small NIMBY Rails toolkit that grew into a complete operations companion.</p></div>
+        </div>
+        <article class="author-card">
+          <figure class="author-portrait">
+            <img src="/assets/author-adaihappyjan.png" alt="Portrait of adaihappyjan" width="640" height="640">
+            <figcaption><strong>adaihappyjan</strong><span>You can call me Adai!</span></figcaption>
+          </figure>
+          <div class="author-story">
+            <span class="author-handle">AUTHOR · @adaihappyjan</span>
+            <h3>Hello, fellow NIMBY Rails players～</h3>
+            <p>I'm adaihappyjan; you can call me Adai!(≧▽≦)/</p>
+            <p>This toolkit began as a small script to reduce repetitive timetable work and grew through community feedback.</p>
+            <p>With the community's encouragement and suggestions, it gradually grew into the toolkit you see today!ヽ(✿ﾟ▽ﾟ)ノ</p>
+            <p>The toolkit now includes most of the features I wanted for my own railway projects～Future work will include both planned improvements and useful ideas suggested by the community!(๑•̀ㅂ•́)و✧</p>
+            <p>Thank you for all the encouragement, suggestions and feedback. It is wonderful to see a small convenience tool grow into something useful to the wider community～</p>
+            <p class="author-thanks">Thank you!(づ｡◕‿‿◕｡)づ ♡</p>
+            <a class="author-link" href="https://github.com/adaihappyjan/NIMBY-Timetable-Toolkit" target="_blank" rel="noopener noreferrer">View project on GitHub <span>↗</span></a>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <div class="task-dock" id="task-dock" hidden>
+    <div class="task-icon">↻</div>
+    <div class="task-copy"><strong id="task-message">Processing…</strong><small id="task-detail">Running in the background; you can continue browsing</small><div class="progress-track"><i id="task-progress"></i></div></div>
+    <button id="cancel-task">Cancel</button>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+
+  <div class="cmdk" id="cmdk" hidden>
+    <div class="cmdk-panel" role="dialog" aria-label="Command palette">
+      <div class="cmdk-search"><span>⌕</span><input type="text" id="cmdk-input" placeholder="Jump to a feature… (↑↓ Select · Enter to open · Esc to close)" aria-label="Search commands"></div>
+      <div class="cmdk-list" id="cmdk-list"></div>
+      <div class="cmdk-foot"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> Open · <kbd>Alt</kbd>+<kbd>1…9</kbd> Quick switch</div>
+    </div>
+  </div>
+  <!-- Compatibility for an already-running older local server. The current
+       server removes these two tags and bundles the dependencies into app.js. -->
+  <script src="/metro.js"></script>
+  <script src="/metro-poster.js"></script>
+  <script src="/app.js"></script>
+  <script src="/tilecache.js"></script>
+  <script src="/autotrack.js"></script>
+  <script src="/workspace.js"></script>
+  <script src="/tutorial.js"></script>
+  <script src="/livefiles.js"></script>
+  <script src="/stationnames.js"></script>
+</body>
+</html>
